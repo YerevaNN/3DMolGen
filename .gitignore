@@ -1,0 +1,13 @@
+venv
+
+# Editor files
+*~
+*.swp
+.vscode/
+.idea/
+
+# Compiled files
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
