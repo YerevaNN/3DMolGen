@@ -1,0 +1,40 @@
+# run "icm _confGen" to see what these parameters mean, mapping between names in this file and the CLI flags are in ConfGenerator
+
+# Numeric parameters
+auto: 0
+effort: 10.0
+maxenergy: 10.0
+mnconf: 50
+sizelimit: 80
+torlimit: 15
+vicinity: 30
+diel: 78.5
+
+# Boolean flags
+cartesian_mmff: true
+no_bond_lengths: false
+formal_charges: true
+sample_double_bonds: false
+conf_entropy_only: false
+force_overwrite: true
+force_input_update: false
+quiet: false
+sample_ring_systems: false
+systematic_search: true
+ai_assisted: false
+evaluate_strain: false # NOT WORKING YET, NEED TO FIX
+verbose_commands: false
+verbose_info: false
+
+
+# Other parameters
+keep_hydrogens: false
+keep_3d: false
+molcart: ""  # Format: "host,user,pass,database"
+
+# Range parameters (optional)
+from_idx: 1
+to_idx: 100
+# stride: 1  # Alternative to to_idx
+
+parallel_jobs: 1
