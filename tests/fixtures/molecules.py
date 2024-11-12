@@ -6,12 +6,14 @@ Chem.SanitizeMol(_mol)
 
 CANONICAL_ASPIRIN_SMILES = Chem.MolToSmiles(_mol)
 
+
 @pytest.fixture
 def cif_aspirin_molecule():
     CIF_PATH = "./tests/fixtures/aspirin.cif"
     gtMol = Chem.MolFromSmiles(CANONICAL_ASPIRIN_SMILES)
 
     return CIF_PATH, gtMol
+
 
 @pytest.fixture
 def xyz_aspirin_molecule():
