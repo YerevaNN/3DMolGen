@@ -16,11 +16,11 @@ def get_conformer_statistics(mol: Chem.Mol, gt_mol: Chem.Mol | None = None):
     p = PoseBusters(config="mol")
     results = p.bust([mol], full_report=True)
 
-    return {  
+    return {
         "energy_ratio": results["energy_ratio"].iloc[0],
         "ensemble_avg_energy": results["ensemble_avg_energy"].iloc[0],
         "mol_pred_energy": results["mol_pred_energy"].iloc[0],
-        "resuts": results
+        "resuts": results,
     }
 
 
@@ -35,10 +35,3 @@ def calculate_rmsd(mol: Chem.Mol, gt_mol: Chem.Mol):
     rmsd = check_rmsd(mol, gt_mol)
 
     return rmsd["results"]["rmsd"]
-
-
-
-
-
-
-
