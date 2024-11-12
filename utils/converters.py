@@ -46,6 +46,17 @@ def convert_xyz_to_mol(file_path: Path | str, canonicalize_smi: bool = True, can
     return obabel_convert(file_path, obConversion, canonicalize_smi, canonicalize_atoms)
 
 
+def convert_xyz_to_sdf(file_path: Path | str, output_file: Path | str):
+    obConversion = openbabel.OBConversion()
+    obConversion.SetInAndOutFormats("xyz", "sdf")
+
+    obMol = openbabel.OBMol()
+    obConversion.ReadFile(obMol, file_path)
+    with open(output_file, 'w') as f:
+        obConversion.WriteFile(obMol, f.name)
+    
+
+
 def convert_cif_to_mol(file_path: str, canonicalize_smi: bool = True, canonicalize_atoms: bool = False):
     obConversion = openbabel.OBConversion()
     obConversion.SetInAndOutFormats("cif", "mol")

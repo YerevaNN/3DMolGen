@@ -11,3 +11,5 @@ venv
 *.pyo
 *.pyd
 __pycache__/
+
+data/
