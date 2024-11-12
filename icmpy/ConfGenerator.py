@@ -17,6 +17,7 @@ from tqdm import tqdm
 # while using multiprocessing with RDKit molecules, since it would rely on pickling
 Chem.SetDefaultPickleProperties(Chem.PropertyPickleOptions.AllProps)
 
+
 def is_yaml_file(file_path):
     # Check if the file has a .yaml or .yml extension
     if not (file_path.endswith(".yaml") or file_path.endswith(".yml")):
