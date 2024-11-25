@@ -9,6 +9,7 @@ def test_basic_icmpy_conformer_generation():
     mol_identifiers = [
         "CC(=O)OC1=CC=CC=C1C(=O)O",  # Aspirin
         "CCCCC",
+        # "Cc1ccc([C@H]2[CH]c3cnccc3[N]C2=O)cc1"
     ]  # This can also include paths to sdf files
 
     config_file = "icmpy/default_config.yaml"
