@@ -5,6 +5,7 @@ venv
 *.swp
 .vscode/
 .idea/
+data/ 
 
 # Compiled files
 *.pyc
