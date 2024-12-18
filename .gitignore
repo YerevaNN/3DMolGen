@@ -5,6 +5,7 @@ venv
 *.swp
 .vscode/
 .idea/
+.aim/
 data/ 
 
 # Compiled files
