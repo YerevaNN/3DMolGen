@@ -15,10 +15,10 @@ class VQVAE(nn.Module):
         self.register_buffer("code_book_usage", torch.zeros(self.struct_vocab_size))
         self.encoder = nn.Sequential(
             nn.Linear(self.n_descriptors, self.n_hidden_dim),
-            nn.BatchNorm1d(self.n_hidden_dim),
+            # nn.BatchNorm1d(self.n_hidden_dim),
             nn.ReLU(),
             nn.Linear(self.n_hidden_dim, self.n_hidden_dim),
-            nn.BatchNorm1d(self.n_hidden_dim),
+            # nn.BatchNorm1d(self.n_hidden_dim),
             nn.ReLU(),
             nn.Linear(self.n_hidden_dim, self.latent_space_dim)
         )
@@ -26,7 +26,7 @@ class VQVAE(nn.Module):
         self.embedding.weight.data.uniform_(-1.0 / self.struct_vocab_size, 1.0 / self.struct_vocab_size)
         self.decoder = nn.Sequential(
             nn.Linear(self.latent_space_dim, self.n_hidden_dim),
-            nn.BatchNorm1d(self.n_hidden_dim),
+            # nn.BatchNorm1d(self.n_hidden_dim), use RMSNorm
             nn.ReLU(),
             nn.Linear(self.n_hidden_dim, self.n_descriptors),
         )
@@ -62,9 +62,4 @@ class VQVAE(nn.Module):
         print(
             f"Codebook utilization: {utilization:.2f}% ({used_codes}/{self.struct_vocab_size} codes used)"
         )
-
-        # Calculate and print histogram of usage
-        # usage_counts, _ = torch.histc(self.code_book_usage, bins=10)
-        # print("Usage histogram:")
-        # for i, count in enumerate(usage_counts):
-        #     print(f"Bin {i+1}: {count.item()}")
+        return utilization
