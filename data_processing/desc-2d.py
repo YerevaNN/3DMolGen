@@ -1,5 +1,7 @@
 import numpy as np
 from rdkit import Chem
+import ast
+from collections import OrderedDict
 from scipy.spatial import distance
 
 def is_collinear(p1, p2, p3, tolerance=1e-6):
@@ -9,18 +11,51 @@ def is_collinear(p1, p2, p3, tolerance=1e-6):
     cross_product = np.cross(v1, v2)
     return np.allclose(cross_product, [0, 0, 0], atol=tolerance)
 
-def calculate_descriptors(mol, atom_index, coords):
-    """Calculates generation descriptors for a specific atom in a molecule."""
+def get_smiles_list(mol):
+    smiles_list = []
+    canonical_smiles = Chem.MolToSmiles(mol, canonical=True, isomericSmiles=False)
+    atom_order = ast.literal_eval(mol.GetProp('_smilesAtomOutputOrder'))
+    
+    i = 0
+    while i < len(canonical_smiles):
+        if canonical_smiles[i].isupper():
+            if i + 1 < len(canonical_smiles) and canonical_smiles[i+1].islower():
+                atom_symbol = canonical_smiles[i:i+2]
+                i += 1
+            else:
+                atom_symbol = canonical_smiles[i]
+            original_index = atom_order.pop(0)
+            smiles_list.append((atom_symbol, original_index))
+        elif canonical_smiles[i] in ['b', 'c', 'n', 'o', 'p', 's', 'f', 'i']:
+            atom_symbol = canonical_smiles[i]
+            original_index = atom_order.pop(0)
+            smiles_list.append((atom_symbol, original_index))
+        i += 1
 
+    # for char in canonical_smiles:
+    #     if char in ['B','b','C','c','N','n','O','o','P','p','S','s','F','f','Cl','cl','Br','br','I','I']:
+    #         i = atom_order.pop(0)
+    #         smiles_list.append((char, i))
+
+    return smiles_list
+
+def calculate_descriptors(mol, atom_index, coords, smiles, sdf_to_smiles):
+    """Calculates generation descriptors for a specific atom in a molecule."""
     def find_next_atom(atom_idx, exclude_atoms):
         """For finding the reference points."""
         this_atom = mol.GetAtomWithIdx(atom_idx)
-        neighbors = [neighbor.GetIdx() for neighbor in this_atom.GetNeighbors() if neighbor.GetIdx() not in exclude_atoms]
-        if not neighbors:
-            return None
-        dists = np.array([distance.euclidean(coords[n], coords[atom_idx]) for n in neighbors])
-        return neighbors[np.argmin(dists)]
-    
+        cur_id = sdf_to_smiles[atom_idx]
+        neighbors = [neighbor.GetIdx() for neighbor in this_atom.GetNeighbors()]
+        # Left
+        for i in range(cur_id - 1, -1, -1):
+            if smiles[i][1] in neighbors and smiles[i][1] not in exclude_atoms:
+                return smiles[i][1]
+        # Right
+        for i in range(cur_id, len(smiles)):
+            if smiles[i][1] in neighbors and smiles[i][1] not in exclude_atoms:
+                return smiles[i][1]
+        return None
+            
     current_atom_coord = coords[atom_index]
 
     # Find reference atoms
@@ -138,9 +173,16 @@ def get_mol_descriptors(sdf_file):
     conformer = mol.GetConformer()
     coords = conformer.GetPositions()
 
+    smiles = get_smiles_list(mol)
+    sdf_to_smiles = {}
+    for i, (ch, id) in enumerate(smiles):
+        sdf_to_smiles[id] = i
+    print(smiles)
+    print(sdf_to_smiles)
+
     all_descriptors = []
     for i in range(mol.GetNumAtoms()):
-        descriptors = calculate_descriptors(mol, i, coords)
+        descriptors = calculate_descriptors(mol, i, coords, smiles, sdf_to_smiles)
         if descriptors.size:
             desc_str = ", ".join(f"{val:.3f}" for val in descriptors)
             atom_symbol = mol.GetAtomWithIdx(i).GetSymbol()
@@ -166,3 +208,4 @@ if __name__ == '__main__':
         print(f"Error: {e}")
     except FileNotFoundError:
         print(f"Error: SDF file '{sdf_file}' not found.")
+        
