@@ -16,6 +16,7 @@ def calculate_generation_descriptors(mol, atom_index, coords):
         """For finding the reference points."""
         this_atom = mol.GetAtomWithIdx(atom_idx)
         neighbors = [neighbor.GetIdx() for neighbor in this_atom.GetNeighbors() if neighbor.GetIdx() not in exclude_atoms]
+        print(neighbors)
         if not neighbors:
             return None
         dists = np.array([distance.euclidean(coords[n], coords[atom_idx]) for n in neighbors])
@@ -25,6 +26,7 @@ def calculate_generation_descriptors(mol, atom_index, coords):
 
     # Find reference atoms
     focal_atom_index = find_next_atom(atom_index, [])
+    print(focal_atom_index)
     if focal_atom_index is None:
         print(f"f not found for atom {atom_index}")
         return np.array([])
@@ -98,7 +100,7 @@ def calculate_generation_descriptors(mol, atom_index, coords):
 
     # Pad bond lengths if less than 4 neighbors
     bond_lengths.extend([0.0] * (4 - num_neighbors))
-    bond_lengths = sorted(bond_lengths)[:4] #take the closest 4
+    bond_lengths = sorted(bond_lengths)[:4] # Take the closest 4
 
     for k_idx, neighbor_k_index in enumerate(neighbor_indices[:4]):
         neighbor_k_coord = coords[neighbor_k_index]
@@ -129,7 +131,8 @@ def calculate_generation_descriptors(mol, atom_index, coords):
 
 def get_mol_descriptors(sdf_file):
     """Calculates generation descriptors for all atoms in a molecule from an SDF file."""
-    supplier = Chem.SDMolSupplier(sdf_file)
+    supplier = Chem.SDMolSupplier(sdf_file, sanitize=False, removeHs=False)
+
     mol = supplier[0]
     if mol is None:
         raise ValueError("Could not read molecule from SDF file")
