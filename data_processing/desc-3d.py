@@ -16,7 +16,6 @@ def calculate_generation_descriptors(mol, atom_index, coords):
         """For finding the reference points."""
         this_atom = mol.GetAtomWithIdx(atom_idx)
         neighbors = [neighbor.GetIdx() for neighbor in this_atom.GetNeighbors() if neighbor.GetIdx() not in exclude_atoms]
-        print(neighbors)
         if not neighbors:
             return None
         dists = np.array([distance.euclidean(coords[n], coords[atom_idx]) for n in neighbors])
@@ -26,7 +25,6 @@ def calculate_generation_descriptors(mol, atom_index, coords):
 
     # Find reference atoms
     focal_atom_index = find_next_atom(atom_index, [])
-    print(focal_atom_index)
     if focal_atom_index is None:
         print(f"f not found for atom {atom_index}")
         return np.array([])
@@ -52,7 +50,6 @@ def calculate_generation_descriptors(mol, atom_index, coords):
     # Calculate spherical coordinates
     r = distance.euclidean(current_atom_coord, focal_atom_coord)
 
-    # Vectors for angles calculation
     v_cf = c1_atom_coord - focal_atom_coord
     v_c2f = c2_atom_coord - focal_atom_coord
     v_if = current_atom_coord - focal_atom_coord
@@ -70,11 +67,10 @@ def calculate_generation_descriptors(mol, atom_index, coords):
     else:
         return np.array([])
 
-    # Project v_if onto the plane
+    # Calculate phi (azimuthal angle)
     normal_vector_unit = normal_vector / norm_normal_vector
     proj_if = v_if - np.dot(v_if, normal_vector_unit) * normal_vector_unit
 
-    # Calculate phi (azimuthal angle)
     norm_proj_if = np.linalg.norm(proj_if)
     norm_v_cf = np.linalg.norm(v_cf)
     if norm_proj_if > 1e-6 and norm_v_cf > 1e-6:
@@ -91,23 +87,22 @@ def calculate_generation_descriptors(mol, atom_index, coords):
     # Calculate understanding descriptors (bond lengths and angles)
     neighbor_indices = [neighbor.GetIdx() for neighbor in mol.GetAtomWithIdx(atom_index).GetNeighbors()]
     num_neighbors = len(neighbor_indices)
-    print(atom_index, neighbor_indices)
     bond_lengths = []
     bond_angles = []
-
     for neighbor_index in neighbor_indices:
-        bond_lengths.append(distance.euclidean(current_atom_coord, coords[neighbor_index]))
+        bond_lengths.append((distance.euclidean(current_atom_coord, coords[neighbor_index]), neighbor_index))
 
-    # Pad bond lengths if less than 4 neighbors
-    bond_lengths.extend([0.0] * (4 - num_neighbors))
-    bond_lengths = sorted(bond_lengths)[:4] # Take the closest 4
+    bond_lengths = sorted(bond_lengths)[:4]
+    print(bond_lengths)
+    closest_neighbor_indices = [index for length, index in bond_lengths]
 
-    for k_idx, neighbor_k_index in enumerate(neighbor_indices[:4]):
+    bond_angles = []
+    for k_idx, neighbor_k_index in enumerate(closest_neighbor_indices):
         neighbor_k_coord = coords[neighbor_k_index]
         v_ik = neighbor_k_coord - current_atom_coord
-        for l_idx, neighbor_l_index in enumerate(neighbor_indices[k_idx + 1:4]):
-            neighbor_l_index_actual = neighbor_indices[k_idx + 1 + l_idx]
-            neighbor_l_coord = coords[neighbor_l_index_actual]
+        for l_idx in range(k_idx + 1, len(closest_neighbor_indices)):
+            neighbor_l_index = closest_neighbor_indices[l_idx]
+            neighbor_l_coord = coords[neighbor_l_index]
             v_il = neighbor_l_coord - current_atom_coord
 
             norm_v_ik = np.linalg.norm(v_ik)
@@ -118,9 +113,13 @@ def calculate_generation_descriptors(mol, atom_index, coords):
                 angle = np.arccos(cos_angle)
                 bond_angles.append(angle)
 
+    bond_lengths = [b_length for b_length, b_idx in bond_lengths]
+
+    # Pad bond lengths if less than 4 neighbors
+    bond_lengths.extend([0.0] * (4 - num_neighbors))
+
     # Pad bond angles if less than 6 were found
     bond_angles.extend([0.0] * (6 - len(bond_angles)))
-    bond_angles = sorted(bond_angles)[:6]
 
     # Combine descriptors
     generation_descriptor = np.array([r, theta, abs(phi), np.sign(phi)])
@@ -148,7 +147,7 @@ def get_mol_descriptors(sdf_file):
             atom_symbol = mol.GetAtomWithIdx(i).GetSymbol()
             all_descriptors.append(f"{atom_symbol}<{desc_str}>")
         else:
-            all_descriptors.append(None)  # Use None to mark skipped atoms
+            all_descriptors.append(None)
 
     return all_descriptors
 
@@ -156,7 +155,7 @@ if __name__ == '__main__':
     sdf_file = '/auto/home/filya/3DMolGen/data_processing/molecule.sdf'
     try:
         descriptors = get_mol_descriptors(sdf_file)
-        if any(descriptors):  # Check if any descriptors were calculated
+        if any(descriptors): 
             for i, desc in enumerate(descriptors):
                 if desc:
                     print(f"Atom {i}: {desc}")
