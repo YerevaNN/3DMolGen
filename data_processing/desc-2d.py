@@ -1,8 +1,8 @@
 import numpy as np
 from rdkit import Chem
 import ast
-from collections import OrderedDict
 from scipy.spatial import distance
+import sys
 
 def is_collinear(p1, p2, p3, tolerance=1e-6):
     """Checks if three points are collinear."""
@@ -37,6 +37,7 @@ def get_smiles_list(mol):
 def calculate_descriptors(mol, atom_index, coords, smiles, sdf_to_smiles):
     """Calculates generation descriptors for a specific atom in a molecule."""
     def find_next_atom(atom_idx, exclude_atoms):
+        print(atom_idx)
         this_atom = mol.GetAtomWithIdx(atom_idx)
         cur_id = sdf_to_smiles[atom_idx]
         neighbors = [neighbor.GetIdx() for neighbor in this_atom.GetNeighbors()]
@@ -48,7 +49,7 @@ def calculate_descriptors(mol, atom_index, coords, smiles, sdf_to_smiles):
         for i in range(cur_id, len(smiles)):
             if smiles[i][1] in neighbors and smiles[i][1] not in exclude_atoms:
                 return smiles[i][1]
-        return None
+        return -1
     
     def find_ref_points():
         exclude_focal = []
@@ -58,22 +59,26 @@ def calculate_descriptors(mol, atom_index, coords, smiles, sdf_to_smiles):
         cnt = 0
         while cnt < 20:
             focal_atom_index = find_next_atom(atom_index, exclude_focal)
-            if focal_atom_index is None:
+            if focal_atom_index == -1:
                 print(f"good f not found for atom {atom_index}")
                 return np.array([])
             
             c1_atom_index = find_next_atom(focal_atom_index, [atom_index])
-            if c1_atom_index is None:
+            if c1_atom_index == -1:
                 exclude_focal.append(focal_atom_index)
                 continue
                 
             
             c2_atom_index = find_next_atom(c1_atom_index, [atom_index, focal_atom_index])
-            if c2_atom_index is None:
+            if c2_atom_index == -1:
                 # Try changing c1
                 c1_atom_index = find_next_atom(focal_atom_index, [atom_index, c1_atom_index])
+                if c1_atom_index == -1:
+                    # Try changing f
+                    exclude_focal.append(focal_atom_index)
+                    continue
                 c2_atom_index = find_next_atom(c1_atom_index, [atom_index, focal_atom_index])
-                if c2_atom_index is None: # Otherwise, we return the coords
+                if c2_atom_index == -1: # Otherwise, we return the coords
                     # Try changing f
                     exclude_focal.append(focal_atom_index)
                     continue
@@ -86,8 +91,12 @@ def calculate_descriptors(mol, atom_index, coords, smiles, sdf_to_smiles):
             print(f"c2 not found for atom {atom_index}")
         return np.array([])
 
-            
-    focal_atom_coord, c1_atom_coord, c2_atom_coord = find_ref_points()
+    refs = find_ref_points()
+    print(refs)
+    if len(refs) == 3:
+        focal_atom_coord, c1_atom_coord, c2_atom_coord = refs
+    else:
+        return np.array([])
 
     if is_collinear(focal_atom_coord, c1_atom_coord, c2_atom_coord):
         print("collinear")
@@ -175,14 +184,7 @@ def calculate_descriptors(mol, atom_index, coords, smiles, sdf_to_smiles):
 
     return descriptors
 
-def get_mol_descriptors(sdf_file):
-    """Calculates generation descriptors for all atoms in a molecule from an SDF file."""
-    supplier = Chem.SDMolSupplier(sdf_file, sanitize=False, removeHs=False)
-
-    mol = supplier[0]
-    if mol is None:
-        raise ValueError("Could not read molecule from SDF file")
-
+def get_mol_descriptors(mol):
     conformer = mol.GetConformer()
     coords = conformer.GetPositions()
 
@@ -205,18 +207,32 @@ def get_mol_descriptors(sdf_file):
 
     return all_descriptors
 
-if __name__ == '__main__':
-    sdf_file = '/auto/home/filya/3DMolGen/data_processing/molecule.sdf'
-    try:
-        descriptors = get_mol_descriptors(sdf_file)
-        if any(descriptors): 
-            for i, desc in enumerate(descriptors):
-                if desc:
-                    print(f"Atom {i}: {desc}")
-                else:
-                    print(f"Atom {i}: Descriptors could not be calculated (e.g., collinearity or no neighbors).")
+
+def process_and_find_descriptors(sdf):
+    supplier = Chem.SDMolSupplier(sdf, sanitize=False, removeHs=False)
+    for i in range(10):
+        mol = supplier[i]
+        if not mol:
+            print(f"Failed to process molecule {i+1}")
+            return
         else:
-            print("No descriptors could be calculated for this molecule.")
+            print(f"Calculating descriptors for mol {i + 1}...")
+            descriptors = get_mol_descriptors(mol)
+            if any(descriptors): 
+                for j, desc in enumerate(descriptors):
+                    if desc:
+                        print(f"Atom {j}: {desc}")
+                    else:
+                        print(f"Atom {j}: Descriptors could not be calculated (e.g., collinearity or no neighbors).")
+            else:
+                print(f"No descriptors could be calculated {i}-th molecule.")
+
+
+if __name__ == '__main__':
+    # sys.stdout = open("output.txt", "w") 
+    sdf_file = '/auto/home/menuab/pcqm4m-v2-train.sdf' #'/auto/home/filya/3DMolGen/data_processing/molecule.sdf'
+    try:
+        process_and_find_descriptors(sdf_file)
     except ValueError as e:
         print(f"Error: {e}")
     except FileNotFoundError:
