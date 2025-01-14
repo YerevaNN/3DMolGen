@@ -36,9 +36,9 @@ def get_smiles_list(mol):
 
 def calculate_descriptors(mol, atom_index, coords, smiles, sdf_to_smiles):
     """Calculates generation descriptors for a specific atom in a molecule."""
-    def find_next_atom(atom_idx, exclude_atoms):
-        this_atom = mol.GetAtomWithIdx(atom_idx)
-        cur_id = sdf_to_smiles[atom_idx]
+    def find_next_atom(atom_index, exclude_atoms):
+        this_atom = mol.GetAtomWithIdx(atom_index)
+        cur_id = sdf_to_smiles[atom_index]
         neighbors = [neighbor.GetIdx() for neighbor in this_atom.GetNeighbors()]
         # Left
         for i in range(cur_id - 1, -1, -1):
@@ -55,9 +55,7 @@ def calculate_descriptors(mol, atom_index, coords, smiles, sdf_to_smiles):
         focal_atom_index = -1
         c1_atom_index = -1
         c2_atom_index = -1
-        cnt = 0
-        while cnt < 20:
-            cnt += 1
+        while True:
             focal_atom_index = find_next_atom(atom_index, exclude_focal)
             if focal_atom_index == -1:
                 print(f"good f not found for atom {atom_index}")
@@ -67,28 +65,23 @@ def calculate_descriptors(mol, atom_index, coords, smiles, sdf_to_smiles):
             if c1_atom_index == -1:
                 exclude_focal.append(focal_atom_index)
                 continue
-            
+
             c2_atom_index = find_next_atom(c1_atom_index, [atom_index, focal_atom_index])
-            if c2_atom_index == -1:
-                # Try changing c1
-                c1_atom_index = find_next_atom(focal_atom_index, [atom_index, c1_atom_index])
+            # Try changing c1
+            exclude_c1 = [atom_index]
+            while c2_atom_index == -1:
+                exclude_c1.append(c1_atom_index)
+                c1_atom_index = find_next_atom(focal_atom_index, exclude_c1)
                 if c1_atom_index == -1:
-                    # Try changing f
+                    # Nothing else to do. Try changing f
                     exclude_focal.append(focal_atom_index)
-                    continue
+                    break
                 c2_atom_index = find_next_atom(c1_atom_index, [atom_index, focal_atom_index])
-                if c2_atom_index == -1: # Otherwise, we return the coords
-                    # Try changing f
-                    exclude_focal.append(focal_atom_index)
-                    continue
-            
-            return coords[focal_atom_index], coords[c1_atom_index], coords[c2_atom_index]
-        
-        if c1_atom_index == -1:
-            print(f"c1 not found for atom {atom_index}")
-        elif c2_atom_index == -1:
-            print(f"c2 not found for atom {atom_index}")
-        return np.array([])
+
+            if c2_atom_index != -1:
+                # print(f"atom {atom_index} -> f:{focal_atom_index}, c1:{c1_atom_index}, c2:{c2_atom_index}")
+                return coords[focal_atom_index], coords[c1_atom_index], coords[c2_atom_index]
+
 
     refs = find_ref_points()
     if len(refs) == 3:
@@ -208,18 +201,22 @@ def get_mol_descriptors(mol):
 
 def process_and_find_descriptors(sdf):
     supplier = Chem.SDMolSupplier(sdf, sanitize=False, removeHs=False)
-    for i in range(10):
+    # print(len(supplier))
+    for i in range(25000):
+        if i % 1000 == 0:
+            print(i)
         mol = supplier[i]
         if not mol:
             print(f"Failed to process molecule {i+1}")
             return
         else:
-            print(f"Calculating descriptors for mol {i + 1}...")
+            # print(f"Calculating descriptors for mol {i + 1}...")
             descriptors = get_mol_descriptors(mol)
             if any(descriptors): 
                 for j, desc in enumerate(descriptors):
                     if desc:
-                        print(f"Atom {j}: {desc}")
+                        pass
+                        # print(f"Atom {j}: {desc}")
                     else:
                         print(f"Atom {j}: Descriptors could not be calculated (e.g., collinearity or no neighbors).")
             else:
