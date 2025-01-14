@@ -17,37 +17,56 @@ def calculate_descriptors(mol, atom_index, coords):
         this_atom = mol.GetAtomWithIdx(atom_idx)
         neighbors = [neighbor.GetIdx() for neighbor in this_atom.GetNeighbors() if neighbor.GetIdx() not in exclude_atoms]
         if not neighbors:
-            return None
+            return -1
         dists = np.array([distance.euclidean(coords[n], coords[atom_idx]) for n in neighbors])
         return neighbors[np.argmin(dists)]
     
-    current_atom_coord = coords[atom_index]
+    def find_ref_points():
+        exclude_focal = []
+        focal_atom_index = -1
+        c1_atom_index = -1
+        c2_atom_index = -1
+        while True:
+            focal_atom_index = find_next_atom(atom_index, exclude_focal)
+            if focal_atom_index == -1:
+                print(f"good f not found for atom {atom_index}")
+                return np.array([])
+            
+            c1_atom_index = find_next_atom(focal_atom_index, [atom_index])
+            if c1_atom_index == -1:
+                exclude_focal.append(focal_atom_index)
+                continue
 
-    # Find reference atoms
-    focal_atom_index = find_next_atom(atom_index, [])
-    if focal_atom_index is None:
-        print(f"f not found for atom {atom_index}")
+            c2_atom_index = find_next_atom(c1_atom_index, [atom_index, focal_atom_index])
+            # Try changing c1
+            exclude_c1 = [atom_index]
+            while c2_atom_index == -1:
+                exclude_c1.append(c1_atom_index)
+                c1_atom_index = find_next_atom(focal_atom_index, exclude_c1)
+                if c1_atom_index == -1:
+                    # Nothing else to do. Try changing f
+                    exclude_focal.append(focal_atom_index)
+                    break
+                c2_atom_index = find_next_atom(c1_atom_index, [atom_index, focal_atom_index])
+
+            if c2_atom_index != -1:
+                # print(f"atom {atom_index} -> f:{focal_atom_index}, c1:{c1_atom_index}, c2:{c2_atom_index}")
+                return coords[focal_atom_index], coords[c1_atom_index], coords[c2_atom_index]
+
+
+    refs = find_ref_points()
+    if len(refs) == 3:
+        focal_atom_coord, c1_atom_coord, c2_atom_coord = refs
+    else:
         return np.array([])
-    
-    c1_atom_index = find_next_atom(focal_atom_index, [atom_index])
-    if c1_atom_index is None:
-        print(f"c1 not found for atom {atom_index}")
-        return np.array([])
-    
-    c2_atom_index = find_next_atom(c1_atom_index, [atom_index, focal_atom_index])
-    if c2_atom_index is None:
-        print(f"c2 not found for atom {atom_index}")
-        return np.array([])
-    
-    focal_atom_coord = coords[focal_atom_index]
-    c1_atom_coord = coords[c1_atom_index]
-    c2_atom_coord = coords[c2_atom_index]
 
     if is_collinear(focal_atom_coord, c1_atom_coord, c2_atom_coord):
         print("collinear")
         return np.array([])
 
     # Calculate spherical coordinates
+    current_atom_coord = coords[atom_index]
+
     r = distance.euclidean(current_atom_coord, focal_atom_coord)
 
     v_cf = c1_atom_coord - focal_atom_coord
@@ -126,7 +145,6 @@ def calculate_descriptors(mol, atom_index, coords):
     descriptors = np.concatenate([generation_descriptor, understanding_descriptor])
 
     return descriptors
-
 def get_mol_descriptors(sdf_file):
     """Calculates generation descriptors for all atoms in a molecule from an SDF file."""
     supplier = Chem.SDMolSupplier(sdf_file, sanitize=False, removeHs=False)

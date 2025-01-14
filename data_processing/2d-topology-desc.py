@@ -1,3 +1,6 @@
+# This code is slight different from the paper, it takes closest in  sequence but in both directions
+# It will be easy to change that in function find_next_atom and just look at the atoms before the current one
+# To use this approach, we need to decide how to handle missing values(which also occurs in case of some of our sdf files)
 import numpy as np
 from rdkit import Chem
 import ast
@@ -40,14 +43,26 @@ def calculate_descriptors(mol, atom_index, coords, smiles, sdf_to_smiles):
         this_atom = mol.GetAtomWithIdx(atom_index)
         cur_id = sdf_to_smiles[atom_index]
         neighbors = [neighbor.GetIdx() for neighbor in this_atom.GetNeighbors()]
-        # Left
-        for i in range(cur_id - 1, -1, -1):
-            if smiles[i][1] in neighbors and smiles[i][1] not in exclude_atoms:
-                return smiles[i][1]
-        # Right
-        for i in range(cur_id, len(smiles)):
-            if smiles[i][1] in neighbors and smiles[i][1] not in exclude_atoms:
-                return smiles[i][1]
+        
+        n = len(smiles)
+        max_reach = max(cur_id, n - 1 - cur_id) # Maximum distance to check on any side
+
+        for distance in range(1, max_reach + 1):
+            left_index = cur_id - distance
+            if 0 <= left_index < n and smiles[left_index][1] in neighbors and smiles[left_index][1] not in exclude_atoms:
+                return smiles[left_index][1]
+            right_index = cur_id + distance
+            if 0 <= right_index < n and smiles[right_index][1] in neighbors and smiles[right_index][1] not in exclude_atoms:
+                return smiles[right_index][1]
+        
+        # # Left
+        # for i in range(cur_id - 1, -1, -1):
+        #     if smiles[i][1] in neighbors and smiles[i][1] not in exclude_atoms:
+        #         return smiles[i][1]
+        # # Right
+        # for i in range(cur_id, len(smiles)):
+        #     if smiles[i][1] in neighbors and smiles[i][1] not in exclude_atoms:
+        #         return smiles[i][1]
         return -1
     
     def find_ref_points():
@@ -202,7 +217,7 @@ def get_mol_descriptors(mol):
 def process_and_find_descriptors(sdf):
     supplier = Chem.SDMolSupplier(sdf, sanitize=False, removeHs=False)
     # print(len(supplier))
-    for i in range(25000):
+    for i in range(25000): #(26000, 3378606):
         if i % 1000 == 0:
             print(i)
         mol = supplier[i]
@@ -218,7 +233,8 @@ def process_and_find_descriptors(sdf):
                         pass
                         # print(f"Atom {j}: {desc}")
                     else:
-                        print(f"Atom {j}: Descriptors could not be calculated (e.g., collinearity or no neighbors).")
+                        print(f"Molecule{i} Atom {j}: Descriptors could not be calculated (e.g., collinearity or no neighbors).")
+                        return
             else:
                 print(f"No descriptors could be calculated {i}-th molecule.")
 
