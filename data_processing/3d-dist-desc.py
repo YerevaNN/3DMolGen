@@ -1,3 +1,4 @@
+# To use this approach, we need to decide how to handle missing values(which also occurs in case of some of our sdf files)
 import numpy as np
 from rdkit import Chem
 from scipy.spatial import distance
