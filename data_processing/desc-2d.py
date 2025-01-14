@@ -37,7 +37,6 @@ def get_smiles_list(mol):
 def calculate_descriptors(mol, atom_index, coords, smiles, sdf_to_smiles):
     """Calculates generation descriptors for a specific atom in a molecule."""
     def find_next_atom(atom_idx, exclude_atoms):
-        print(atom_idx)
         this_atom = mol.GetAtomWithIdx(atom_idx)
         cur_id = sdf_to_smiles[atom_idx]
         neighbors = [neighbor.GetIdx() for neighbor in this_atom.GetNeighbors()]
@@ -58,6 +57,7 @@ def calculate_descriptors(mol, atom_index, coords, smiles, sdf_to_smiles):
         c2_atom_index = -1
         cnt = 0
         while cnt < 20:
+            cnt += 1
             focal_atom_index = find_next_atom(atom_index, exclude_focal)
             if focal_atom_index == -1:
                 print(f"good f not found for atom {atom_index}")
@@ -67,7 +67,6 @@ def calculate_descriptors(mol, atom_index, coords, smiles, sdf_to_smiles):
             if c1_atom_index == -1:
                 exclude_focal.append(focal_atom_index)
                 continue
-                
             
             c2_atom_index = find_next_atom(c1_atom_index, [atom_index, focal_atom_index])
             if c2_atom_index == -1:
@@ -92,7 +91,6 @@ def calculate_descriptors(mol, atom_index, coords, smiles, sdf_to_smiles):
         return np.array([])
 
     refs = find_ref_points()
-    print(refs)
     if len(refs) == 3:
         focal_atom_coord, c1_atom_coord, c2_atom_coord = refs
     else:
