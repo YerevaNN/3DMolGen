@@ -51,6 +51,10 @@ def calculate_descriptors(mol, atom_index, coords, smiles_to_sdf, focal_atom_coo
             cos_phi = np.dot(proj_if, v_cf) / (norm_proj_if * norm_v_cf)
             cos_phi = np.clip(cos_phi, -1.0, 1.0)
             phi = np.arccos(cos_phi)
+            normal_vector = [0, 0, 1]
+            cross_proj_cf = np.cross(v_cf, proj_if)
+            if np.dot(normal_vector, cross_proj_cf) < 0:
+                phi = -phi
         else:
             return np.array([])
         generation_descriptor = np.array([distance.euclidean(coords[atom_index], focal_atom_coord), np.pi / 2, phi, np.sign(phi)])
@@ -113,12 +117,15 @@ def get_mol_descriptors(mol):
     smiles_to_sdf = {}
     for i, (ch, id) in enumerate(smiles):
         smiles_to_sdf[i] = id
-    # print(smiles)
     # print(smiles_to_sdf)
 
     f = coords[smiles_to_sdf[0]]
     c1 = coords[smiles_to_sdf[1]]
     c2 = coords[smiles_to_sdf[2]]
+    print("f:", f)
+    print("c1:", c1)
+    print("c2:", c2)
+    print("smiles:", smiles)
 
     all_descriptors = []
     for i in range(len(smiles)):
@@ -134,7 +141,7 @@ def get_mol_descriptors(mol):
 
 def process_and_find_descriptors(sdf):
     supplier = Chem.SDMolSupplier(sdf, sanitize=False, removeHs=False)
-    for i in range(497,498):
+    for i in range(7,8):
         if i % 1000 == 0:
             print(i)
         mol = supplier[i]
