@@ -10,28 +10,70 @@ def is_collinear(p1, p2, p3, tolerance=1e-6):
     cross_product = np.cross(v1, v2)
     return np.allclose(cross_product, [0, 0, 0], atol=tolerance)
 
-def get_smiles_list(mol):
+def get_new_atom(mol, atom_order):
+    if not atom_order:
+        return -1, "??"
+    original_index = atom_order.pop(0)
+    atom = mol.GetAtomWithIdx(original_index)
+    if not atom:
+        raise ValueError("Coundn't find the atom by the given index")
+    while atom.GetSymbol() == "H" and atom_order:
+        original_index = atom_order.pop(0)
+        atom = mol.GetAtomWithIdx(original_index)
+    if atom.GetSymbol() == "H":
+        return -1, "??"
+    return original_index, atom.GetSymbol()
+
+def get_smiles(mol):
     smiles_list = []
+
     canonical_smiles = Chem.MolToSmiles(mol, canonical=True, isomericSmiles=False)
+    print("smiles", canonical_smiles)
     atom_order = ast.literal_eval(mol.GetProp('_smilesAtomOutputOrder'))
+    original_index, atom_name = get_new_atom(mol, atom_order)
     
     i = 0
     while i < len(canonical_smiles):
-        if canonical_smiles[i].isupper() and canonical_smiles[i] != 'H':
-            if i + 1 < len(canonical_smiles) and canonical_smiles[i+1].islower():
-                atom_symbol = canonical_smiles[i:i+2]
-                i += 1
-            else:
-                atom_symbol = canonical_smiles[i]
-            original_index = atom_order.pop(0)
-            smiles_list.append((atom_symbol, original_index))
-        elif canonical_smiles[i] in ['b', 'c', 'n', 'o', 'p', 's', 'f', 'i']:
-            atom_symbol = canonical_smiles[i]
-            original_index = atom_order.pop(0)
-            smiles_list.append((atom_symbol, original_index))
-        i += 1
+        if canonical_smiles[i:i+len(atom_name)].upper() == atom_name.upper() and canonical_smiles[i] != 'H':
+            smiles_list.append((atom_name, original_index))
+            i += len(atom_name)
+            original_index, atom_name = get_new_atom(mol, atom_order)
+        else:
+            # print(atom_name)
+            # print(canonical_smiles)
+            i += 1
 
-    return smiles_list
+    smiles_to_sdf = {}
+    sdf_to_smiles = {}
+    for i, (ch, id) in enumerate(smiles_list):
+        smiles_to_sdf[i] = id
+        sdf_to_smiles[id] = i
+
+    return smiles_list, smiles_to_sdf, sdf_to_smiles
+
+def get_ans(mol, descriptors):
+    ans = ""
+
+    canonical_smiles = Chem.MolToSmiles(mol, canonical=True, isomericSmiles=False)
+    atom_order = ast.literal_eval(mol.GetProp('_smilesAtomOutputOrder'))
+    original_index, atom_name = get_new_atom(mol, atom_order)
+
+    smiles_id = 0
+    i = 0
+    while i < len(canonical_smiles):
+        if (canonical_smiles[i:i+len(atom_name)].upper() == atom_name.upper()) and canonical_smiles[i] != 'H':
+            ans += canonical_smiles[i:i+len(atom_name)]
+            print(canonical_smiles[i:i+len(atom_name)], atom_name)
+            print(canonical_smiles[i:i+len(atom_name)].upper(), atom_name.upper())
+            ans += descriptors[smiles_id]
+            smiles_id += 1
+            i += len(atom_name)
+            original_index, atom_name = get_new_atom(mol, atom_order)
+        else:
+            ans += canonical_smiles[i]
+            i += 1
+    return ans
+
 
 def calculate_descriptors(mol, smiles_index, sdf_to_smiles, smiles_to_sdf, coords):
     """Calculates generation descriptors for a specific atom in a molecule."""
@@ -154,31 +196,26 @@ def get_mol_descriptors(mol):
     conformer = mol.GetConformer()
     coords = conformer.GetPositions()
 
-    smiles = get_smiles_list(mol)
-    smiles_to_sdf = {}
-    sdf_to_smiles = {}
-    for i, (ch, id) in enumerate(smiles):
-        smiles_to_sdf[i] = id
-        sdf_to_smiles[id] = i
-    # print(smiles_to_sdf)
-    print(sdf_to_smiles)
-    print("smiles:", smiles)
+    smiles, smiles_to_sdf, sdf_to_smiles = get_smiles(mol)
+    
+    print("sdf_to_smiles", sdf_to_smiles)
+    # print("smiles:", smiles)
 
     all_descriptors = []
     for i in range(len(smiles)):
         descriptors = calculate_descriptors(mol, i, sdf_to_smiles, smiles_to_sdf, coords)
         if descriptors.size:
-            desc_str = ", ".join(f"{val:.4f}" for val in descriptors)
+            desc_str = ",".join(f"{val:.4f}" for val in descriptors)
             desc_str = desc_str[:-5] #give the sign as integer
-            all_descriptors.append(f"{smiles[i][0]}<{desc_str}>")
+            all_descriptors.append(f"<{desc_str}>")
         else:
             all_descriptors.append(None)
 
-    return all_descriptors
+    return get_ans(mol, all_descriptors)
 
 def process_and_find_descriptors(sdf):
     supplier = Chem.SDMolSupplier(sdf) #, sanitize=False, removeHs=False)
-    for i in range(6,7):
+    for i in range(498,499):
         if i % 1000 == 0:
             print(i)
         mol = supplier[i]
@@ -188,19 +225,10 @@ def process_and_find_descriptors(sdf):
         else:
             print(f"Calculating descriptors for mol {i + 1}...")
             descriptors = get_mol_descriptors(mol)
-            if any(descriptors): 
-                for j, desc in enumerate(descriptors):
-                    if desc:
-                        print(f"Atom {j}: {desc}")
-                    else:
-                        print(f"Molecule{i} Atom {j}: Descriptors could not be calculated (e.g., collinearity or no neighbors).")
-                        return
-            else:
-                print(f"No descriptors could be calculated {i}-th molecule.")
-
+            print(descriptors)
 
 if __name__ == '__main__':
-    sys.stdout = open("output.txt", "w") 
+    sys.stdout = open("output2.txt", "w") 
     sdf_file = '/auto/home/menuab/pcqm4m-v2-train.sdf' #'/auto/home/filya/3DMolGen/data_processing/molecule.sdf'
     try:
         process_and_find_descriptors(sdf_file)
