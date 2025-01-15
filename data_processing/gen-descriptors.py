@@ -17,7 +17,7 @@ def get_smiles_list(mol):
     
     i = 0
     while i < len(canonical_smiles):
-        if canonical_smiles[i].isupper():
+        if canonical_smiles[i].isupper() and canonical_smiles[i] != 'H':
             if i + 1 < len(canonical_smiles) and canonical_smiles[i+1].islower():
                 atom_symbol = canonical_smiles[i:i+2]
                 i += 1
@@ -33,16 +33,54 @@ def get_smiles_list(mol):
 
     return smiles_list
 
-def calculate_descriptors(mol, atom_index, coords, smiles_to_sdf, focal_atom_coord, c1_atom_coord, c2_atom_coord ):
+def calculate_descriptors(mol, smiles_index, sdf_to_smiles, smiles_to_sdf, coords):
     """Calculates generation descriptors for a specific atom in a molecule."""
-    if atom_index == 0: 
-        theta = np.pi / 2
+    atom_index = smiles_to_sdf[smiles_index]
+    # Calculate the ref points 
+
+    def find_next_atom(sdf_id):
+        smiles_id = sdf_to_smiles[sdf_id]
+        this_atom = mol.GetAtomWithIdx(sdf_id)
+        neighbors = [neighbor.GetIdx() for neighbor in this_atom.GetNeighbors()]
+        for i in range(smiles_id - 1, -1, -1):
+            if smiles_to_sdf[i] in neighbors:
+                return smiles_to_sdf[i]
+        return -1
+
+    f = -1
+    c1 = -1
+    c2 = -1
+    focal_atom_coord = -1
+    c1_atom_coord = -1
+    c2_atom_coord = -1
+    
+    f = find_next_atom(atom_index)
+    if f != -1:
+        focal_atom_coord = coords[f]
+        c1 = find_next_atom(f)
+        if c1 != -1:
+            c1_atom_coord = coords[c1]
+            c2 = find_next_atom(c1)
+            if c2 != -1:
+                c2_atom_coord = coords[c2]
+
+    print("atom idx:", atom_index, "smiles idx:", smiles_index, "f:", f, "c1:", c1, "c2:", c2)
+
+    # Calculate spherical coordinates
+    if f == -1: 
+        if smiles_index != 0:
+            print(f"f was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
         generation_descriptor = np.array([0, np.pi / 2, 0, np.sign(0)])
-    elif atom_index == 1:
-        atom_index = smiles_to_sdf[atom_index]
+    elif c1 == -1:
+        # print("f-smiles:", sdf_to_smiles[f])
+        if smiles_index != 1:
+            print(f"c1 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
         generation_descriptor = np.array([distance.euclidean(coords[atom_index], focal_atom_coord), np.pi / 2, 0, np.sign(0)])
-    elif atom_index == 2:
-        atom_index = smiles_to_sdf[atom_index]
+    elif c2 == -1:
+        # print("f-smiles:", sdf_to_smiles[f])
+        # print("c1-smiles:", sdf_to_smiles[c1])
+        if smiles_index != 2:
+            print(f"c2 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
         proj_if = coords[atom_index] - focal_atom_coord #v_if=proj_if
         v_cf = c1_atom_coord - focal_atom_coord
         norm_proj_if = np.linalg.norm(proj_if)
@@ -57,9 +95,11 @@ def calculate_descriptors(mol, atom_index, coords, smiles_to_sdf, focal_atom_coo
                 phi = -phi
         else:
             return np.array([])
-        generation_descriptor = np.array([distance.euclidean(coords[atom_index], focal_atom_coord), np.pi / 2, phi, np.sign(phi)])
+        generation_descriptor = np.array([distance.euclidean(coords[atom_index], focal_atom_coord), np.pi / 2, abs(phi), np.sign(phi)])
     else:
-        atom_index = smiles_to_sdf[atom_index]
+        # print("f-smiles:", sdf_to_smiles[f])
+        # print("c1-smiles:", sdf_to_smiles[c1])
+        # print("c2-smiles:", sdf_to_smiles[c2])
 
         if is_collinear(focal_atom_coord, c1_atom_coord, c2_atom_coord):
             print("collinear")
@@ -109,39 +149,36 @@ def calculate_descriptors(mol, atom_index, coords, smiles_to_sdf, focal_atom_coo
         
     return np.array(generation_descriptor)
 
+
 def get_mol_descriptors(mol):
     conformer = mol.GetConformer()
     coords = conformer.GetPositions()
 
     smiles = get_smiles_list(mol)
     smiles_to_sdf = {}
+    sdf_to_smiles = {}
     for i, (ch, id) in enumerate(smiles):
         smiles_to_sdf[i] = id
+        sdf_to_smiles[id] = i
     # print(smiles_to_sdf)
-
-    f = coords[smiles_to_sdf[0]]
-    c1 = coords[smiles_to_sdf[1]]
-    c2 = coords[smiles_to_sdf[2]]
-    print("f:", f)
-    print("c1:", c1)
-    print("c2:", c2)
+    print(sdf_to_smiles)
     print("smiles:", smiles)
 
     all_descriptors = []
     for i in range(len(smiles)):
-        descriptors = calculate_descriptors(mol, i, coords, smiles_to_sdf, f, c1, c2)
+        descriptors = calculate_descriptors(mol, i, sdf_to_smiles, smiles_to_sdf, coords)
         if descriptors.size:
-            desc_str = ", ".join(f"{val:.3f}" for val in descriptors)
+            desc_str = ", ".join(f"{val:.4f}" for val in descriptors)
+            desc_str = desc_str[:-5] #give the sign as integer
             all_descriptors.append(f"{smiles[i][0]}<{desc_str}>")
         else:
             all_descriptors.append(None)
 
     return all_descriptors
 
-
 def process_and_find_descriptors(sdf):
-    supplier = Chem.SDMolSupplier(sdf, sanitize=False, removeHs=False)
-    for i in range(7,8):
+    supplier = Chem.SDMolSupplier(sdf) #, sanitize=False, removeHs=False)
+    for i in range(6,7):
         if i % 1000 == 0:
             print(i)
         mol = supplier[i]
