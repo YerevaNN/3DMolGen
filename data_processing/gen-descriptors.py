@@ -4,7 +4,6 @@ import ast
 from scipy.spatial import distance
 import sys
 import json
-import warnings
 
 def is_collinear(p1, p2, p3, tolerance=1e-6):
     v1 = p2 - p1
@@ -41,8 +40,6 @@ def get_smiles(mol):
             i += len(atom_name)
             original_index, atom_name = get_new_atom(mol, atom_order)
         else:
-            # print(atom_name)
-            # print(canonical_smiles)
             i += 1
 
     smiles_to_sdf = {}
@@ -112,9 +109,9 @@ def calculate_descriptors(mol, smiles_index, sdf_to_smiles, smiles_to_sdf, coord
     if f == -1: 
         if smiles_index != 0:
             print(f"f was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
+            return np.array([-1])
         generation_descriptor = np.array([0, np.pi / 2, 0, np.sign(0)])
     elif c1 == -1:
-        # print("f-smiles:", sdf_to_smiles[f])
         if smiles_index != 1:
             print(f"c1 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
         generation_descriptor = np.array([distance.euclidean(coords[atom_index], focal_atom_coord), np.pi / 2, 0, np.sign(0)])
@@ -136,16 +133,13 @@ def calculate_descriptors(mol, smiles_index, sdf_to_smiles, smiles_to_sdf, coord
             if np.dot(normal_vector, cross_proj_cf) < 0:
                 phi = -phi
         else:
-            return np.array([])
+            print("can't divide by 0")
+            return np.array([-1])
         generation_descriptor = np.array([distance.euclidean(coords[atom_index], focal_atom_coord), np.pi / 2, abs(phi), np.sign(phi)])
     else:
-        # print("f-smiles:", sdf_to_smiles[f])
-        # print("c1-smiles:", sdf_to_smiles[c1])
-        # print("c2-smiles:", sdf_to_smiles[c2])
-
         if is_collinear(focal_atom_coord, c1_atom_coord, c2_atom_coord):
             print("collinear", atom_index)
-            return np.array([])
+            return np.array([-1])
 
         # Calculate spherical coordinates
         current_atom_coord = coords[atom_index]
@@ -167,7 +161,8 @@ def calculate_descriptors(mol, smiles_index, sdf_to_smiles, smiles_to_sdf, coord
             cos_theta = np.clip(cos_theta, -1.0, 1.0)
             theta = np.arccos(cos_theta)
         else:
-            return np.array([])
+            print("can't divide by 0")
+            return np.array([-1])
 
         # Calculate phi (azimuthal angle)
         normal_vector_unit = normal_vector / norm_normal_vector
@@ -185,11 +180,11 @@ def calculate_descriptors(mol, smiles_index, sdf_to_smiles, smiles_to_sdf, coord
                 phi = -phi
         else:
             print("problem with", atom_index)
-            return np.array([])
+            return np.array([-1])
         
         generation_descriptor = np.array([r, theta, abs(phi), np.sign(phi)])
         
-    return np.array(generation_descriptor)
+    return generation_descriptor
 
 
 def get_mol_descriptors(mol):
@@ -197,19 +192,16 @@ def get_mol_descriptors(mol):
     coords = conformer.GetPositions()
 
     smiles, smiles_to_sdf, sdf_to_smiles = get_smiles(mol)
-    
-    # print("sdf_to_smiles", sdf_to_smiles)
-    # print("smiles:", smiles)
 
     all_descriptors = []
     for i in range(len(smiles)):
         descriptors = calculate_descriptors(mol, i, sdf_to_smiles, smiles_to_sdf, coords)
-        if descriptors.size:
+        if descriptors.size and descriptors[0] != -1:
             desc_str = ",".join(f"{val:.4f}" for val in descriptors)
             desc_str = desc_str[:-5] #give the sign as integer
             all_descriptors.append(f"<{desc_str}>")
         else:
-            all_descriptors.append("no descriptors")
+            return "no descriptors"
 
     return get_ans(mol, all_descriptors)
 
@@ -217,28 +209,29 @@ def process_and_find_descriptors(sdf):
     supplier = Chem.SDMolSupplier(sdf) #, sanitize=False, removeHs=False)
     data = []
     for i, mol in enumerate(supplier): #3378606
-        if i == 2669976:
-            continue
+        # if i == 2669976:
+        #     continue
         if i % 1000 == 0:
-             print(f"Calculating descriptors for mol {i}...")
+            print(f"Mol {i}...")
         if not mol:
             print(f"Failed to process molecule {i}")
             return
         else:
-            # print(f"Calculating descriptors for mol {i+1}...")
             descriptors = get_mol_descriptors(mol)
-            json_string = json.dumps(descriptors)  
-            data.append(json_string)
-            # print(descriptors)
+            if descriptors != "no descriptors":
+                json_string = json.dumps(descriptors)  
+                data.append(json_string)
+            else:
+                print("Excluding this mol")
 
-    with open(f"pcqm_embedded_4.jsonl", "w") as file:
+    with open(f"spherical.jsonl", "w") as file:
         for d in data:
             file.write(d)  
             file.write("\n")
         file.close()
 
 if __name__ == '__main__':
-    sys.stdout = open("output2.txt", "w") 
+    sys.stdout = open("output.txt", "w") 
     sdf_file = '/auto/home/menuab/pcqm4m-v2-train.sdf' #'/auto/home/filya/3DMolGen/data_processing/molecule.sdf'
     try:
         process_and_find_descriptors(sdf_file)
