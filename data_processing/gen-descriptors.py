@@ -214,7 +214,7 @@ def process_and_find_descriptors(sdf):
         if i % 1000 == 0:
             print(f"Mol {i}...")
         if not mol:
-            print(f"Failed to process molecule {i}")
+            print(f"Failed to process mol {i}")
             return
         else:
             descriptors = get_mol_descriptors(mol)
@@ -222,7 +222,7 @@ def process_and_find_descriptors(sdf):
                 json_string = json.dumps(descriptors)  
                 data.append(json_string)
             else:
-                print("Excluding this mol")
+                print(f"Excluding mol {i}")
 
     with open(f"spherical.jsonl", "w") as file:
         for d in data:
