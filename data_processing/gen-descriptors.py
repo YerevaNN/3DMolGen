@@ -4,6 +4,9 @@ import ast
 from scipy.spatial import distance
 import sys
 import json
+import os
+from collections import OrderedDict
+from ogb.lsc import PCQM4Mv2Dataset
 
 def is_collinear(p1, p2, p3, tolerance=1e-6):
     v1 = p2 - p1
@@ -27,10 +30,11 @@ def get_new_atom(mol, atom_order):
 
 def get_smiles(mol):
     smiles_list = []
-
     canonical_smiles = Chem.MolToSmiles(mol, canonical=True, isomericSmiles=False)
     # print("smiles", canonical_smiles)
+
     atom_order = ast.literal_eval(mol.GetProp('_smilesAtomOutputOrder'))
+
     original_index, atom_name = get_new_atom(mol, atom_order)
     
     i = 0
@@ -186,12 +190,20 @@ def calculate_descriptors(mol, smiles_index, sdf_to_smiles, smiles_to_sdf, coord
         
     return generation_descriptor
 
+def get_json(mol, embedded, sample):
+    original_smiles = sample[0]
+    canonical_smiles = Chem.MolToSmiles(mol, canonical=True, isomericSmiles=False)
+    return {"canonical_smiles": canonical_smiles, 
+            "pcqm4v2_smiles": original_smiles, 
+            "pcqm4v2_label": sample[1], 
+            "conformers": {"embedded_smiles": embedded}}
+    
 
 def get_mol_descriptors(mol):
     conformer = mol.GetConformer()
     coords = conformer.GetPositions()
 
-    smiles, smiles_to_sdf, sdf_to_smiles = get_smiles(mol)
+    smiles, smiles_to_sdf, sdf_to_smiles = get_smiles(mol) 
 
     all_descriptors = []
     for i in range(len(smiles)):
@@ -205,12 +217,14 @@ def get_mol_descriptors(mol):
 
     return get_ans(mol, all_descriptors)
 
-def process_and_find_descriptors(sdf):
+def process_and_find_descriptors(sdf, val_indices):
+    # print(val_indices)
     supplier = Chem.SDMolSupplier(sdf) #, sanitize=False, removeHs=False)
-    data = []
+    dataset = PCQM4Mv2Dataset(root = '/auto/home/menuab', only_smiles = True)
+
+    train_data = []
+    val_data = []
     for i, mol in enumerate(supplier): #3378606
-        # if i == 2669976:
-        #     continue
         if i % 1000 == 0:
             print(f"Mol {i}...")
         if not mol:
@@ -219,22 +233,54 @@ def process_and_find_descriptors(sdf):
         else:
             descriptors = get_mol_descriptors(mol)
             if descriptors != "no descriptors":
-                json_string = json.dumps(descriptors)  
-                data.append(json_string)
+                json_string = get_json(mol, descriptors, dataset[i])
+                if i in val_indices:
+                    val_data.append(json_string)
+                else:
+                    train_data.append(json_string)
             else:
                 print(f"Excluding mol {i}")
 
-    with open(f"spherical.jsonl", "w") as file:
-        for d in data:
-            file.write(d)  
+    os.makedirs("train", exist_ok=True)
+    file_counter = 0
+    current_file = None
+    new_file_freq = 1000000
+
+    for i, data_item in enumerate(train_data):
+        if i % new_file_freq == 0:
+            if current_file:
+                current_file.close()  # Close the previous file
+            current_file = open(f"train/train_data_{file_counter}.jsonl", 'w')
+            file_counter += 1
+
+        if current_file:
+            json.dump(data_item, current_file)
+            current_file.write('\n')
+
+    if current_file:
+        current_file.close()
+
+    os.makedirs("val", exist_ok=True)
+    with open(f"val/val_data.jsonl", "w") as file:
+        for d in val_data:
+            json.dump(d, file)
             file.write("\n")
         file.close()
 
 if __name__ == '__main__':
-    sys.stdout = open("output.txt", "w") 
+    sys.stdout = open("output-t.txt", "w") 
     sdf_file = '/auto/home/menuab/pcqm4m-v2-train.sdf' #'/auto/home/filya/3DMolGen/data_processing/molecule.sdf'
+    val_indices_file = "/auto/home/menuab/code/3DMolGen/data_processing/pcqm4v2_valid_indice.txt"
+    val_indices = []
+    with open(val_indices_file, 'r') as f:
+        for line in f:
+            try:
+                index = int(line.strip())
+                val_indices.append(index)
+            except ValueError:
+                print(f"Skipping invalid line: {line.strip()}")  # Handle potential errors
     try:
-        process_and_find_descriptors(sdf_file)
+        process_and_find_descriptors(sdf_file, val_indices)
     except ValueError as e:
         print(f"Error: {e}")
     except FileNotFoundError:
