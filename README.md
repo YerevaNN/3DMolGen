@@ -20,6 +20,8 @@ Create a conda environment and install the required packages using the following
 conda create -n 3dmolgen python=3.11
 conda activate 3dmolgen
 pip install -r requirements.txt
+
+conda install -c conda-forge rdkit openbabel
 ```
 
 ## Usage and Contributing
