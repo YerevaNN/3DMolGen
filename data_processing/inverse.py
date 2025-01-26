@@ -52,26 +52,121 @@ def assign_coordinates(mol, atoms, descriptors):
 
     conf = Chem.Conformer(mol.GetNumAtoms())
     mol.AddConformer(conf)
+    conf = mol.GetConformer()
     
     atom_positions = {}
     
-    for id, atom in enumerate(atoms):
-        descriptor = descriptors[id]
+    for id, descriptor in enumerate(descriptors):
+        print("Atom", id)
         r, theta, phi, sign = descriptor
-        print(atom, r, theta)
         f = -1
         c1 = -1
         c2 = -1
-
         f = find_next_atom(id)
         if f != -1:
             c1 = find_next_atom(f)
             if c1 != -1:
                 c2 = find_next_atom(c1)
-                if c2 != -1:
-                    pass
-    #...
-    
+        print("f", f, "c1", c1, "c2", c2)
+        pos = []
+        
+        if f != -1 and c1 != -1 and c2 != -1:
+            p_f = atom_positions.get(f)
+            p_c1 = atom_positions.get(c1)
+            p_c2 = atom_positions.get(c2)
+            
+            if p_f is None or p_c1 is None or p_c2 is None:
+                print(f"Atom {id}: Reference atoms positions not fully defined.")
+                pos = np.array([0.0, 0.0, 0.0])
+            else:
+                v1 = p_c1 - p_f
+                v2 = p_c2 - p_f
+                normal = np.cross(v1, v2)
+                norm_normal = np.linalg.norm(normal)
+                
+                if norm_normal < 1e-6:
+                    print(f"Atom {id}: Reference atoms are collinear. Assigning default position at origin.")
+                    pos = np.array([0.0, 0.0, 0.0])
+                else:
+                    # Orthonormal basis
+                    e1 = v1 / np.linalg.norm(v1)
+                    e3 = normal / norm_normal
+                    e2 = np.cross(e3, e1)
+                    
+                    # Create rotation matrix from local to global coordinates
+                    rotation_matrix = np.vstack([e1, e2, e3]).T  # 3x3 matrix
+                    
+                    # Convert spherical to Cartesian in local coordinates
+                    local_relative_pos = spherical_to_cartesian(r, theta, phi) * sign
+                    
+                    # Rotate to global coordinates
+                    global_relative_pos = rotation_matrix @ local_relative_pos
+                    
+                    # Assign global position
+                    pos = p_f + global_relative_pos
+
+        elif f != -1 and c1 != -1:
+            p_f = atom_positions.get(f)
+            p_c1 = atom_positions.get(c1)
+            if p_f is None or p_c1 is None:
+                print(f"Atom {id}: Reference atoms positions not fully defined. Assigning default position at origin.")
+                pos = np.array([0.0, 0.0, 0.0])
+            else:
+                v1 = p_c1 - p_f
+                e1 = v1 / np.linalg.norm(v1)
+                
+                rng = np.random.RandomState(42)
+                while True:
+                    arbitrary_vector = rng.rand(3) - 0.5  # Generate a vector with components between -0.5 and 0.5
+                    if np.linalg.norm(np.cross(e1, arbitrary_vector)) > 1e-6: # Ensure not collinear
+                        break # Exit loop if we found a non-collinear vector
+               
+                # Calculate e2 using cross product with the arbitrary vector, this will really be 
+                e2_dir = np.cross(e1, arbitrary_vector)
+                norm_e2_dir = np.linalg.norm(e2_dir)
+                if norm_e2_dir < 1e-6: # Vectors are collinear
+                    print("collinear")
+                    if np.allclose(arbitrary_vector, [1, 0, 0]):
+                        e2_dir = np.cross(e1, np.array([0, 1, 0]))
+                    elif np.allclose(arbitrary_vector, [0, 1, 0]):
+                        e2_dir = np.cross(e1, np.array([0, 0, 1]))
+                    else:
+                        e2_dir = np.cross(e1, np.array([1, 0, 0]))
+                    norm_e2_dir = np.linalg.norm(e2_dir)
+
+                e2 = e2_dir / norm_e2_dir # Normalize e2
+
+                e3 = np.cross(e1, e2)
+                
+                # Create rotation matrix
+                rotation_matrix = np.vstack([e1, e2, e3]).T  # 3x3 matrix
+                
+                # Convert spherical to Cartesian in local coordinates
+                local_relative_pos = spherical_to_cartesian(r, theta, phi) * sign
+                
+                # Rotate to global coordinates
+                global_relative_pos = rotation_matrix @ local_relative_pos
+                
+                # Assign global position
+                pos = p_f + global_relative_pos
+                
+        elif f != -1:
+            p_f = atom_positions.get(f)
+            if p_f is None:
+                print(f"Atom {id}: Reference atom position not defined. Assigning default position at origin.")
+                pos = np.array([0.0, 0.0, 0.0])
+            else:
+                pos = p_f + np.array([r, 0.0, 0.0])
+
+        else:
+            pos = np.array([0.0, 0.0, 0.0])
+            print(f"Atom {id}: No reference atoms found. Assigning position at origin.")
+
+        atom_positions[id] = pos
+
+        conf.SetAtomPosition(id, tuple(pos))
+        print(f"Coords: {pos}")
+
     return mol
 
 def reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf):
