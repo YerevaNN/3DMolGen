@@ -11,10 +11,10 @@ def parse_embedded_smiles(embedded_smiles):
     
     for token in tokens:
         atom = token[0]
-        atoms.append(atom)
         descriptor_str = token[2]
         if descriptor_str:
             try:
+                atoms.append(atom)
                 descriptor = [float(x) for x in descriptor_str.split(',')]
                 if len(descriptor) != 4:
                     raise ValueError
@@ -22,7 +22,7 @@ def parse_embedded_smiles(embedded_smiles):
             except:
                 raise ValueError(f"Invalid descriptor format for atom {atom}: '{descriptor_str}'")
         else: # H
-            descriptors.append([0.0, 0.0, 0.0, 0.0])
+            pass
     
     smiles = re.sub(r'<[^>]+>', '', embedded_smiles)
     return smiles, atoms, descriptors
@@ -33,20 +33,6 @@ def spherical_to_cartesian(r, theta, phi):
     z = r * np.cos(theta)
     return np.array([x, y, z])
 
-def find_next_atom(mol, smiles_to_sdf, smiles_id):
-    sdf_id = smiles_to_sdf.get(smiles_id, -1)
-    if sdf_id == -1:
-        print(f"Not found sdf from smiles {smiles_id}")
-        return -1
-    
-    atom = mol.GetAtomWithIdx(sdf_id)
-    neighbors = [neighbor.GetIdx() for neighbor in atom.GetNeighbors()]
-    
-    for i in range(smiles_id - 1, -1, -1):
-        if smiles_to_sdf[i] in neighbors:
-            return smiles_to_sdf[i]
-    return -1
-
 def is_collinear(p1, p2, p3, tolerance=1e-6):
     v1 = p2 - p1
     v2 = p3 - p1
@@ -54,13 +40,37 @@ def is_collinear(p1, p2, p3, tolerance=1e-6):
     return np.allclose(cross_product, [0, 0, 0], atol=tolerance)
 
 def assign_coordinates(mol, atoms, descriptors):
-    """Returns the molecule with assigned 3D coordinates."""
+    """Returns the molecule with assigned 3D coordinates."""    
+
+    def find_next_atom(id):
+        atom = mol.GetAtomWithIdx(id)
+        neighbors = [neighbor.GetIdx() for neighbor in atom.GetNeighbors()]
+        for i in range(id - 1, -1, -1):
+            if i in neighbors:
+                return i
+        return -1
+
     conf = Chem.Conformer(mol.GetNumAtoms())
     mol.AddConformer(conf)
+    
+    atom_positions = {}
+    
+    for id, atom in enumerate(atoms):
+        descriptor = descriptors[id]
+        r, theta, phi, sign = descriptor
+        print(atom, r, theta)
+        f = -1
+        c1 = -1
+        c2 = -1
 
-    writer = Chem.SDWriter("mol.sdf")
-    writer.write(mol)
-    writer.close()
+        f = find_next_atom(id)
+        if f != -1:
+            c1 = find_next_atom(f)
+            if c1 != -1:
+                c2 = find_next_atom(c1)
+                if c2 != -1:
+                    pass
+    #...
     
     return mol
 
@@ -73,30 +83,36 @@ def reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf):
     for idx, embedded_smiles in enumerate(embedded_smiles_list):
         try:
             smiles, atoms, descriptors = parse_embedded_smiles(embedded_smiles)
-            print(smiles, atoms, descriptors)
-            if not atoms:
-                print(f"Molecule {idx}: No atoms found.")
-                continue
-            
+            # print(f"\nProcessing Molecule {idx+1}:")
+            # print(f"SMILES: {smiles}")
+            # print(f"Atoms: {atoms}")
+            # print(f"Descriptors: {descriptors}")
+
             mol = Chem.MolFromSmiles(smiles)
             if mol is None:
-                print(f"Molecule {idx}: Invalid SMILES '{smiles}'.")
+                print(f"Molecule {idx+1}: Invalid SMILES '{smiles}'.")
                 continue
-            mol = Chem.AddHs(mol)
-            
+            # writer1 = Chem.SDWriter("mol1.sdf")
+            # writer1.write(mol)
+            # writer1.close()
+            # mol = Chem.AddHs(mol)
+            # writer2 = Chem.SDWriter("mol2.sdf")
+            # writer2.write(mol)
+            # writer2.close()
+
             mol_with_coords = assign_coordinates(mol, atoms, descriptors)
             
             # Optional: Optimize geometry (e.g., using UFF)
             # AllChem.UFFOptimizeMolecule(mol_with_coords)
             
-            # writer.write(mol_with_coords)
-            # print(f"Molecule {idx}: Successfully reconstructed.")
+            writer.write(mol_with_coords)
+            print(f"Molecule {idx+1}: Successfully reconstructed and written to SDF.")
         
         except Exception as e:
-            print(f"Molecule {idx}: Error - {str(e)}")
+            print(f"Molecule {idx+1}: Error - {str(e)}")
     
-    # writer.close()
-    # print(f"All molecules have been written to {output_sdf}")
+    writer.close()
+    print(f"\nAll molecules have been written to '{output_sdf}'")
 
 if __name__ == "__main__":
     embedded_smiles_list = [

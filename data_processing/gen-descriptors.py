@@ -5,7 +5,6 @@ from scipy.spatial import distance
 import sys
 import json
 import os
-from collections import OrderedDict
 from ogb.lsc import PCQM4Mv2Dataset
 
 def is_collinear(p1, p2, p3, tolerance=1e-6):
@@ -132,7 +131,17 @@ def calculate_descriptors(mol, smiles_index, sdf_to_smiles, smiles_to_sdf, coord
             cos_phi = np.dot(proj_if, v_cf) / (norm_proj_if * norm_v_cf)
             cos_phi = np.clip(cos_phi, -1.0, 1.0)
             phi = np.arccos(cos_phi)
-            normal_vector = [0, 0, 1]
+
+            normal_vector = np.cross(v_cf, proj_if)
+            norm_normal = np.linalg.norm(normal_vector)
+            
+            if norm_normal > 1e-6:
+                normal_vector /= norm_normal  # Normalize the normal vector
+            else:
+                print("Can't define a valid normal vector (vectors are collinear).")
+                return np.array([-1])
+            
+            # Determine the sign of phi based on the direction of the normal vector
             cross_proj_cf = np.cross(v_cf, proj_if)
             if np.dot(normal_vector, cross_proj_cf) < 0:
                 phi = -phi
