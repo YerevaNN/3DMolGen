@@ -1,0 +1,1 @@
+from tests.fixtures.molecules import cif_aspirin_molecule, xyz_aspirin_molecule

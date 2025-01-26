@@ -13,3 +13,9 @@ data/
 *.pyo
 *.pyd
 __pycache__/
+
+data/
+
+# Log files
+*.log
+*.csv
