@@ -16,17 +16,10 @@ def create_atom_mapping_by_properties(mol1, mol2):
     return atom_map
 
 
-def compare_mols_sdf(sdf_file1, sdf_file2):
+def compare_mols_sdf(i, writer, suppl1, suppl2):
     try:
-        suppl1 = Chem.SDMolSupplier(sdf_file1)
-        suppl2 = Chem.SDMolSupplier(sdf_file2)
-
-        if not suppl1 or not suppl2:
-            print(f"Error: Could not open one or both SDF files: {sdf_file1}, {sdf_file2}")
-            return None
-
-        mol1 = next(iter(suppl1))
-        mol2 = next(iter(suppl2))
+        mol1 = next(suppl1)
+        mol2 = next(suppl2)
 
         if not mol1 or not mol2:
             print(f"Error: Could not read molecule from one or both SDF files.")
@@ -35,14 +28,15 @@ def compare_mols_sdf(sdf_file1, sdf_file2):
         mol1 = Chem.RemoveHs(mol1)
 
         if mol1.GetNumAtoms() != mol2.GetNumAtoms():
-            print(f"NumAtoms not equal: {sdf_file1} or {sdf_file2}")
+            print(f"NumAtoms not equal: MOL {i}")
             return False
 
-        smiles1 = Chem.MolToSmiles(mol1, canonical=True) # Canonical SMILES
-        smiles2 = Chem.MolToSmiles(mol2, canonical=True) # Canonical SMILES
+        smiles1 = Chem.MolToSmiles(mol1, canonical=True, isomericSmiles=False) # Canonical SMILES
+        smiles2 = Chem.MolToSmiles(mol2, canonical=True, isomericSmiles=False) # Canonical SMILES
 
         if smiles1 != smiles2:
-            print(f"Smiles not equal: {sdf_file1} or {sdf_file2}")
+            print(smiles1, smiles2)
+            print(f"Smiles not equal: MOL {i}")
             return False
 
         if mol1.GetNumConformers() == 0 or mol2.GetNumConformers() == 0:
@@ -57,33 +51,42 @@ def compare_mols_sdf(sdf_file1, sdf_file2):
             print(f"Error during molecule alignment: {align_err}")
             return None
 
-
+        writer.write(mol2)
         # Calculate RMSD (Root Mean Square Deviation) after alignment
         rmsd = AllChem.GetBestRMS(mol1, mol2)
 
         print(f"RMSD after alignment: {rmsd:.3f}")
 
         return rmsd <= 0.1
-
-    except FileNotFoundError:
-        print(f"Error: SDF file not found: {sdf_file1} or {sdf_file2}")
-        return None
     except StopIteration:
-        print(f"Error: SDF file is empty: {sdf_file1} or {sdf_file2}")
+        print(f"Error: SDF file is empty: MOL {i}")
         return None
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
         return None
 
-# Example Usage (replace with your file paths)
-sdf1_path = "/auto/home/menuab/pcqm4m-v2-train.sdf"  # Replace with path to SDF file WITH hydrogens
-sdf2_path = "/auto/home/filya/3DMolGen/reconstructed_molecules.sdf"   # Replace with path to SDF file WITHOUT hydrogens
 
-are_same = compare_mols_sdf(sdf_file1=sdf1_path, sdf_file2=sdf2_path)
 
-if are_same is None:
-    print("Comparison failed. Check error messages above.")
-elif are_same:
-    print("Molecules are the same (ignoring hydrogens and 3D pose).")
-else:
-    print("Molecules are different.")
+sdf1_path = "/auto/home/menuab/pcqm4m-v2-train.sdf" # Replace with path to SDF file WITH hydrogens
+sdf2_path = "/auto/home/filya/3DMolGen/reconstructed_molecules.sdf" # Replace with path to SDF file WITHOUT hydrogens
+try:
+    suppl1 = Chem.SDMolSupplier(sdf1_path)
+    suppl2 = Chem.SDMolSupplier(sdf2_path)
+    if not suppl1 or not suppl2:
+        print(f"Error: Could not open one or both SDF files: {sdf1_path}, {sdf2_path}")
+except FileNotFoundError:
+    print(f"Error: SDF file not found")
+
+writer = Chem.SDWriter("mols111.sdf")
+    
+for i in range(10):
+    are_same = compare_mols_sdf(i, writer, suppl1, suppl2)
+
+    if are_same is None:
+        print("Comparison failed. Check error messages above.")
+    elif are_same:
+        print("Molecules are the same (ignoring hydrogens and 3D pose).")
+    else:
+        print("Molecules are different.")
+
+writer.close()
