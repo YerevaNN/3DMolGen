@@ -250,7 +250,7 @@ def process_and_find_descriptors(sdf, val_indices):
             else:
                 print(f"Excluding mol {i}")
 
-    os.makedirs("train", exist_ok=True)
+    os.makedirs("train2", exist_ok=True)
     file_counter = 0
     current_file = None
     new_file_freq = 1000000
@@ -259,7 +259,7 @@ def process_and_find_descriptors(sdf, val_indices):
         if i % new_file_freq == 0:
             if current_file:
                 current_file.close()  # Close the previous file
-            current_file = open(f"train/train_data_{file_counter}.jsonl", 'w')
+            current_file = open(f"train2/train_data_{file_counter}.jsonl", 'w')
             file_counter += 1
 
         if current_file:
@@ -269,8 +269,8 @@ def process_and_find_descriptors(sdf, val_indices):
     if current_file:
         current_file.close()
 
-    os.makedirs("val", exist_ok=True)
-    with open(f"val/val_data.jsonl", "w") as file:
+    os.makedirs("val2", exist_ok=True)
+    with open(f"val2/val_data.jsonl", "w") as file:
         for d in val_data:
             json.dump(d, file)
             file.write("\n")
