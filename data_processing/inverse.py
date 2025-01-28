@@ -1,13 +1,13 @@
 import numpy as np
 from rdkit import Chem
 import re
+import sys
 import json
 
 def parse_embedded_smiles(embedded_smiles):
     pattern = r'([A-Za-z][a-z]?)(<([^>]+)>)?'
     tokens = re.findall(pattern, embedded_smiles)
     
-    atoms = []
     descriptors = []
     
     for token in tokens:
@@ -15,7 +15,6 @@ def parse_embedded_smiles(embedded_smiles):
         descriptor_str = token[2]
         if descriptor_str:
             try:
-                atoms.append(atom)
                 descriptor = [float(x) for x in descriptor_str.split(',')]
                 if len(descriptor) != 4:
                     raise ValueError
@@ -25,8 +24,8 @@ def parse_embedded_smiles(embedded_smiles):
         else: # H
             pass
     
-    smiles = re.sub(r'<[^>]+>', '', embedded_smiles)
-    return smiles, atoms, descriptors
+    smiles = re.sub(r'<[^>]+>', '', embedded_smiles) # exclude <...>s
+    return smiles, descriptors
 
 def spherical_to_cartesian(r, theta, phi):
     x = r * np.sin(theta) * np.cos(phi)
@@ -40,7 +39,7 @@ def is_collinear(p1, p2, p3, tolerance=1e-6):
     cross_product = np.cross(v1, v2)
     return np.allclose(cross_product, [0, 0, 0], atol=tolerance)
 
-def assign_coordinates(mol, atoms, descriptors):
+def assign_coordinates(mol, descriptors):
     """Returns the molecule with assigned 3D coordinates."""    
 
     def find_next_atom(id):
@@ -58,7 +57,7 @@ def assign_coordinates(mol, atoms, descriptors):
     atom_positions = {}
     
     for id, descriptor in enumerate(descriptors):
-        print("Atom", id)
+        # print("Atom", id)
         r, theta, phi, sign = descriptor
         f = -1
         c1 = -1
@@ -68,7 +67,7 @@ def assign_coordinates(mol, atoms, descriptors):
             c1 = find_next_atom(f)
             if c1 != -1:
                 c2 = find_next_atom(c1)
-        print("f", f, "c1", c1, "c2", c2)
+        # print("f", f, "c1", c1, "c2", c2)
         pos = []
         
         if f != -1 and c1 != -1 and c2 != -1:
@@ -98,8 +97,9 @@ def assign_coordinates(mol, atoms, descriptors):
                     rotation_matrix = np.vstack([e1, e2, e3]).T  # 3x3 matrix
                     
                     # Convert spherical to Cartesian in local coordinates
-                    local_relative_pos = spherical_to_cartesian(r, theta, phi) * sign
-                    
+                    actual_phi = sign * phi
+                    local_relative_pos = spherical_to_cartesian(r, theta, actual_phi)
+
                     # Rotate to global coordinates
                     global_relative_pos = rotation_matrix @ local_relative_pos
                     
@@ -107,6 +107,9 @@ def assign_coordinates(mol, atoms, descriptors):
                     pos = p_f + global_relative_pos
 
         elif f != -1 and c1 != -1:
+            if id != 2:
+                print(f"c2 was not found for atom {id}")
+
             p_f = atom_positions.get(f)
             p_c1 = atom_positions.get(c1)
             if p_f is None or p_c1 is None:
@@ -143,7 +146,8 @@ def assign_coordinates(mol, atoms, descriptors):
                 rotation_matrix = np.vstack([e1, e2, e3]).T  # 3x3 matrix
                 
                 # Convert spherical to Cartesian in local coordinates
-                local_relative_pos = spherical_to_cartesian(r, theta, phi) * sign
+                actual_phi = sign * phi
+                local_relative_pos = spherical_to_cartesian(r, theta, actual_phi)
                 
                 # Rotate to global coordinates
                 global_relative_pos = rotation_matrix @ local_relative_pos
@@ -152,6 +156,8 @@ def assign_coordinates(mol, atoms, descriptors):
                 pos = p_f + global_relative_pos
                 
         elif f != -1:
+            if id != 1:
+                print(f"f was not found for atom {id}")
             p_f = atom_positions.get(f)
             if p_f is None:
                 print(f"Atom {id}: Reference atom position not defined. Assigning default position at origin.")
@@ -166,7 +172,7 @@ def assign_coordinates(mol, atoms, descriptors):
         atom_positions[id] = pos
 
         conf.SetAtomPosition(id, tuple(pos))
-        print(f"Coords: {pos}")
+        # print(f"Coords: {pos}")
 
     return mol
 
@@ -179,25 +185,17 @@ def reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf):
         if idx == 10: 
             break
         try:
-            smiles, atoms, descriptors = parse_embedded_smiles(embedded_smiles)
-            # print(f"\nProcessing Molecule {idx+1}:")
+            smiles, descriptors = parse_embedded_smiles(embedded_smiles)
+            # print(f"\nProcessing Molecule {idx+1}...")
             # print(f"SMILES: {smiles}")
-            # print(f"Atoms: {atoms}")
             # print(f"Descriptors: {descriptors}")
 
             mol = Chem.MolFromSmiles(smiles)
             if mol is None:
                 print(f"Molecule {idx+1}: Invalid SMILES '{smiles}'.")
                 continue
-            # writer1 = Chem.SDWriter("mol1.sdf")
-            # writer1.write(mol)
-            # writer1.close()
-            # mol = Chem.AddHs(mol)
-            # writer2 = Chem.SDWriter("mol2.sdf")
-            # writer2.write(mol)
-            # writer2.close()
 
-            mol_with_coords = assign_coordinates(mol, atoms, descriptors)
+            mol_with_coords = assign_coordinates(mol, descriptors)
             
             # Optional: Optimize geometry (e.g., using UFF)
             # AllChem.UFFOptimizeMolecule(mol_with_coords)
@@ -212,6 +210,7 @@ def reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf):
     print(f"\nAll molecules have been written to '{output_sdf}'")
 
 if __name__ == "__main__":
+    sys.stdout = open("output-inv.txt", "w") 
     data_file = "/auto/home/filya/3DMolGen/train1/train_data_0.jsonl"
     embedded_smiles_list = []
     with open(data_file, 'r') as f:
@@ -222,10 +221,6 @@ if __name__ == "__main__":
                     conformers_data = json_object["conformers"]
                     if isinstance(conformers_data, dict) and "embedded_smiles" in conformers_data:
                         embedded_smiles_list.append(conformers_data["embedded_smiles"])
-                    elif isinstance(conformers_data, list): # Handle list of conformers if needed
-                        for conformer in conformers_data:
-                            if "embedded_smiles" in conformer:
-                                embedded_smiles_list.append(conformer["embedded_smiles"])
                     else:
                         print(f"Warning: 'embedded_smiles' key not found within 'conformers' on line {line_number} or 'conformers' is not in expected format.")
                 else:
