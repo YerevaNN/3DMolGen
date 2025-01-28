@@ -38,7 +38,7 @@ def get_smiles(mol):
     
     i = 0
     while i < len(canonical_smiles):
-        if canonical_smiles[i:i+len(atom_name)].upper() == atom_name.upper() and canonical_smiles[i] != 'H':
+        if canonical_smiles[i:i+len(atom_name)].upper() == atom_name.upper():
             smiles_list.append((atom_name, original_index))
             i += len(atom_name)
             original_index, atom_name = get_new_atom(mol, atom_order)
@@ -63,7 +63,7 @@ def get_ans(mol, descriptors):
     smiles_id = 0
     i = 0
     while i < len(canonical_smiles):
-        if (canonical_smiles[i:i+len(atom_name)].upper() == atom_name.upper()) and canonical_smiles[i] != 'H':
+        if canonical_smiles[i:i+len(atom_name)].upper() == atom_name.upper():
             ans += canonical_smiles[i:i+len(atom_name)]
             ans += descriptors[smiles_id]
             smiles_id += 1
@@ -77,18 +77,23 @@ def get_ans(mol, descriptors):
 
 def calculate_descriptors(mol, smiles_index, sdf_to_smiles, smiles_to_sdf, coords):
     """Calculates generation descriptors for a specific atom in a molecule."""
-    atom_index = smiles_to_sdf[smiles_index]
-    # Calculate the ref points 
-
+    next_of_atom = {}
     def find_next_atom(sdf_id):
+        if sdf_id in next_of_atom:
+            return next_of_atom[sdf_id]
         smiles_id = sdf_to_smiles[sdf_id]
         this_atom = mol.GetAtomWithIdx(sdf_id)
         neighbors = [neighbor.GetIdx() for neighbor in this_atom.GetNeighbors()]
         for i in range(smiles_id - 1, -1, -1):
             if smiles_to_sdf[i] in neighbors:
+                next_of_atom[sdf_id] = smiles_to_sdf[i]
                 return smiles_to_sdf[i]
+        next_of_atom[sdf_id] = -1
         return -1
 
+    atom_index = smiles_to_sdf[smiles_index]
+    
+    # Calculate the ref points 
     f = -1
     c1 = -1
     c2 = -1
@@ -123,6 +128,7 @@ def calculate_descriptors(mol, smiles_index, sdf_to_smiles, smiles_to_sdf, coord
         # print("c1-smiles:", sdf_to_smiles[c1])
         if smiles_index != 2:
             print(f"c2 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
+        #assume that the point is on XY plane
         proj_if = coords[atom_index] - focal_atom_coord #v_if=proj_if
         v_cf = c1_atom_coord - focal_atom_coord
         norm_proj_if = np.linalg.norm(proj_if)
@@ -200,10 +206,8 @@ def calculate_descriptors(mol, smiles_index, sdf_to_smiles, smiles_to_sdf, coord
     return generation_descriptor
 
 def get_json(mol, embedded, sample):
-    original_smiles = sample[0]
-    canonical_smiles = Chem.MolToSmiles(mol, canonical=True, isomericSmiles=False)
-    return {"canonical_smiles": canonical_smiles, 
-            "pcqm4v2_smiles": original_smiles, 
+    return {"canonical_smiles": Chem.MolToSmiles(mol, canonical=True, isomericSmiles=False), 
+            "pcqm4v2_smiles": sample[0], 
             "pcqm4v2_label": sample[1], 
             "conformers": {"embedded_smiles": embedded}}
     
@@ -219,7 +223,7 @@ def get_mol_descriptors(mol):
         descriptors = calculate_descriptors(mol, i, sdf_to_smiles, smiles_to_sdf, coords)
         if descriptors.size and descriptors[0] != -1:
             desc_str = ",".join(f"{val:.4f}" for val in descriptors)
-            desc_str = desc_str[:-5] #give the sign as integer
+            desc_str = desc_str[:-5] # give the sign as an integer
             all_descriptors.append(f"<{desc_str}>")
         else:
             return "no descriptors"
@@ -227,7 +231,6 @@ def get_mol_descriptors(mol):
     return get_ans(mol, all_descriptors)
 
 def process_and_find_descriptors(sdf, val_indices):
-    # print(val_indices)
     supplier = Chem.SDMolSupplier(sdf) #, sanitize=False, removeHs=False)
     dataset = PCQM4Mv2Dataset(root = '/auto/home/menuab', only_smiles = True)
 
@@ -258,7 +261,7 @@ def process_and_find_descriptors(sdf, val_indices):
     for i, data_item in enumerate(train_data):
         if i % new_file_freq == 0:
             if current_file:
-                current_file.close()  # Close the previous file
+                current_file.close()
             current_file = open(f"train2/train_data_{file_counter}.jsonl", 'w')
             file_counter += 1
 
@@ -277,8 +280,8 @@ def process_and_find_descriptors(sdf, val_indices):
         file.close()
 
 if __name__ == '__main__':
-    sys.stdout = open("output-t.txt", "w") 
-    sdf_file = '/auto/home/menuab/pcqm4m-v2-train.sdf' #'/auto/home/filya/3DMolGen/data_processing/molecule.sdf'
+    sys.stdout = open("output-gen.txt", "w") 
+    sdf_file = '/auto/home/menuab/pcqm4m-v2-train.sdf'
     val_indices_file = "/auto/home/menuab/code/3DMolGen/data_processing/pcqm4v2_valid_indice.txt"
     val_indices = []
     with open(val_indices_file, 'r') as f:
@@ -287,7 +290,7 @@ if __name__ == '__main__':
                 index = int(line.strip())
                 val_indices.append(index)
             except ValueError:
-                print(f"Skipping invalid line: {line.strip()}")  # Handle potential errors
+                print(f"Skipping invalid line: {line.strip()}")
     try:
         process_and_find_descriptors(sdf_file, val_indices)
     except ValueError as e:
