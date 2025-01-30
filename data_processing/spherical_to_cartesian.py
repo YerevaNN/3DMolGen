@@ -189,12 +189,16 @@ def reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf):
         raise ValueError(f"Could not create SDF writer for {output_sdf}")
     for idx, embedded_smiles in enumerate(embedded_smiles_list):
         try:
+            if idx == 1000:
+                break
             smiles, descriptors = parse_embedded_smiles(embedded_smiles)
             # print(f"\nProcessing Molecule {idx+1}...")
             # print(f"SMILES: {smiles}")
             # print(f"Descriptors: {descriptors}")
 
             mol = Chem.MolFromSmiles(smiles)
+            mol = Chem.RemoveHs(mol)
+            Chem.SanitizeMol(mol)
             if mol is None:
                 print(f"Molecule {idx+1}: Invalid SMILES '{smiles}'.")
                 continue
