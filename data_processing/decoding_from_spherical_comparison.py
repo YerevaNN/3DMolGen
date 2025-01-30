@@ -99,6 +99,11 @@ def compare_mols_sdf(i, suppl1, suppl2):
 
         if mol1.GetNumAtoms() != mol2.GetNumAtoms():
             print(f"NumAtoms not equal: MOL {i}")
+            writer2.write(mol2)
+            writer1.write(mol1)
+            writer1.close()
+            writer2.close()
+            sys.exit(1)
             return False
 
         smiles1 = Chem.MolToSmiles(mol1, canonical=True, isomericSmiles=False) # Canonical SMILES
@@ -147,7 +152,7 @@ try:
 except FileNotFoundError:
     print(f"Error: SDF file not found")
 
-for i in range(3378606):
+for i in range(1000): #(3378606):
     are_same = compare_mols_sdf(i, suppl1, suppl2)
     if are_same is None:
         print("Comparison failed. Check error messages above.")
