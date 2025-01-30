@@ -3,6 +3,9 @@ from rdkit import Chem
 import re
 import sys
 import json
+import numpy as np
+
+# ignore = []  
 
 def parse_embedded_smiles(embedded_smiles):
     pattern = r'([A-Za-z][a-z]?)(<([^>]+)>)?'
@@ -39,9 +42,8 @@ def is_collinear(p1, p2, p3, tolerance=1e-6):
     cross_product = np.cross(v1, v2)
     return np.allclose(cross_product, [0, 0, 0], atol=tolerance)
 
-def assign_coordinates(mol, descriptors):
+def assign_coordinates(mol_id, mol, descriptors):
     """Returns the molecule with assigned 3D coordinates."""    
-
     def find_next_atom(id):
         atom = mol.GetAtomWithIdx(id)
         neighbors = [neighbor.GetIdx() for neighbor in atom.GetNeighbors()]
@@ -109,6 +111,7 @@ def assign_coordinates(mol, descriptors):
         elif f != -1 and c1 != -1:
             if id != 2:
                 print(f"c2 was not found for atom {id}")
+                # ignore.append(mol_id)
 
             p_f = atom_positions.get(f)
             p_c1 = atom_positions.get(c1)
@@ -157,7 +160,8 @@ def assign_coordinates(mol, descriptors):
                 
         elif f != -1:
             if id != 1:
-                print(f"f was not found for atom {id}")
+                # ignore.append(mol_id)
+                print(f"c1 was not found for atom {id}")
             p_f = atom_positions.get(f)
             if p_f is None:
                 print(f"Atom {id}: Reference atom position not defined. Assigning default position at origin.")
@@ -166,8 +170,10 @@ def assign_coordinates(mol, descriptors):
                 pos = p_f + np.array([r, 0.0, 0.0])
 
         else:
+            if id != 0:
+                # ignore.append(mol_id)
+                print(f"f was not found for atom {id}")
             pos = np.array([0.0, 0.0, 0.0])
-            print(f"Atom {id}: No reference atoms found. Assigning position at origin.")
 
         atom_positions[id] = pos
 
@@ -182,8 +188,6 @@ def reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf):
     if writer is None:
         raise ValueError(f"Could not create SDF writer for {output_sdf}")
     for idx, embedded_smiles in enumerate(embedded_smiles_list):
-        if idx == 10: 
-            break
         try:
             smiles, descriptors = parse_embedded_smiles(embedded_smiles)
             # print(f"\nProcessing Molecule {idx+1}...")
@@ -195,13 +199,13 @@ def reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf):
                 print(f"Molecule {idx+1}: Invalid SMILES '{smiles}'.")
                 continue
 
-            mol_with_coords = assign_coordinates(mol, descriptors)
+            mol_with_coords = assign_coordinates(idx, mol, descriptors)
             
             # Optional: Optimize geometry (e.g., using UFF)
             # AllChem.UFFOptimizeMolecule(mol_with_coords)
             
             writer.write(mol_with_coords)
-            print(f"Molecule {idx+1}: Successfully reconstructed and written to SDF.")
+            # print(f"Molecule {idx+1}: Successfully reconstructed and written to SDF.")
         
         except Exception as e:
             print(f"Molecule {idx+1}: Error - {str(e)}")
@@ -209,26 +213,28 @@ def reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf):
     writer.close()
     print(f"\nAll molecules have been written to '{output_sdf}'")
 
-if __name__ == "__main__":
-    sys.stdout = open("output-inv.txt", "w") 
-    data_file = "/auto/home/filya/3DMolGen/train1/train_data_0.jsonl"
-    embedded_smiles_list = []
-    with open(data_file, 'r') as f:
-        for line_number, line in enumerate(f):
-            try:
-                json_object = json.loads(line)
-                if "conformers" in json_object:
-                    conformers_data = json_object["conformers"]
-                    if isinstance(conformers_data, dict) and "embedded_smiles" in conformers_data:
-                        embedded_smiles_list.append(conformers_data["embedded_smiles"])
-                    else:
-                        print(f"Warning: 'embedded_smiles' key not found within 'conformers' on line {line_number} or 'conformers' is not in expected format.")
+sys.stdout = open("output-inv.txt", "w") 
+data_file = "/auto/home/filya/3DMolGen/train1/train_data_0.jsonl"
+embedded_smiles_list = []
+with open(data_file, 'r') as f:
+    for line_number, line in enumerate(f):
+        try:
+            json_object = json.loads(line)
+            if "conformers" in json_object:
+                conformers_data = json_object["conformers"]
+                if isinstance(conformers_data, dict) and "embedded_smiles" in conformers_data:
+                    embedded_smiles_list.append(conformers_data["embedded_smiles"])
                 else:
-                    print(f"Warning: 'conformers' key not found in JSON object on line {line_number}.")
+                    print(f"Warning: 'embedded_smiles' key not found within 'conformers' on line {line_number} or 'conformers' is not in expected format.")
+            else:
+                print(f"Warning: 'conformers' key not found in JSON object on line {line_number}.")
 
-            except json.JSONDecodeError as e:
-                print(f"Error: JSONDecodeError on line {line_number}: {e}")
-                print(f"Line causing error: {line.strip()}")
+        except json.JSONDecodeError as e:
+            print(f"Error: JSONDecodeError on line {line_number}: {e}")
+            print(f"Line causing error: {line.strip()}")
 
-    output_sdf = "reconstructed_molecules.sdf"
-    reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf)
+output_sdf = "reconstructed_molecules.sdf"
+reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf)
+
+# ignore = np.array(ignore)
+# np.save("/auto/home/filya/3DMolGen/data_processing/ignore.npy", ignore)
