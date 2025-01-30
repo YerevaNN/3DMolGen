@@ -1,9 +1,14 @@
 from rdkit import Chem
 from rdkit.Chem import AllChem
+import sys
+import numpy as np
+
+# ignore = np.load("/auto/home/filya/3DMolGen/data_processing/ignore.npy")
+# print(ignore)
 
 writer1 = Chem.SDWriter("mols1.sdf")
 writer2 = Chem.SDWriter("mols2.sdf")
-writer_pre = Chem.SDWriter("mols2_pre.sdf")
+# writer_pre = Chem.SDWriter("mols2_pre.sdf")
 
 def create_atom_mapping_by_properties(mol1, mol2, useChirality=False):
     """
@@ -82,7 +87,8 @@ def compare_mols_sdf(i, suppl1, suppl2):
     try:
         mol1 = next(suppl1)
         mol2 = next(suppl2)
-
+        # if i in ignore:
+        #     return True
         if not mol1 or not mol2:
             print(f"Error: Could not read molecule from one or both SDF files.")
             return None
@@ -106,20 +112,20 @@ def compare_mols_sdf(i, suppl1, suppl2):
         if mol1.GetNumConformers() == 0 or mol2.GetNumConformers() == 0:
             print(f"Error: One or both molecules lack 3D coordinates in SDF files.")
             return None
-        writer_pre.write(mol2)
+        # writer_pre.write(mol2)
         # Align mol2 to mol1 based on coordinates
         try:
             mp = create_atom_mapping_by_properties(mol1, mol2)
             mol2 = reorder_mol_atoms_by_map(mol2, mp)
             AllChem.AlignMol(mol2, mol1, atomMap=[(i, i) for i in range(mol2.GetNumAtoms())])
             rmsd = AllChem.GetBestRMS(mol1, mol2)
-            print(f"RMSD after alignment: {rmsd:.3f}")
+            # print(f"RMSD after alignment: {rmsd:.3f}")
         except Exception as align_err:
             print(f"Error during molecule alignment: {align_err}")
             return None
 
-        writer2.write(mol2)
-        writer1.write(mol1)
+        # writer2.write(mol2)
+        # writer1.write(mol1)
         return rmsd <= 0.1
     except StopIteration:
         print(f"Error: SDF file is empty: MOL {i}")
@@ -128,6 +134,8 @@ def compare_mols_sdf(i, suppl1, suppl2):
         print(f"An unexpected error occurred: {e}")
         return None
 
+
+sys.stdout = open("output-comp.txt", "w") 
 
 sdf1_path = "/auto/home/menuab/pcqm4m-v2-train.sdf" # Replace with path to SDF file WITH hydrogens
 sdf2_path = "/auto/home/filya/3DMolGen/reconstructed_molecules.sdf" # Replace with path to SDF file WITHOUT hydrogens
@@ -139,15 +147,29 @@ try:
 except FileNotFoundError:
     print(f"Error: SDF file not found")
 
-for i in range(10):
+for i in range(3378606):
     are_same = compare_mols_sdf(i, suppl1, suppl2)
     if are_same is None:
         print("Comparison failed. Check error messages above.")
     elif are_same:
-        print("Molecules are the same (ignoring hydrogens and 3D pose).")
+        pass
+        # print("Molecules are the same (ignoring hydrogens and 3D pose).")
     else:
+        print(i)
         print("Molecules are different.")
+
+# i = 15
+# are_same = compare_mols_sdf(i, suppl1, suppl2)
+# if are_same is None:
+#     print("Comparison failed. Check error messages above.")
+# elif are_same:
+#     pass
+#     # print("Molecules are the same (ignoring hydrogens and 3D pose).")
+# else:
+#     print(i)
+#     print("Molecules are different.")
+
 
 writer1.close()
 writer2.close()
-writer_pre.close()
+# writer_pre.close()
