@@ -88,10 +88,10 @@ def preprocess(raw_path: str, dest_folder_path: str, indices_path, embedding_typ
     log.info(f"Reading files from {raw_path}")
     partitions = ["qm9", "drugs"]
     total_confs, total_mols = 0, 0
-    train_list, valid_list = [], []
     embedding_func = embedding_func_selector[embedding_type]
 
     for partition in partitions:
+        train_list, valid_list = [], []
         
         dest_path = osp.join(dest_folder_path, partition.upper())
         train_indices = set(sorted(np.load(osp.join(*[indices_path, partition.upper(),
