@@ -75,20 +75,24 @@ def get_ans(mol, descriptors):
     return ans
 
 
-def calculate_descriptors(mol, smiles_index, sdf_to_smiles, smiles_to_sdf, coords):
+def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sdf, coords):
     """Calculates generation descriptors for a specific atom in a molecule."""
-    next_of_atom = {}
-    def find_next_atom(sdf_id):
-        if sdf_id in next_of_atom:
-            return next_of_atom[sdf_id]
-        smiles_id = sdf_to_smiles[sdf_id]
-        this_atom = mol.GetAtomWithIdx(sdf_id)
-        neighbors = [neighbor.GetIdx() for neighbor in this_atom.GetNeighbors()]
-        for i in range(smiles_id - 1, -1, -1):
-            if smiles_to_sdf[i] in neighbors:
-                next_of_atom[sdf_id] = smiles_to_sdf[i]
+    def find_next_atom(begin_sdf_id, sdf_id1, sdf_id2 = None):
+        begin_smiles_id = sdf_to_smiles[begin_sdf_id]
+        smiles_id1 = sdf_to_smiles[sdf_id1]
+        this_atom1 = mol.GetAtomWithIdx(sdf_id1)
+        neighbors1 = [neighbor.GetIdx() for neighbor in this_atom1.GetNeighbors()]
+        neighbors2 = []
+        smiles_id2 = -1
+        if sdf_id2 is not None:
+            smiles_id2 = sdf_to_smiles[sdf_id2]
+            this_atom2 = mol.GetAtomWithIdx(sdf_id2)
+            neighbors2 = [neighbor.GetIdx() for neighbor in this_atom2.GetNeighbors()]
+        for i in range(begin_smiles_id - 1, -1, -1):
+            if i == smiles_id1 or i == smiles_id2:
+                continue
+            if smiles_to_sdf[i] in neighbors1 or smiles_to_sdf[i] in neighbors2:
                 return smiles_to_sdf[i]
-        next_of_atom[sdf_id] = -1
         return -1
 
     atom_index = smiles_to_sdf[smiles_index]
@@ -101,13 +105,13 @@ def calculate_descriptors(mol, smiles_index, sdf_to_smiles, smiles_to_sdf, coord
     c1_atom_coord = -1
     c2_atom_coord = -1
     
-    f = find_next_atom(atom_index)
+    f = find_next_atom(atom_index, atom_index)
     if f != -1:
         focal_atom_coord = coords[f]
-        c1 = find_next_atom(f)
+        c1 = find_next_atom(atom_index, f)
         if c1 != -1:
             c1_atom_coord = coords[c1]
-            c2 = find_next_atom(c1)
+            c2 = find_next_atom(atom_index, c1, f)
             if c2 != -1:
                 c2_atom_coord = coords[c2]
 
@@ -116,7 +120,7 @@ def calculate_descriptors(mol, smiles_index, sdf_to_smiles, smiles_to_sdf, coord
     # Calculate spherical coordinates
     if f == -1: 
         if smiles_index != 0:
-            print(f"f was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
+            print(f"f was not found for mol {mol_id}, atom {atom_index}, {sdf_to_smiles[atom_index]}")
             return np.array([-1])
         generation_descriptor = np.array([0, np.pi / 2, 0, np.sign(0)])
     elif c1 == -1:
@@ -159,7 +163,6 @@ def calculate_descriptors(mol, smiles_index, sdf_to_smiles, smiles_to_sdf, coord
         if is_collinear(focal_atom_coord, c1_atom_coord, c2_atom_coord):
             print("collinear", atom_index)
             return np.array([-1])
-
         # Calculate spherical coordinates
         current_atom_coord = coords[atom_index]
 
@@ -212,7 +215,7 @@ def get_json(mol, embedded, sample):
             "conformers": {"embedded_smiles": embedded}}
     
 
-def get_mol_descriptors(mol):
+def get_mol_descriptors(mol, mol_id):
     conformer = mol.GetConformer()
     coords = conformer.GetPositions()
 
@@ -220,7 +223,7 @@ def get_mol_descriptors(mol):
 
     all_descriptors = []
     for i in range(len(smiles)):
-        descriptors = calculate_descriptors(mol, i, sdf_to_smiles, smiles_to_sdf, coords)
+        descriptors = calculate_descriptors(mol, mol_id, i, sdf_to_smiles, smiles_to_sdf, coords)
         if descriptors.size and descriptors[0] != -1:
             desc_str = ",".join(f"{val:.4f}" for val in descriptors)
             desc_str = desc_str[:-5] # give the sign as an integer
@@ -239,11 +242,12 @@ def process_and_find_descriptors(sdf, val_indices):
     for i, mol in enumerate(supplier): #3378606
         if i % 1000 == 0:
             print(f"Mol {i}...")
+            sys.stdout.flush()
         if not mol:
             print(f"Failed to process mol {i}")
             return
         else:
-            descriptors = get_mol_descriptors(mol)
+            descriptors = get_mol_descriptors(mol, i)
             if descriptors != "no descriptors":
                 json_string = get_json(mol, descriptors, dataset[i])
                 if i in val_indices:
@@ -253,7 +257,7 @@ def process_and_find_descriptors(sdf, val_indices):
             else:
                 print(f"Excluding mol {i}")
 
-    os.makedirs("train2", exist_ok=True)
+    os.makedirs("train_embedded_spherical", exist_ok=True)
     file_counter = 0
     current_file = None
     new_file_freq = 1000000
@@ -262,7 +266,7 @@ def process_and_find_descriptors(sdf, val_indices):
         if i % new_file_freq == 0:
             if current_file:
                 current_file.close()
-            current_file = open(f"train2/train_data_{file_counter}.jsonl", 'w')
+            current_file = open(f"train_embedded_spherical/train_data_{file_counter}.jsonl", 'w')
             file_counter += 1
 
         if current_file:
@@ -272,8 +276,8 @@ def process_and_find_descriptors(sdf, val_indices):
     if current_file:
         current_file.close()
 
-    os.makedirs("val2", exist_ok=True)
-    with open(f"val2/val_data.jsonl", "w") as file:
+    os.makedirs("valid_embedded_spherical", exist_ok=True)
+    with open(f"valid_embedded_spherical/valid_data.jsonl", "w") as file:
         for d in val_data:
             json.dump(d, file)
             file.write("\n")
@@ -282,7 +286,7 @@ def process_and_find_descriptors(sdf, val_indices):
 if __name__ == '__main__':
     sys.stdout = open("output-gen.txt", "w") 
     sdf_file = '/auto/home/menuab/pcqm4m-v2-train.sdf'
-    val_indices_file = "/auto/home/menuab/code/3DMolGen/data_processing/pcqm4v2_valid_indice.txt"
+    val_indices_file = "/auto/home/menuab/code/3DMolGen/data/pcqm/pcqm4v2_valid_indice.txt"
     val_indices = []
     with open(val_indices_file, 'r') as f:
         for line in f:
@@ -295,6 +299,3 @@ if __name__ == '__main__':
         process_and_find_descriptors(sdf_file, val_indices)
     except ValueError as e:
         print(f"Error: {e}")
-    except FileNotFoundError:
-        print(f"Error: SDF file '{sdf_file}' not found.")
-        
