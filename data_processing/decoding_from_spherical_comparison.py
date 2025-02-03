@@ -3,12 +3,18 @@ from rdkit.Chem import AllChem
 import sys
 import numpy as np
 
-# ignore = np.load("/auto/home/filya/3DMolGen/data_processing/ignore.npy")
-# print(ignore)
-
 writer1 = Chem.SDWriter("mols1.sdf")
 writer2 = Chem.SDWriter("mols2.sdf")
-# writer_pre = Chem.SDWriter("mols2_pre.sdf")
+
+exclude_h = False
+
+excluded_mols_array = np.load("/auto/home/filya/3DMolGen/data_processing/excluded_mols.npy")
+val_indices_file = "/auto/home/menuab/code/3DMolGen/data/pcqm/pcqm4v2_valid_indice.txt"
+val_indices = []
+with open(val_indices_file, 'r') as f:
+    for line in f:
+        index = int(line.strip())
+        val_indices.append(index)
 
 def create_atom_mapping_by_properties(mol1, mol2, useChirality=False):
     """
@@ -34,20 +40,6 @@ def create_atom_mapping_by_properties(mol1, mol2, useChirality=False):
     
     return mapping
 
-# def create_atom_mapping_by_properties(mol1, mol2):
-#     atoms1 = [(atom.GetAtomicNum(), atom.GetDegree(), atom.GetIdx()) for atom in mol1.GetAtoms()]
-#     atoms2 = [(atom.GetAtomicNum(), atom.GetDegree(), atom.GetIdx()) for atom in mol2.GetAtoms()]
-
-#     # Sort atoms based on (atomic number, degree)
-#     sorted_atoms1 = sorted(atoms1, key=lambda x: (x[0], x[1]))
-#     sorted_atoms2 = sorted(atoms2, key=lambda x: (x[0], x[1]))
-
-#     atom_map = []
-#     for i in range(mol1.GetNumAtoms()):
-#         atom_map.append((sorted_atoms1[i][2], sorted_atoms2[i][2])) # map original indices
-
-#     return atom_map
-
 def reorder_mol_atoms_by_map(mol, atom_map):
     num_atoms = mol.GetNumAtoms()
     if not atom_map or len(atom_map) != num_atoms:
@@ -55,7 +47,7 @@ def reorder_mol_atoms_by_map(mol, atom_map):
         return None
 
     new_mol = Chem.RWMol()  # Editable molecule
-    old_to_new_indices = {} # Map from old index to new index in the new Mol
+    old_to_new_indices = {}
 
     # Add atoms in the new order based on atom_map (second index in tuple is new index)
     for index_mol1, index_mol2 in atom_map:
@@ -70,7 +62,7 @@ def reorder_mol_atoms_by_map(mol, atom_map):
     for index_mol1, index_mol2 in atom_map:
         new_conf.SetAtomPosition(index_mol1, old_conf.GetAtomPosition(index_mol2)) # Copy positions based on map (mol2 index)
 
-    new_mol.AddConformer(new_conf, assignId=True) # Assign the new conformer
+    new_mol.AddConformer(new_conf, assignId=True)
 
     # Add bonds - re-index bond atoms based on the mapping
     for bond in mol.GetBonds():
@@ -86,38 +78,43 @@ def reorder_mol_atoms_by_map(mol, atom_map):
 def compare_mols_sdf(i, suppl1, suppl2):
     try:
         mol1 = next(suppl1)
+        if i in excluded_mols_array:
+            print("Excluded", i)
+            return True
+        if i in val_indices:
+            print("Valid", i)
+            return True
+
         mol2 = next(suppl2)
-        # if i in ignore:
-        #     return True
         if not mol1 or not mol2:
             print(f"Error: Could not read molecule from one or both SDF files.")
             return None
 
-        mol1 = Chem.RemoveHs(mol1)
-        Chem.SanitizeMol(mol1)  # Ensure validity after removing Hs
-        Chem.SanitizeMol(mol2)
-
         if mol1.GetNumAtoms() != mol2.GetNumAtoms():
+            # writer1.write(mol1)
+            # writer2.write(mol2)
             print(f"NumAtoms not equal: MOL {i}")
-            writer2.write(mol2)
-            writer1.write(mol1)
-            writer1.close()
-            writer2.close()
-            sys.exit(1)
             return False
-
+        
         smiles1 = Chem.MolToSmiles(mol1, canonical=True, isomericSmiles=False) # Canonical SMILES
         smiles2 = Chem.MolToSmiles(mol2, canonical=True, isomericSmiles=False) # Canonical SMILES
 
-        if smiles1 != smiles2:
+        #ensure equality of smiles, if the molecules are the same. Due to some H inconsistencies
+        mol_1 = Chem.MolFromSmiles(smiles1)
+        mol_2 = Chem.MolFromSmiles(smiles2)
+
+        canonical_smiles1 = Chem.MolToSmiles(mol_1, canonical=True)
+        canonical_smiles2 = Chem.MolToSmiles(mol_2, canonical=True)
+
+        if canonical_smiles1 != canonical_smiles2:
             print(smiles1, smiles2)
             print(f"Smiles not equal: MOL {i}")
             return False
-
+        
         if mol1.GetNumConformers() == 0 or mol2.GetNumConformers() == 0:
             print(f"Error: One or both molecules lack 3D coordinates in SDF files.")
             return None
-        # writer_pre.write(mol2)
+        
         # Align mol2 to mol1 based on coordinates
         try:
             mp = create_atom_mapping_by_properties(mol1, mol2)
@@ -125,12 +122,14 @@ def compare_mols_sdf(i, suppl1, suppl2):
             AllChem.AlignMol(mol2, mol1, atomMap=[(i, i) for i in range(mol2.GetNumAtoms())])
             rmsd = AllChem.GetBestRMS(mol1, mol2)
             # print(f"RMSD after alignment: {rmsd:.3f}")
-        except Exception as align_err:
-            print(f"Error during molecule alignment: {align_err}")
+        except Exception as err:
+            print(f"Error during molecule alignment or rmsd calculation: {err}")
             return None
+        if rmsd > 0.1:
+            writer1.write(mol1)
+            writer2.write(mol2)
+            print(f"RMSD after alignment: {rmsd:.3f}")
 
-        # writer2.write(mol2)
-        # writer1.write(mol1)
         return rmsd <= 0.1
     except StopIteration:
         print(f"Error: SDF file is empty: MOL {i}")
@@ -138,43 +137,39 @@ def compare_mols_sdf(i, suppl1, suppl2):
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
         return None
+        
 
-
-sys.stdout = open("output-comp.txt", "w") 
+out_file = "output_comp_with_H.txt"
+if exclude_h:
+    out_file = "output_comp.txt"
+sys.stdout = open(out_file, "w") 
 
 sdf1_path = "/auto/home/menuab/pcqm4m-v2-train.sdf" # Replace with path to SDF file WITH hydrogens
-sdf2_path = "/auto/home/filya/3DMolGen/reconstructed_molecules.sdf" # Replace with path to SDF file WITHOUT hydrogens
+sdf2_path = "/auto/home/filya/3DMolGen/reconstructed_mols/reconstructed_molecules_0_with_H.sdf"
+if exclude_h:
+    sdf2_path = "/auto/home/filya/3DMolGen/reconstructed_mols/reconstructed_molecules_0.sdf"
 try:
-    suppl1 = Chem.SDMolSupplier(sdf1_path)
-    suppl2 = Chem.SDMolSupplier(sdf2_path)
+    suppl1 = Chem.SDMolSupplier(sdf1_path, removeHs=exclude_h, sanitize=exclude_h)
+    suppl2 = Chem.SDMolSupplier(sdf2_path, removeHs=exclude_h, sanitize=exclude_h)
     if not suppl1 or not suppl2:
         print(f"Error: Could not open one or both SDF files: {sdf1_path}, {sdf2_path}")
 except FileNotFoundError:
     print(f"Error: SDF file not found")
 
-for i in range(1000): #(3378606):
+for i in range(1000000): #3378606):
+    # if i % 100:
+        # print(i)
+        # sys.stdout.flush()
+
     are_same = compare_mols_sdf(i, suppl1, suppl2)
     if are_same is None:
         print("Comparison failed. Check error messages above.")
     elif are_same:
         pass
-        # print("Molecules are the same (ignoring hydrogens and 3D pose).")
+        # print("Molecules are the same (ignoring hydrogens).")
     else:
         print(i)
         print("Molecules are different.")
 
-# i = 15
-# are_same = compare_mols_sdf(i, suppl1, suppl2)
-# if are_same is None:
-#     print("Comparison failed. Check error messages above.")
-# elif are_same:
-#     pass
-#     # print("Molecules are the same (ignoring hydrogens and 3D pose).")
-# else:
-#     print(i)
-#     print("Molecules are different.")
-
-
 writer1.close()
 writer2.close()
-# writer_pre.close()

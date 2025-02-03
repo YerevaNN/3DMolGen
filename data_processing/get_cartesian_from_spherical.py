@@ -5,7 +5,7 @@ import sys
 import json
 import numpy as np
 
-# ignore = []  
+exclude_h = False
 
 def parse_embedded_smiles(embedded_smiles):
     pattern = r'([A-Za-z][a-z]?)(<([^>]+)>)?'
@@ -24,8 +24,9 @@ def parse_embedded_smiles(embedded_smiles):
                 descriptors.append(descriptor)
             except:
                 raise ValueError(f"Invalid descriptor format for atom {atom}: '{descriptor_str}'")
-        else: # H
-            pass
+        # else:
+        #     print("NO_DESC")
+        # otherwise, it's H if exclude_H
     
     smiles = re.sub(r'<[^>]+>', '', embedded_smiles) # exclude <...>s
     return smiles, descriptors
@@ -42,7 +43,7 @@ def is_collinear(p1, p2, p3, tolerance=1e-6):
     cross_product = np.cross(v1, v2)
     return np.allclose(cross_product, [0, 0, 0], atol=tolerance)
 
-def assign_coordinates(mol_id, mol, descriptors):
+def assign_coordinates(mol, descriptors):
     """Returns the molecule with assigned 3D coordinates."""  
     def find_next_atom(begin_smiles_id, smiles_id1, smiles_id2 = -1): #smiles ids same as sdf ids
         this_atom1 = mol.GetAtomWithIdx(smiles_id1)
@@ -119,7 +120,6 @@ def assign_coordinates(mol_id, mol, descriptors):
         elif f != -1 and c1 != -1:
             if id != 2:
                 print(f"c2 was not found for atom {id}")
-                # ignore.append(mol_id)
 
             p_f = atom_positions.get(f)
             p_c1 = atom_positions.get(c1)
@@ -168,7 +168,6 @@ def assign_coordinates(mol_id, mol, descriptors):
                 
         elif f != -1:
             if id != 1:
-                # ignore.append(mol_id)
                 print(f"c1 was not found for atom {id}")
             p_f = atom_positions.get(f)
             if p_f is None:
@@ -179,7 +178,6 @@ def assign_coordinates(mol_id, mol, descriptors):
 
         else:
             if id != 0:
-                # ignore.append(mol_id)
                 print(f"f was not found for atom {id}")
             pos = np.array([0.0, 0.0, 0.0])
 
@@ -204,24 +202,25 @@ def reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf):
                 sys.stdout.flush()
 
             smiles, descriptors = parse_embedded_smiles(embedded_smiles)
-            # print(f"\nProcessing Molecule {idx+1}...")
+            # print(f"\nProcessing Molecule {idx}...")
             # print(f"SMILES: {smiles}")
             # print(f"Descriptors: {descriptors}")
 
-            mol = Chem.MolFromSmiles(smiles)
-            mol = Chem.RemoveHs(mol)
-            Chem.SanitizeMol(mol)
+            mol = Chem.MolFromSmiles(smiles, sanitize=False)
+            if exclude_h:
+                mol = Chem.RemoveHs(mol)
+                mol = Chem.SanitizeMol(mol)
             if mol is None:
                 print(f"Molecule {idx+1}: Invalid SMILES '{smiles}'.")
                 continue
 
-            mol_with_coords = assign_coordinates(idx, mol, descriptors)
+            mol_with_coords = assign_coordinates(mol, descriptors)
             
             # Optional: Optimize geometry (e.g., using UFF)
             # AllChem.UFFOptimizeMolecule(mol_with_coords)
             
             writer.write(mol_with_coords)
-            # print(f"Molecule {idx+1}: Successfully reconstructed and written to SDF.")
+            # print(f"Molecule {idx}: Successfully reconstructed and written to SDF.")
         
         except Exception as e:
             print(f"Molecule {idx+1}: Error - {str(e)}")
@@ -229,8 +228,15 @@ def reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf):
     writer.close()
     print(f"\nAll molecules have been written to '{output_sdf}'")
 
-sys.stdout = open("output-inv.txt", "w") 
-data_file = "/auto/home/filya/3DMolGen/train_embedded_spherical/train_data_0.jsonl"
+out_file = "output_inv_with_H.txt"
+if exclude_h:
+    out_file = "output_inv.txt"
+sys.stdout = open(out_file, "w") 
+
+data_file = "/auto/home/filya/3DMolGen/train_embedded_spherical_with_H/train_data_0.jsonl"
+if exclude_h:
+    data_file = "/auto/home/filya/3DMolGen/train_embedded_spherical/train_data_0.jsonl"
+
 embedded_smiles_list = []
 with open(data_file, 'r') as f:
     for line_number, line in enumerate(f):
@@ -249,8 +255,7 @@ with open(data_file, 'r') as f:
             print(f"Error: JSONDecodeError on line {line_number}: {e}")
             print(f"Line causing error: {line.strip()}")
 
-output_sdf = "reconstructed_mols/reconstructed_molecules_0.sdf"
+output_sdf = "reconstructed_mols/reconstructed_molecules_1_with_H.sdf"
+if exclude_h:
+    output_sdf = "reconstructed_mols/reconstructed_molecules_1.sdf"
 reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf)
-
-# ignore = np.array(ignore)
-# np.save("/auto/home/filya/3DMolGen/data_processing/ignore.npy", ignore)
