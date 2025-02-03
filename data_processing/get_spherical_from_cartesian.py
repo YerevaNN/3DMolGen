@@ -7,6 +7,8 @@ import json
 import os
 from ogb.lsc import PCQM4Mv2Dataset
 
+exclude_h = False
+
 def is_collinear(p1, p2, p3, tolerance=1e-6):
     v1 = p2 - p1
     v2 = p3 - p1
@@ -20,11 +22,12 @@ def get_new_atom(mol, atom_order):
     atom = mol.GetAtomWithIdx(original_index)
     if not atom:
         raise ValueError("Coundn't find the atom by the given index")
-    while atom.GetSymbol() == "H" and atom_order:
-        original_index = atom_order.pop(0)
-        atom = mol.GetAtomWithIdx(original_index)
-    if atom.GetSymbol() == "H":
-        return -1, "??"
+    if exclude_h:
+        while atom.GetSymbol() == "H" and atom_order:
+            original_index = atom_order.pop(0)
+            atom = mol.GetAtomWithIdx(original_index)
+        if atom.GetSymbol() == "H":
+            return -1, "??"
     return original_index, atom.GetSymbol()
 
 def get_smiles(mol):
@@ -234,12 +237,14 @@ def get_mol_descriptors(mol, mol_id):
     return get_ans(mol, all_descriptors)
 
 def process_and_find_descriptors(sdf, val_indices):
-    supplier = Chem.SDMolSupplier(sdf) #, sanitize=False, removeHs=False)
+    supplier = Chem.SDMolSupplier(sdf, sanitize=exclude_h, removeHs=exclude_h)
     dataset = PCQM4Mv2Dataset(root = '/auto/home/menuab', only_smiles = True)
 
     train_data = []
     val_data = []
     for i, mol in enumerate(supplier): #3378606
+        # if i == 30000:
+        #     break
         if i % 1000 == 0:
             print(f"Mol {i}...")
             sys.stdout.flush()
@@ -257,7 +262,11 @@ def process_and_find_descriptors(sdf, val_indices):
             else:
                 print(f"Excluding mol {i}")
 
-    os.makedirs("train_embedded_spherical", exist_ok=True)
+    train_folder = "train_embedded_spherical_with_H"
+    if exclude_h:
+        train_folder = "train_embedded_spherical"
+    os.makedirs(train_folder, exist_ok=True)
+
     file_counter = 0
     current_file = None
     new_file_freq = 1000000
@@ -266,7 +275,7 @@ def process_and_find_descriptors(sdf, val_indices):
         if i % new_file_freq == 0:
             if current_file:
                 current_file.close()
-            current_file = open(f"train_embedded_spherical/train_data_{file_counter}.jsonl", 'w')
+            current_file = open(os.path.join(train_folder, f"train_data_{file_counter}.jsonl"), 'w')
             file_counter += 1
 
         if current_file:
@@ -276,15 +285,21 @@ def process_and_find_descriptors(sdf, val_indices):
     if current_file:
         current_file.close()
 
-    os.makedirs("valid_embedded_spherical", exist_ok=True)
-    with open(f"valid_embedded_spherical/valid_data.jsonl", "w") as file:
+    valid_folder = "valid_embedded_spherical_with_H"
+    if exclude_h:
+        valid_folder = "valid_embedded_spherical"
+    os.makedirs(valid_folder, exist_ok=True)
+    with open(os.path.join(valid_folder, "valid_data.jsonl"), "w") as file:
         for d in val_data:
             json.dump(d, file)
             file.write("\n")
         file.close()
 
 if __name__ == '__main__':
-    sys.stdout = open("output-gen.txt", "w") 
+    out_file = "output_gen_with_H.txt"
+    if exclude_h:
+        out_file = "output_gen.txt"
+    sys.stdout = open(out_file, "w") 
     sdf_file = '/auto/home/menuab/pcqm4m-v2-train.sdf'
     val_indices_file = "/auto/home/menuab/code/3DMolGen/data/pcqm/pcqm4v2_valid_indice.txt"
     val_indices = []
