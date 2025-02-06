@@ -233,8 +233,7 @@ def get_mol_descriptors(mol, mol_id):
             all_descriptors.append(f"<{desc_str}>")
         else:
             return "no descriptors"
-
-    return get_ans(mol, all_descriptors)
+    return all_descriptors
 
 def process_and_find_descriptors(sdf, val_indices):
     supplier = Chem.SDMolSupplier(sdf, sanitize=exclude_h, removeHs=exclude_h)
@@ -252,7 +251,8 @@ def process_and_find_descriptors(sdf, val_indices):
             print(f"Failed to process mol {i}")
             return
         else:
-            descriptors = get_mol_descriptors(mol, i)
+            all_descriptors = get_mol_descriptors(mol, i)
+            descriptors = get_ans(mol, all_descriptors)
             if descriptors != "no descriptors":
                 json_string = get_json(mol, descriptors, dataset[i])
                 if i in val_indices:
