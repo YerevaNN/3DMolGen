@@ -78,6 +78,8 @@ def assign_coordinates(mol, descriptors):
             c1 = find_next_atom(id, f)
             if c1 != -1:
                 c2 = find_next_atom(id, c1, f)
+        
+        # print("smiles idx:", id, "f:", f, "c1:", c1, "c2:", c2)
 
         pos = []
         
@@ -103,6 +105,7 @@ def assign_coordinates(mol, descriptors):
                     e1 = v1 / np.linalg.norm(v1)
                     e3 = normal / norm_normal
                     e2 = np.cross(e3, e1)
+                    e2 /= np.linalg.norm(e2)
                     
                     # Create rotation matrix from local to global coordinates
                     rotation_matrix = np.vstack([e1, e2, e3]).T  # 3x3 matrix
@@ -152,6 +155,7 @@ def assign_coordinates(mol, descriptors):
                 e2 = e2_dir / norm_e2_dir # Normalize e2
 
                 e3 = np.cross(e1, e2)
+                e3 /= np.linalg.norm(e3)
                 
                 # Create rotation matrix
                 rotation_matrix = np.vstack([e1, e2, e3]).T  # 3x3 matrix
