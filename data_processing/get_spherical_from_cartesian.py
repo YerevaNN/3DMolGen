@@ -118,24 +118,29 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
             if c2 != -1:
                 c2_atom_coord = coords[c2]
 
-    # print("atom idx:", atom_index, "smiles idx:", smiles_index, "f:", f, "c1:", c1, "c2:", c2)
+    # print("atom idx:", atom_index, "smiles idx:", smiles_index, "f:", sdf_to_smiles.get(f, -1), "c1:", sdf_to_smiles.get(c1, -1), "c2:", sdf_to_smiles.get(c2, -1))
 
     # Calculate spherical coordinates
     if f == -1: 
         if smiles_index != 0:
             print(f"f was not found for mol {mol_id}, atom {atom_index}, {sdf_to_smiles[atom_index]}")
             return np.array([-1])
-        generation_descriptor = np.array([0, np.pi / 2, 0, np.sign(0)])
-    elif c1 == -1:
+        return np.array([0, np.pi / 2, 0, np.sign(0)])
+    if c1 == -1:
         if smiles_index != 1:
             print(f"c1 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
-        generation_descriptor = np.array([distance.euclidean(coords[atom_index], focal_atom_coord), np.pi / 2, 0, np.sign(0)])
-    elif c2 == -1:
+        return np.array([distance.euclidean(coords[atom_index], focal_atom_coord), np.pi / 2, 0, np.sign(0)])
+    if c2 == -1:
         # print("f-smiles:", sdf_to_smiles[f])
         # print("c1-smiles:", sdf_to_smiles[c1])
         if smiles_index != 2:
             print(f"c2 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
         #assume that the point is on XY plane
+        if is_collinear(focal_atom_coord, c1_atom_coord, coords[atom_index]):
+            print("f, c1, i are collinear in atom", atom_index)
+            return np.array([-1])
+            # return np.array([distance.euclidean(coords[atom_index], focal_atom_coord), np.pi / 2, 0, np.sign(0)])
+
         proj_if = coords[atom_index] - focal_atom_coord #v_if=proj_if
         v_cf = c1_atom_coord - focal_atom_coord
         norm_proj_if = np.linalg.norm(proj_if)
@@ -148,7 +153,7 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
             normal_vector = np.cross(v_cf, proj_if)
             norm_normal = np.linalg.norm(normal_vector)
             
-            if norm_normal > 1e-6:
+            if norm_normal > 1e-8:
                 normal_vector /= norm_normal  # Normalize the normal vector
             else:
                 print("Can't define a valid normal vector (vectors are collinear).")
@@ -161,56 +166,55 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
         else:
             print("can't divide by 0")
             return np.array([-1])
-        generation_descriptor = np.array([distance.euclidean(coords[atom_index], focal_atom_coord), np.pi / 2, abs(phi), np.sign(phi)])
+        return np.array([distance.euclidean(coords[atom_index], focal_atom_coord), np.pi / 2, abs(phi), np.sign(phi)])
+    
+    #here we have f,c1,c2
+    if is_collinear(focal_atom_coord, c1_atom_coord, c2_atom_coord):
+        print("collinear", atom_index)
+        return np.array([-1])
+    # Calculate spherical coordinates
+    current_atom_coord = coords[atom_index]
+
+    r = distance.euclidean(current_atom_coord, focal_atom_coord)
+
+    v_cf = c1_atom_coord - focal_atom_coord
+    v_c2f = c2_atom_coord - focal_atom_coord
+    v_if = current_atom_coord - focal_atom_coord
+
+    # Calculate normal vector to the plane defined by focal and reference atoms
+    normal_vector = np.cross(v_cf, v_c2f)
+
+    # Calculate theta (polar angle)
+    norm_v_if = np.linalg.norm(v_if)
+    norm_normal_vector = np.linalg.norm(normal_vector)
+    if norm_v_if > 1e-6 and norm_normal_vector > 1e-6:
+        cos_theta = np.dot(v_if, normal_vector) / (norm_v_if * norm_normal_vector)
+        cos_theta = np.clip(cos_theta, -1.0, 1.0)
+        theta = np.arccos(cos_theta)
     else:
-        if is_collinear(focal_atom_coord, c1_atom_coord, c2_atom_coord):
-            print("collinear", atom_index)
-            return np.array([-1])
-        # Calculate spherical coordinates
-        current_atom_coord = coords[atom_index]
+        print("can't divide by 0")
+        return np.array([-1])
 
-        r = distance.euclidean(current_atom_coord, focal_atom_coord)
+    # Calculate phi (azimuthal angle)
+    normal_vector_unit = normal_vector / norm_normal_vector
+    proj_if = v_if - np.dot(v_if, normal_vector_unit) * normal_vector_unit
 
-        v_cf = c1_atom_coord - focal_atom_coord
-        v_c2f = c2_atom_coord - focal_atom_coord
-        v_if = current_atom_coord - focal_atom_coord
-
-        # Calculate normal vector to the plane defined by focal and reference atoms
-        normal_vector = np.cross(v_cf, v_c2f)
-
-        # Calculate theta (polar angle)
-        norm_v_if = np.linalg.norm(v_if)
-        norm_normal_vector = np.linalg.norm(normal_vector)
-        if norm_v_if > 1e-6 and norm_normal_vector > 1e-6:
-            cos_theta = np.dot(v_if, normal_vector) / (norm_v_if * norm_normal_vector)
-            cos_theta = np.clip(cos_theta, -1.0, 1.0)
-            theta = np.arccos(cos_theta)
-        else:
-            print("can't divide by 0")
-            return np.array([-1])
-
-        # Calculate phi (azimuthal angle)
-        normal_vector_unit = normal_vector / norm_normal_vector
-        proj_if = v_if - np.dot(v_if, normal_vector_unit) * normal_vector_unit
-
-        norm_proj_if = np.linalg.norm(proj_if)
-        norm_v_cf = np.linalg.norm(v_cf)
-        if norm_proj_if > 1e-6 and norm_v_cf > 1e-6:
-            cos_phi = np.dot(proj_if, v_cf) / (norm_proj_if * norm_v_cf)
-            cos_phi = np.clip(cos_phi, -1.0, 1.0)
-            phi = np.arccos(cos_phi)
-            # Determine the sign of phi using the cross product
-            cross_proj_cf = np.cross(v_cf, proj_if)
-            if np.dot(normal_vector, cross_proj_cf) < 0:
-                phi = -phi
-        else:
-            print("problem with", atom_index)
-            return np.array([-1])
+    norm_proj_if = np.linalg.norm(proj_if)
+    norm_v_cf = np.linalg.norm(v_cf)
+    if norm_proj_if > 1e-6 and norm_v_cf > 1e-6:
+        cos_phi = np.dot(proj_if, v_cf) / (norm_proj_if * norm_v_cf)
+        cos_phi = np.clip(cos_phi, -1.0, 1.0)
+        phi = np.arccos(cos_phi)
+        # Determine the sign of phi using the cross product
+        cross_proj_cf = np.cross(v_cf, proj_if)
+        if np.dot(normal_vector, cross_proj_cf) < 0:
+            phi = -phi
+    else:
+        print("problem with", atom_index)
+        return np.array([-1])
+    
+    return np.array([r, theta, abs(phi), np.sign(phi)])
         
-        generation_descriptor = np.array([r, theta, abs(phi), np.sign(phi)])
-        
-    return generation_descriptor
-
 def get_json(mol, embedded, sample):
     return {"canonical_smiles": Chem.MolToSmiles(mol, canonical=True, isomericSmiles=False), 
             "pcqm4v2_smiles": sample[0], 
