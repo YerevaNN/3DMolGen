@@ -1,5 +1,7 @@
 import argparse
 import os
+import ast
+from rdkit import Chem
 import os.path as osp
 from typing import Dict
 import pickle
@@ -8,8 +10,13 @@ import datamol as dm
 import numpy as np
 from loguru import logger as log
 from tqdm import tqdm
+<<<<<<< HEAD:data_processing/preprocessing_forked_ET_Flow.py
 from get_spherical_from_cartesian import get_smiles, get_mol_descriptors
 import re
+=======
+import random
+random.seed(42)
+>>>>>>> 392db4e (restructure project (dependencies not fixed)):molgen3D/data_processing/preprocessing_forked_ET_Flow.py
 
 def load_pkl(file_path: str):
     if not os.path.exists(file_path):
@@ -18,17 +25,98 @@ def load_pkl(file_path: str):
         return pickle.load(f)
     
 def load_json(path):
+<<<<<<< HEAD:data_processing/preprocessing_forked_ET_Flow.py
     with open(path, "r") as fp:  # Unpickling
+=======
+    """Loads json file"""
+    with open(path, "r") as fp:  
+>>>>>>> 392db4e (restructure project (dependencies not fixed)):molgen3D/data_processing/preprocessing_forked_ET_Flow.py
         return json.load(fp)
     
-def get_cartesian_embedded(mol, canonical_smiles, embedded_smiles, geom_id, precision=4):
-    positions = mol.GetConformer().GetPositions()
-    for atm_ind in range(0, len(positions)):
-        x, y, z = positions[atm_ind]
-        embedded_smiles = embedded_smiles.replace(f":{atm_ind}]", f"<{x:.{precision}f},{y:.{precision}f},{z:.{precision}f}>]")
-    return {"canonical_smiles": canonical_smiles,
-            "geom_id": geom_id, 
-            "embedded_smiles": embedded_smiles}
+def embed_coordinates(mol, smiles, order):
+    # Get the conformer's positions
+    conf = mol.GetConformer()
+    
+    # Split the SMILES into tokens
+    tokens = []
+    i = 0
+    n = len(smiles)
+    while i < n:
+        if smiles[i] == '[':
+            # Parse bracketed atom
+            j = i + 1
+            while j < n and smiles[j] != ']':
+                j += 1
+            if j >= n:
+                j = n - 1
+            tokens.append(('atom', smiles[i:j+1]))
+            i = j + 1
+        elif smiles[i] in {'-', '=', '#', ':', '/', '\\'}:
+            # Bond symbols
+            tokens.append(('bond', smiles[i]))
+            i += 1
+        elif smiles[i].isdigit() or smiles[i] == '%':
+            # Handle ring numbers
+            if smiles[i] == '%':
+                if i + 2 < n and smiles[i+1].isdigit() and smiles[i+2].isdigit():
+                    tokens.append(('ring', smiles[i:i+3]))
+                    i += 3
+                else:
+                    tokens.append(('ring', smiles[i]))
+                    i += 1
+            else:
+                j = i
+                while j < n and smiles[j].isdigit():
+                    j += 1
+                tokens.append(('ring', smiles[i:j]))
+                i = j
+        elif smiles[i] in {'(', ')'}:
+            # Branch
+            tokens.append(('branch', smiles[i]))
+            i += 1
+        elif smiles[i].isupper() or smiles[i].islower():
+            # Element symbol followed by optional digits
+            start = i
+            # Parse element
+            if smiles[i].isupper() and i + 1 < n and smiles[i+1].islower():
+                i += 2
+            else:
+                i += 1
+            # Parse digits
+            while i < n and smiles[i].isdigit():
+                i += 1
+            tokens.append(('atom', smiles[start:i]))
+        else:
+            # Unknown character, skip
+            i += 1
+    
+    # Extract atom tokens and validate count
+    atom_tokens = [token[1] for token in tokens if token[0] == 'atom']
+    if len(atom_tokens) != len(order):
+        raise ValueError("Mismatch between atom tokens count and order list length.")
+    
+    # Generate coordinate strings for each atom in order
+    coord_strings = []
+    for atom_idx in order:
+        pos = conf.GetAtomPosition(atom_idx)
+        coord_str = f"<{pos.x:.4f},{pos.y:.4f},{pos.z:.4f}>"
+        coord_strings.append(coord_str)
+    
+    # Replace atom tokens with embedded coordinates
+    current_atom = 0
+    new_tokens = []
+    for token in tokens:
+        if token[0] == 'atom':
+            new_token = f"{token[1][:-1]}{coord_strings[current_atom]}]"
+            new_tokens.append(new_token)
+            current_atom += 1
+        else:
+            new_tokens.append(token[1])
+    
+    # Join tokens to form the new SMILES
+    embedded_smiles = ''.join(new_tokens)
+    return embedded_smiles
+
 
 def get_spherical_embedded(mol, canonical_smiles, embedded_smiles, geom_id, precision=4):
     descriptors_smiles_indexation = get_mol_descriptors(mol, geom_id)
@@ -47,8 +135,12 @@ def get_spherical_embedded(mol, canonical_smiles, embedded_smiles, geom_id, prec
             "embedded_smiles": embedded_smiles}
 
 embedding_func_selector = {
+<<<<<<< HEAD:data_processing/preprocessing_forked_ET_Flow.py
     "cartesian": get_cartesian_embedded,
     "spherical": get_spherical_embedded
+=======
+    "cartesian": embed_coordinates
+>>>>>>> 392db4e (restructure project (dependencies not fixed)):molgen3D/data_processing/preprocessing_forked_ET_Flow.py
 }
 
 def read_mol(
@@ -61,29 +153,22 @@ def read_mol(
     data = []
     try:
         mol_pickle = load_pkl(osp.join(base_path, mol_dict["pickle_path"]))
-        confs = mol_pickle["conformers"]
-        sample_mol = confs[0]["rd_mol"]
-        canonical_smiles = dm.to_smiles(
-                sample_mol,
+        confs = mol_pickle["conformers"]        
+        for conf in confs:
+            mol, geom_id = conf["rd_mol"], conf["geom_id"]
+            canonical_smiles = dm.to_smiles(
+                mol,
                 canonical=True,
                 explicit_hs=True,
                 with_atom_indices=False,
-                isomeric=True,
+                isomeric=False,
             )
-        smiles_with_ind = dm.to_smiles(
-                sample_mol,
-                canonical=True,
-                explicit_hs=True,
-                with_atom_indices=True,
-                isomeric=True,
-                )
-        for conf in confs:
-            mol, geom_id = conf["rd_mol"], conf["geom_id"]
-            sample = embedding_func(mol,
-                                    canonical_smiles, 
-                                    smiles_with_ind, 
-                                    geom_id, 
-                                    precision)
+            atom_order = list(map(int, ast.literal_eval(mol.GetProp('_smilesAtomOutputOrder'))))
+            embedded_smiles = embed_coordinates(mol, canonical_smiles, atom_order)
+            sample = {"canonical_smiles": canonical_smiles,
+                      "geom_id": geom_id, 
+                      "embedded_smiles": embedded_smiles}
+            # print(sample)
             json_string = json.dumps(sample)
             data.append(json_string)
 
@@ -98,6 +183,7 @@ def save_processed_data(data, dest_path):
     for partition in ["train", "valid"]:
         os.makedirs(osp.join(dest_path, partition), exist_ok=True)
         part = data[partition]
+        random.shuffle(part)
         for i in range(0, len(part), data_chunk):
             with open(osp.join(*[dest_path, partition, f"{partition}_data_{i//data_chunk}.jsonl"]), "w") as file:
                 file.writelines(part[i:i+data_chunk])
@@ -160,7 +246,7 @@ if __name__ == "__main__":
         "--geom_path",
         "-p",
         type=str,
-        required=True,
+        required=False,
         default="/mnt/sxtn2/chem/GEOM_data/rdkit_folder",
         help="Path to the geom dataset rdkit folder",
     )
@@ -191,7 +277,7 @@ if __name__ == "__main__":
     indices_path = "/mnt/sxtn2/chem/GEOM_data/et_flow_indice/"
 
     # get distanation path
-    dest = osp.join(args.dest, args.embedding_type)
+    dest = osp.join(args.dest, args.embedding_type + "_nonisomeric")
     os.makedirs(dest, exist_ok=True)
     log.info(f"Processed files will be saved at destination path: {dest}")
 
