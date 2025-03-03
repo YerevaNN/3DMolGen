@@ -1,314 +1,20 @@
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from transformers import GenerationConfig
-import rdkit
-from torch import bfloat16, float32
 import torch
-from rdkit import Chem
-from posebusters import PoseBusters
-import json
 import cloudpickle
 import random
+import yaml
 import re
 from tqdm import tqdm
 from loguru import logger
 from collections import defaultdict, Counter
 import submitit
 import os
-import ast
-import itertools
 from datetime import datetime
 
-
 # from utils import parse_molecule_with_coordinates
+from molgen3D.config.sampling_config import sampling_configs, gen_num_codes
+from molgen3D.utils.data_processing_utils import parse_molecule_with_coordinates
 torch.backends.cudnn.benchmark = True
-
-greedy_config = GenerationConfig(
-    do_sample=False,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-
-beam_search_config_b4_g1_d0 = GenerationConfig(
-    num_beams=4,  
-    num_beam_groups=1,
-    diversity_penalty=0,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-
-beam_search_config_b4_g2_d1 = GenerationConfig(
-    num_beams=4,  
-    num_beam_groups=2,
-    diversity_penalty=0.1,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-
-beam_search_config_b4_g2_d2 = GenerationConfig(
-    num_beams=4,  
-    num_beam_groups=2,
-    diversity_penalty=0.2,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-
-beam_search_config_b4_g2_d3 = GenerationConfig(
-    num_beams=4,  
-    num_beam_groups=2,
-    diversity_penalty=0.3,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-
-beam_search_config_b4_g4_d2 = GenerationConfig(
-    num_beams=4,  
-    num_beam_groups=2,
-    diversity_penalty=0.2,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-
-beam_search_config_b4_g4_d3 = GenerationConfig(
-    num_beams=4,  
-    num_beam_groups=4,
-    diversity_penalty=0.3,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-
-beam_search_config_b8_g2_d2 = GenerationConfig(
-    num_beams=8,  
-    num_beam_groups=2,
-    diversity_penalty=0.2,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-
-beam_search_config_b8_g4_d2 = GenerationConfig(
-    num_beams=8,  
-    num_beam_groups=4,
-    diversity_penalty=0.2,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-
-beam_search_config_b8_g8_d2 = GenerationConfig(
-    num_beams=8,  
-    num_beam_groups=8,
-    diversity_penalty=0.2,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-
-top_p_sampling_config = GenerationConfig (
-  do_sample=True,
-  eos_token_id=128329,
-  max_new_tokens=3000,
-  temperature=0.8,
-  top_p=0.9
-)
-top_p_sampling_config_p9_t9_k40 = GenerationConfig(
-    do_sample=True,
-    top_p=0.9,  
-    temperature=0.9,
-    top_k=40,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-
-top_p_sampling_config_p9_t8_k40 = GenerationConfig(
-    do_sample=True,
-    top_p=0.9,  
-    temperature=0.8,
-    top_k=40,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-
-top_p_sampling_config_p9_t1_k40 = GenerationConfig(
-    do_sample=True,
-    top_p=0.8,  
-    temperature=1.0,
-    top_k=40,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-
-top_p_sampling_config_p9_t11_k40 = GenerationConfig(
-    do_sample=True,
-    top_p=0.9,  
-    temperature=1.1,
-    top_k=40,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-
-min_p_sampling_config_p05= GenerationConfig(
-    do_sample=True,
-    min_p = 0.05,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-
-min_p_sampling_config_p10= GenerationConfig(
-    do_sample=True,
-    min_p = 0.1,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-min_p_sampling_config_p05_t1= GenerationConfig(
-    do_sample=True,
-    min_p = 0.05,
-    temperature=1.0,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-min_p_sampling_config_p05_t11= GenerationConfig(
-    do_sample=True,
-    min_p = 0.05,
-    temperature=1.1,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-min_p_sampling_config_p05_t12= GenerationConfig(
-    do_sample=True,
-    min_p = 0.05,
-    temperature=1.2,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-min_p_sampling_config_p05_t13= GenerationConfig(
-    do_sample=True,
-    min_p = 0.05,
-    temperature=1.3,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-
-min_p_sampling_config_p10_t1= GenerationConfig(
-    do_sample=True,
-    min_p = 0.1,
-    temperature=1.0,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-min_p_sampling_config_p10_t11= GenerationConfig(
-    do_sample=True,
-    min_p = 0.1,
-    temperature=1.1,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-min_p_sampling_config_p10_t12= GenerationConfig(
-    do_sample=True,
-    min_p = 0.1,
-    temperature=1.2,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-min_p_sampling_config_p10_t13= GenerationConfig(
-    do_sample=True,
-    min_p = 0.1,
-    temperature=1.3,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-
-min_p_sampling_config_p10_t1= GenerationConfig(
-    do_sample=True,
-    min_p = 0.1,
-    temperature=1.0,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-min_p_sampling_config_p10_t11= GenerationConfig(
-    do_sample=True,
-    min_p = 0.1,
-    temperature=1.1,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-min_p_sampling_config_p10_t12= GenerationConfig(
-    do_sample=True,
-    min_p = 0.1,
-    temperature=1.2,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-min_p_sampling_config_p10_t13= GenerationConfig(
-    do_sample=True,
-    min_p = 0.1,
-    temperature=1.3,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-
-min_p_sampling_config_p20_t1= GenerationConfig(
-    do_sample=True,
-    min_p = 0.2,
-    temperature=1.0,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-min_p_sampling_config_p20_t11= GenerationConfig(
-    do_sample=True,
-    min_p = 0.2,
-    temperature=1.1,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-min_p_sampling_config_p20_t12= GenerationConfig(
-    do_sample=True,
-    min_p = 0.2,
-    temperature=1.2,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-min_p_sampling_config_p20_t13= GenerationConfig(
-    do_sample=True,
-    min_p = 0.2,
-    temperature=1.3,
-    max_new_tokens=3000,
-    eos_token_id=128329,
-)
-
-
-def parse_molecule_with_coordinates(input_str):
-    # Extract SMILES by removing coordinate annotations
-    extracted_smiles = re.sub(r'<[^>]+>', '', input_str)
-    
-    # Parse the extracted SMILES
-    mol = Chem.AddHs(Chem.MolFromSmiles(extracted_smiles))
-
-    if mol is None:
-        raise ValueError("Failed to parse the extracted SMILES.")
-    canonical = Chem.MolToSmiles(mol, canonical=True, allHsExplicit=True)
-    
-    # Retrieve the atom output order from the molecule's properties
-    if not mol.HasProp('_smilesAtomOutputOrder'):
-        raise ValueError("SMILES atom output order not found.")
-    atom_output_order = ast.literal_eval(mol.GetProp('_smilesAtomOutputOrder'))
-    
-    # Parse coordinates from the input string
-    coords = []
-    atom_pattern = re.compile(r'\[([^<]+)<([^>]+)>\]')
-    for match in atom_pattern.finditer(input_str):
-        coord_str = match.group(2)
-        coord = list(map(float, coord_str.split(',')))
-        coords.append(coord)
-    
-    # Verify coordinate count matches atom count
-    if len(coords) != mol.GetNumAtoms():
-        raise ValueError("Mismatch between number of coordinates and atoms.")
-    
-    # Create conformer and assign coordinates
-    conf = Chem.Conformer(mol.GetNumAtoms())
-    for input_idx, atom_idx in enumerate(atom_output_order):
-        x, y, z = coords[input_idx]
-        conf.SetAtomPosition(atom_idx, Chem.rdGeometry.Point3D(x, y, z))
-    mol.AddConformer(conf)
-    
-    return mol
 
 def set_seed(seed=42):
     random.seed(seed)  # Python random module
@@ -439,56 +145,11 @@ def run_inference(inference_config: dict):
         
 
 if __name__ == "__main__":
+    set_seed(42)    
 
-    gen_num_codes = {
-        # "1x_per_mol": 1,
-        # "2x_per_mol": 2,
-        # "1k_per_conf": "1k",
-        "2k_per_conf": "2k"
-    }
-    GENERATION_CONFIGS = {
-        # "greedy": greedy_config,
-        "top_p": top_p_sampling_config,
-        # "top_p_p9_t9_k40": top_p_sampling_config_p9_t9_k40,
-        # "top_p_p9_t8_k40": top_p_sampling_config_p9_t8_k40,
-        # "top_p_p9_t1_k40": top_p_sampling_config_p9_t1_k40,
-        "top_p_p9_t11_k40": top_p_sampling_config_p9_t11_k40,
-        # "beam_search_b4_g1_d0": beam_search_config_b4_g1_d0,
-        # "beam_search_config_b4_g2_d1": beam_search_config_b4_g2_d1,
-        # "beam_search_config_b4_g2_d2": beam_search_config_b4_g2_d2,
-        # "beam_search_config_b4_g2_d3": beam_search_config_b4_g2_d3,
-        # "beam_search_config_b4_g4_d2": beam_search_config_b4_g4_d2,
-        # "beam_search_config_b4_g4_d3": beam_search_config_b4_g4_d3,
-        # "beam_search_config_b8_g2_d2": beam_search_config_b8_g2_d2,
-        # "beam_search_config_b8_g4_d2": beam_search_config_b8_g4_d2,
-        # "beam_search_config_b8_g8_d2": beam_search_config_b8_g8_d2,
-        "min_p_sampling_config_p05": min_p_sampling_config_p05,
-        "min_p_sampling_config_p10": min_p_sampling_config_p10,
-        "min_p_sampling_config_p05_t1": min_p_sampling_config_p05_t1,
-        "min_p_sampling_config_p05_t11": min_p_sampling_config_p05_t11,
-        "min_p_sampling_config_p05_t12": min_p_sampling_config_p05_t12,
-        "min_p_sampling_config_p05_t13": min_p_sampling_config_p05_t13,
-        "min_p_sampling_config_p10_t1": min_p_sampling_config_p10_t1,
-        "min_p_sampling_config_p10_t11": min_p_sampling_config_p10_t11,
-        "min_p_sampling_config_p10_t12": min_p_sampling_config_p10_t12,
-        "min_p_sampling_config_p10_t13": min_p_sampling_config_p10_t13,
-        "min_p_sampling_config_p20_t1": min_p_sampling_config_p20_t1,
-        "min_p_sampling_config_p20_t11": min_p_sampling_config_p20_t11,
-        "min_p_sampling_config_p20_t12": min_p_sampling_config_p20_t12,
-        "min_p_sampling_config_p20_t13": min_p_sampling_config_p20_t13,
-    }
-    model_paths = {
-        # "cart_1e_path": "/nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-1B_conformers/c037e75255bc41c19c716939/step-4500",
-        # "cart_2e_path": "/nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-1B_conformers/d267db61f57d4b428baa604a/step-9000",
-        # "cart_4e_path": "/nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-1B_conformers/3408e9758572478c80393771/step-18000",
-        # "cart_6e_path": "/nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-1B_conformers/301b8328481243c6aa8d8003/step-27000",
-        "cart_8e_path": "/nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-1B_conformers/c13311b27056459eaccf5877/step-36000"
-
-    }
-    tokenizer_path = "/auto/home/menuab/code/YNNtitan/torchtitan/tokenizers/Llama-3.2-chem-1B-v1"
-    test_data_path = "/auto/home/menuab/code/3DMolGen/drugs_test_inference.pickle"
-    results_path = "/auto/home/menuab/code/3DMolGen/gen_results"
-    results_path = os.path.join(results_path, f"{datetime.now().strftime('%Y-%m-%d-%H:%M')}")
+    with open("molgen3D/config/paths.yaml", "r") as f:
+        paths = yaml.safe_load(f)
+    results_path = os.path.join(paths["results_path"], f"{datetime.now().strftime('%Y-%m-%d-%H:%M')}")
     
     executor = submitit.AutoExecutor(folder="~/slurm_jobs/conf_gen/job_%j")
     node = "h100"
@@ -506,49 +167,50 @@ if __name__ == "__main__":
         slurm_additional_parameters={"partition": node},
     )
 
-    set_seed(42)    
-    # inference_config = {
-    #     "model_path": model_paths["cart_4e_path"],
-    #     "tokenizer_path": tokenizer_path,
-    #     "test_data_path": test_data_path,
-    #     "batch_size": 100,
-    #     "num_gens": gen_num_codes["1k_per_conf"],
-    #     "gen_config": GENERATION_CONFIGS["beam_search_config_b4_g2_d1"], 
-    #     "device": "cuda:0",
-    #     "results_path": results_path,
-    #     "run_name": "16e_1k_beam",
-    # }
+    inference_config = {
+        "model_path": paths["model_paths"]["cart_4e_path"],
+        "tokenizer_path": paths["tokenizer_path"],
+        "test_data_path": paths["test_data_path"],
+        "batch_size": 100,
+        "num_gens": gen_num_codes["1k_per_conf"],
+        "gen_config": sampling_configs["min_p_sampling"], 
+        "device": "cuda:0",
+        "results_path": results_path,
+        "run_name": "16e_1k_beam",
+    }
 
-    # generations, stats = run_inference(inference_config=inference_config)
+    # run locally
+    generations, stats = run_inference(inference_config=inference_config)
+    
+    ## run on slurm
     # job = executor.submit(run_inference, 
     #                       inference_config=inference_config)
 
-    
+    ## run grid search
+    # param_grid = {
+    #     "model_path": list(paths["model_paths"].keys()),
+    #     "num_gens": list(gen_num_codes.keys()),
+    #     "gen_config": list(sampling_configs.keys()),
+    # }
 
-    param_grid = {
-        "model_path": list(model_paths.keys()),
-        "num_gens": list(gen_num_codes.keys()),
-        "gen_config": list(GENERATION_CONFIGS.keys()),
-    }
+    # jobs = []
+    # with executor.batch():
+    #     for model_key, num_gens_key, gen_config_key in itertools.product(*param_grid.values()):
+    #         # Update inference config dynamically
+    #         inference_config = {
+    #             "model_path": paths["model_paths"][model_key],
+    #             "tokenizer_path": paths["tokenizer_path"],
+    #             "test_data_path": paths["test_data_path"],
+    #             "batch_size": 200,
+    #             "num_gens": gen_num_codes[num_gens_key],
+    #             "gen_config": sampling_configs[gen_config_key], 
+    #             "device": "auto",
+    #             "results_path": results_path,
+    #             "run_name": f"{model_key}_{num_gens_key}_{gen_config_key}",  # Track run details
+    #         }
 
-    jobs = []
-    with executor.batch():
-        for model_key, num_gens_key, gen_config_key in itertools.product(*param_grid.values()):
-            # Update inference config dynamically
-            inference_config = {
-                "model_path": model_paths[model_key],
-                "tokenizer_path": tokenizer_path,
-                "test_data_path": test_data_path,
-                "batch_size": 200,
-                "num_gens": gen_num_codes[num_gens_key],
-                "gen_config": GENERATION_CONFIGS[gen_config_key], 
-                "device": "auto",
-                "results_path": results_path,
-                "run_name": f"{model_key}_{num_gens_key}_{gen_config_key}",  # Track run details
-            }
-
-            # Submit job
-            job = executor.submit(run_inference, inference_config)
-            jobs.append(job)
+    #         # Submit job
+    #         job = executor.submit(run_inference, inference_config)
+    #         jobs.append(job)
 
     
