@@ -550,5 +550,3 @@ if __name__ == "__main__":
             # Submit job
             job = executor.submit(run_inference, inference_config)
             jobs.append(job)
-
-    

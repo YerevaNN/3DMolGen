@@ -10,14 +10,8 @@ import datamol as dm
 import numpy as np
 from loguru import logger as log
 from tqdm import tqdm
-<<<<<<< HEAD:data_processing/preprocessing_forked_ET_Flow.py
-from get_spherical_from_cartesian import get_smiles, get_mol_descriptors
-import re
-=======
 import random
 random.seed(42)
->>>>>>> 392db4e (restructure project (dependencies not fixed)):molgen3D/data_processing/preprocessing_forked_ET_Flow.py
-
 def load_pkl(file_path: str):
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File {file_path} does not exist.")
@@ -25,15 +19,11 @@ def load_pkl(file_path: str):
         return pickle.load(f)
     
 def load_json(path):
-<<<<<<< HEAD:data_processing/preprocessing_forked_ET_Flow.py
-    with open(path, "r") as fp:  # Unpickling
-=======
     """Loads json file"""
     with open(path, "r") as fp:  
->>>>>>> 392db4e (restructure project (dependencies not fixed)):molgen3D/data_processing/preprocessing_forked_ET_Flow.py
         return json.load(fp)
     
-def embed_coordinates(mol, smiles, order):
+def embed_coordinates(mol, smiles, order, precision=4):
     # Get the conformer's positions
     conf = mol.GetConformer()
     
@@ -99,7 +89,7 @@ def embed_coordinates(mol, smiles, order):
     coord_strings = []
     for atom_idx in order:
         pos = conf.GetAtomPosition(atom_idx)
-        coord_str = f"<{pos.x:.4f},{pos.y:.4f},{pos.z:.4f}>"
+        coord_str = f"<{pos.x:.{precision}f},{pos.y:.{precision}f},{pos.z:.{precision}f}>"
         coord_strings.append(coord_str)
     
     # Replace atom tokens with embedded coordinates
@@ -117,30 +107,8 @@ def embed_coordinates(mol, smiles, order):
     embedded_smiles = ''.join(new_tokens)
     return embedded_smiles
 
-
-def get_spherical_embedded(mol, canonical_smiles, embedded_smiles, geom_id, precision=4):
-    descriptors_smiles_indexation = get_mol_descriptors(mol, geom_id)
-    smiles_list, smiles_to_sdf, sdf_to_smiles = get_smiles(mol)
-    descriptors = []
-    for i in range(len(descriptors_smiles_indexation)):
-        descriptors.append(descriptors_smiles_indexation[sdf_to_smiles[i]]) #descriptors[i] -> of the i-th atom in sdf indexation, sdf_to_smiles[i]-th atom in smiles indexation
-    for atm_ind in range(len(descriptors)):
-        desc_string = descriptors[atm_ind]
-        number_strings = re.findall(r"[-+]?\d*\.\d+|\d+", desc_string)
-        descriptor = [float(num) for num in number_strings]
-        r, theta, abs_phi, sign_phi = descriptor
-        embedded_smiles = embedded_smiles.replace(f":{atm_ind}]", f"<{r:.{precision}f},{theta:.{precision}f},{abs_phi:.{precision}f},{int(sign_phi)}>]")
-    return {"canonical_smiles": canonical_smiles,
-            "geom_id": geom_id, 
-            "embedded_smiles": embedded_smiles}
-
 embedding_func_selector = {
-<<<<<<< HEAD:data_processing/preprocessing_forked_ET_Flow.py
-    "cartesian": get_cartesian_embedded,
-    "spherical": get_spherical_embedded
-=======
     "cartesian": embed_coordinates
->>>>>>> 392db4e (restructure project (dependencies not fixed)):molgen3D/data_processing/preprocessing_forked_ET_Flow.py
 }
 
 def read_mol(
