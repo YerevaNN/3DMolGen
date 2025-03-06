@@ -95,8 +95,8 @@ def calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_
     # Calculate theta (polar angle)
     cos_theta = np.dot(v_if, normal_vector_unit) / r # r is norm_v_if
     if(cos_theta > 1.0 or cos_theta < -1.0):
-        log.error("cos_theta is not correct: ", cos_theta)
-        cos_theta = np.clip(cos_theta, -1.0, 1.0)
+        raise ValueError("cos_theta is not correct: ", cos_theta)
+        # cos_theta = np.clip(cos_theta, -1.0, 1.0)
     theta = np.arccos(cos_theta)
 
     # Calculate phi (azimuthal angle)
@@ -110,8 +110,8 @@ def calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_
         
         cos_phi = np.dot(proj_if, v_cf) 
         if(cos_phi > 1.0 or cos_phi < -1.0):
-            log.error("cos_phi is not correct: ", cos_phi)
-            cos_phi = np.clip(cos_phi, -1.0, 1.0)
+            raise ValueError("cos_phi is not correct: ", cos_phi)
+            # cos_phi = np.clip(cos_phi, -1.0, 1.0)
         phi = np.arccos(cos_phi)
 
         cross_proj_cf = np.cross(v_cf, proj_if)
@@ -122,7 +122,7 @@ def calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_
 
 def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sdf, coords):
     """Calculates generation descriptors for a specific atom in a molecule."""
-    def find_next_atom(begin_sdf_id, sdf_id1, sdf_id2 = None):
+    def find_next_atom(begin_sdf_id, sdf_id1, atom_positions, sdf_id2 = None):
         begin_smiles_id = sdf_to_smiles[begin_sdf_id]
         smiles_id1 = sdf_to_smiles[sdf_id1]
         this_atom1 = mol.GetAtomWithIdx(sdf_id1)
@@ -137,6 +137,8 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
             if i == smiles_id1 or i == smiles_id2:
                 continue
             if smiles_to_sdf[i] in neighbors1 or smiles_to_sdf[i] in neighbors2:
+                if smiles_id2 != -1 and is_collinear(atom_positions[sdf_id1], atom_positions[sdf_id2], atom_positions[smiles_to_sdf[i]]):
+                    continue
                 return smiles_to_sdf[i]
         return -1
     
@@ -148,13 +150,13 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
         c1_atom_coord = -1
         c2_atom_coord = -1
 
-        f = find_next_atom(atom_index, atom_index)
+        f = find_next_atom(atom_index, atom_index, coords)
         if f != -1:
             focal_atom_coord = coords[f]
-            c1 = find_next_atom(atom_index, f)
+            c1 = find_next_atom(atom_index, f, coords)
             if c1 != -1:
                 c1_atom_coord = coords[c1]
-                c2 = find_next_atom(atom_index, c1, f)
+                c2 = find_next_atom(atom_index, c1, coords, f)
                 if c2 != -1:
                     c2_atom_coord = coords[c2]
         return f, c1, c2, focal_atom_coord, c1_atom_coord, c2_atom_coord
@@ -168,22 +170,21 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
     # Calculate spherical coordinates
     if f == -1: 
         if smiles_index != 0:
-            log.error(f"f was not found for mol {mol_id}, atom {atom_index}, {sdf_to_smiles[atom_index]}")
-            return np.array([-1])
+            raise ValueError(f"f was not found for mol {mol_id}, atom {atom_index}, {sdf_to_smiles[atom_index]}")
         return np.array([0, np.pi / 2, 0, np.sign(0)])
     if c1 == -1:
         if smiles_index != 1:
-            log.error(f"c1 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
+            raise ValueError(f"c1 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
         return np.array([distance.euclidean(coords[atom_index], focal_atom_coord), np.pi / 2, 0, np.sign(0)])
     if c2 == -1:
         # print("f-smiles:", sdf_to_smiles[f])
         # print("c1-smiles:", sdf_to_smiles[c1])
         if smiles_index != 2:
-            log.error(f"c2 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
+            raise ValueError(f"c2 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
         #assume that the point is on XY plane
         if is_collinear(focal_atom_coord, c1_atom_coord, coords[atom_index]):
-            log.error("f,c1,i are collinear in atom", atom_index)
-            return np.array([-1])
+            raise ValueError("f,c1,i are collinear in atom", atom_index)
+            # return np.array([-1])
             # return np.array([distance.euclidean(coords[atom_index], focal_atom_coord), np.pi / 2, 0, np.sign(0)])
 
         proj_if = coords[atom_index] - focal_atom_coord #v_if=proj_if
@@ -193,8 +194,8 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
         if norm_proj_if > 1e-6 and norm_v_cf > 1e-6:
             cos_phi = np.dot(proj_if, v_cf) / (norm_proj_if * norm_v_cf)
             if(cos_phi > 1.0 or cos_phi < -1.0):
-                log.error("cos_phi is not correct: ", cos_phi)
-                cos_phi = np.clip(cos_phi, -1.0, 1.0)
+                raise ValueError("cos_phi is not correct: ", cos_phi)
+                # cos_phi = np.clip(cos_phi, -1.0, 1.0)
             phi = np.arccos(cos_phi)
 
             normal_vector = np.cross(v_cf, proj_if)
@@ -203,22 +204,20 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
             if norm_normal > 1e-8:
                 normal_vector /= norm_normal  # Normalize the normal vector
             else:
-                log.error("Can't define a valid normal vector (vectors are collinear).")
-                return np.array([-1])
+                raise ValueError("Can't define a valid normal vector (vectors are collinear).")
             
             # Determine the sign of phi based on the direction of the normal vector
             cross_proj_cf = np.cross(v_cf, proj_if)
             if np.dot(normal_vector, cross_proj_cf) < 0:
                 phi = -phi
         else:
-            log.error("can't divide by 0")
-            return np.array([-1])
+            raise ValueError(f"proj_if or v_cf is 0 for atom {atom_index}")
         return np.array([distance.euclidean(coords[atom_index], focal_atom_coord), np.pi / 2, abs(phi), np.sign(phi)])
     
     # Here we have f,c1,c2
     if is_collinear(focal_atom_coord, c1_atom_coord, c2_atom_coord):
-        log.error("f,c1,c2 are colinear", atom_index)
-        return np.array([-1])
+        raise ValueError("f,c1,c2 are colinear", atom_index)
+        # return np.array([-1])
     
     # Calculate spherical coordinates
     current_atom_coord = coords[atom_index]
@@ -296,8 +295,8 @@ def process_and_find_descriptors(sdf, val_indices):
             print(f"Mol {i}...")
             sys.stdout.flush()
         if not mol:
-            log.error(f"Failed to process mol {i}")
-            return
+            raise ValueError(f"Failed to process mol {i}")
+            # return
         else:
             all_descriptors = get_mol_descriptors(mol, i)
             descriptors = get_ans(mol, all_descriptors)
@@ -309,7 +308,7 @@ def process_and_find_descriptors(sdf, val_indices):
                 else:
                     train_data.append(json_string)
             else:
-                log.error(f"Excluding mol {i}")
+                raise ValueError(f"Excluding mol {i}")
 
     current_file = None
     data_item = train_data[0]
@@ -366,8 +365,8 @@ if __name__ == '__main__':
                 index = int(line.strip())
                 val_indices.append(index)
             except ValueError:
-                log.error(f"Skipping invalid line: {line.strip()}")
+                raise ValueError(f"Skipping invalid line: {line.strip()}")
     try:
         process_and_find_descriptors(sdf_file, val_indices)
     except ValueError as e:
-        log.error(f"Error: {e}")
+        raise ValueError(f"Error: {e}")

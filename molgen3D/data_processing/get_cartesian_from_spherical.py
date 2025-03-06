@@ -69,7 +69,7 @@ def calc_spherical_to_cartesian(r, theta, phi, sign_phi, p_f, p_c1, p_c2):
 
 def assign_cartesian_coordinates(mol, descriptors):
     """Returns the molecule with assigned 3D coordinates."""  
-    def find_next_atom(begin_smiles_id, smiles_id1, smiles_id2 = -1): #smiles ids same as sdf ids
+    def find_next_atom(begin_smiles_id, smiles_id1, atom_positions, smiles_id2 = -1): #smiles ids same as sdf ids
         this_atom1 = mol.GetAtomWithIdx(smiles_id1)
         neighbors1 = [neighbor.GetIdx() for neighbor in this_atom1.GetNeighbors()]
         neighbors2 = []
@@ -80,6 +80,8 @@ def assign_cartesian_coordinates(mol, descriptors):
             if i == smiles_id1 or i == smiles_id2:
                 continue
             if i in neighbors1 or i in neighbors2:
+                if smiles_id2 != -1 and is_collinear(atom_positions[smiles_id1], atom_positions[smiles_id2], atom_positions[i]):
+                    continue
                 return i
         return -1
     
@@ -97,11 +99,11 @@ def assign_cartesian_coordinates(mol, descriptors):
         c1 = -1
         c2 = -1
         
-        f = find_next_atom(id, id)
+        f = find_next_atom(id, id, atom_positions)
         if f != -1:
-            c1 = find_next_atom(id, f)
+            c1 = find_next_atom(id, f, atom_positions)
             if c1 != -1:
-                c2 = find_next_atom(id, c1, f)
+                c2 = find_next_atom(id, c1, atom_positions, f)
         
         # print("smiles idx:", id, "f:", f, "c1:", c1, "c2:", c2)
 
