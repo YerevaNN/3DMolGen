@@ -11,6 +11,7 @@ import numpy as np
 from loguru import logger as log
 from tqdm import tqdm
 import random
+from get_spherical_from_cartesian import embed_coordinates_spherical
 random.seed(42)
 def load_pkl(file_path: str):
     if not os.path.exists(file_path):
@@ -108,7 +109,8 @@ def embed_coordinates(mol, smiles, order, precision=4):
     return embedded_smiles
 
 embedding_func_selector = {
-    "cartesian": embed_coordinates
+    "cartesian": embed_coordinates,
+    "spherical": embed_coordinates_spherical
 }
 
 def read_mol(
