@@ -4,6 +4,7 @@ import re
 import sys
 import json
 import numpy as np
+from loguru import logger as log 
 
 exclude_h = False
 
@@ -36,7 +37,7 @@ def relative(r, theta, phi):
     z = r * np.cos(theta)
     return np.array([x, y, z])
 
-def is_collinear(p1, p2, p3, tolerance=1e-6):
+def is_collinear(p1, p2, p3, tolerance=1e-4):
     v1 = p2 - p1
     v2 = p3 - p1
     cross_product = np.cross(v1, v2)
@@ -115,20 +116,6 @@ def assign_cartesian_coordinates(mol, descriptors):
             p_c2 = atom_positions.get(c2)
             
             pos = calc_spherical_to_cartesian(r, theta, phi, sign, p_f, p_c1, p_c2)
-            
-
-            # if id == 4:
-            #     print(p_f)
-            #     print(p_c1)
-            #     print(p_c2)
-            #     print(pos)
-                # print(e1)
-                # print(e2)
-                # print(e3)
-                # print(actual_phi)
-                # print(local_relative_pos)
-                # print(np.linalg.norm(pos - p_f))
-            
 
         elif f != -1 and c1 != -1:
             if id != 2:
@@ -154,7 +141,7 @@ def assign_cartesian_coordinates(mol, descriptors):
                 e2_dir = np.cross(e1, arbitrary_vector)
                 norm_e2_dir = np.linalg.norm(e2_dir)
                 if norm_e2_dir < 1e-6: # Vectors are collinear
-                    print("collinear")
+                    log.error("collinear during decoding")
                     if np.allclose(arbitrary_vector, [1, 0, 0]):
                         e2_dir = np.cross(e1, np.array([0, 1, 0]))
                     elif np.allclose(arbitrary_vector, [0, 1, 0]):

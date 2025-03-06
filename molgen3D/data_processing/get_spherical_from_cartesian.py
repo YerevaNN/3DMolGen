@@ -10,7 +10,7 @@ from loguru import logger as log
 
 exclude_h = False
 
-def is_collinear(p1, p2, p3, tolerance=1e-6):
+def is_collinear(p1, p2, p3, tolerance=1e-4):
     v1 = p2 - p1
     v2 = p3 - p1
     cross_product = np.cross(v1, v2)
@@ -95,8 +95,8 @@ def calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_
     # Calculate theta (polar angle)
     cos_theta = np.dot(v_if, normal_vector_unit) / r # r is norm_v_if
     if(cos_theta > 1.0 or cos_theta < -1.0):
-        raise ValueError("cos_theta is not correct: ", cos_theta)
-        # cos_theta = np.clip(cos_theta, -1.0, 1.0)
+        log.error(f"cos_theta is not correct: {cos_theta}")
+        cos_theta = np.clip(cos_theta, -1.0, 1.0)
     theta = np.arccos(cos_theta)
 
     # Calculate phi (azimuthal angle)
@@ -110,9 +110,9 @@ def calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_
         
         cos_phi = np.dot(proj_if, v_cf) 
         if(cos_phi > 1.0 or cos_phi < -1.0):
-            raise ValueError("cos_phi is not correct: ", cos_phi)
-            # cos_phi = np.clip(cos_phi, -1.0, 1.0)
-        phi = np.arccos(cos_phi)
+            log.error(f"cos_theta is not correct: {cos_theta}")
+            cos_phi = np.clip(cos_phi, -1.0, 1.0)
+            phi = np.arccos(cos_phi)
 
         cross_proj_cf = np.cross(v_cf, proj_if)
         if np.dot(normal_vector, cross_proj_cf) < 0: # cospi = -1, cos0 = 1
@@ -122,14 +122,14 @@ def calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_
 
 def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sdf, coords):
     """Calculates generation descriptors for a specific atom in a molecule."""
-    def find_next_atom(begin_sdf_id, sdf_id1, atom_positions, sdf_id2 = None):
+    def find_next_atom(begin_sdf_id, sdf_id1, atom_positions, sdf_id2 = -1):
         begin_smiles_id = sdf_to_smiles[begin_sdf_id]
         smiles_id1 = sdf_to_smiles[sdf_id1]
         this_atom1 = mol.GetAtomWithIdx(sdf_id1)
         neighbors1 = [neighbor.GetIdx() for neighbor in this_atom1.GetNeighbors()]
         neighbors2 = []
         smiles_id2 = -1
-        if sdf_id2 is not None:
+        if sdf_id2 != -1:
             smiles_id2 = sdf_to_smiles[sdf_id2]
             this_atom2 = mol.GetAtomWithIdx(sdf_id2)
             neighbors2 = [neighbor.GetIdx() for neighbor in this_atom2.GetNeighbors()]
@@ -163,11 +163,15 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
 
 
     atom_index = smiles_to_sdf[smiles_index]
+    current_atom_coord = coords[atom_index]
+
     f, c1, c2, focal_atom_coord, c1_atom_coord, c2_atom_coord = find_ref_points(atom_index)
 
-    # print("atom idx:", atom_index, "smiles idx:", smiles_index, "f:", sdf_to_smiles.get(f, -1), "c1:", sdf_to_smiles.get(c1, -1), "c2:", sdf_to_smiles.get(c2, -1))
+    # log.info(f"atom idx: {atom_index}, smiles idx: {smiles_index}, f: {sdf_to_smiles.get(f, -1)}, c1: {sdf_to_smiles.get(c1, -1)}, c2: {sdf_to_smiles.get(c2, -1)}")
+    # log.info(f"focal_atom_coord: {focal_atom_coord}")
+    # log.info(f"c1_atom_coord: {c1_atom_coord}")
+    # log.info(f"c2_atom_coord: {c2_atom_coord}")
 
-    # Calculate spherical coordinates
     if f == -1: 
         if smiles_index != 0:
             raise ValueError(f"f was not found for mol {mol_id}, atom {atom_index}, {sdf_to_smiles[atom_index]}")
@@ -175,69 +179,27 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
     if c1 == -1:
         if smiles_index != 1:
             raise ValueError(f"c1 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
-        return np.array([distance.euclidean(coords[atom_index], focal_atom_coord), np.pi / 2, 0, np.sign(0)])
+        return np.array([distance.euclidean(current_atom_coord, focal_atom_coord), np.pi / 2, 0, np.sign(0)])
     if c2 == -1:
-        # print("f-smiles:", sdf_to_smiles[f])
-        # print("c1-smiles:", sdf_to_smiles[c1])
         if smiles_index != 2:
-            raise ValueError(f"c2 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
+            log.error(f"c2 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
         #assume that the point is on XY plane
-        if is_collinear(focal_atom_coord, c1_atom_coord, coords[atom_index]):
-            raise ValueError("f,c1,i are collinear in atom", atom_index)
-            # return np.array([-1])
-            # return np.array([distance.euclidean(coords[atom_index], focal_atom_coord), np.pi / 2, 0, np.sign(0)])
-
-        proj_if = coords[atom_index] - focal_atom_coord #v_if=proj_if
-        v_cf = c1_atom_coord - focal_atom_coord
-        norm_proj_if = np.linalg.norm(proj_if)
-        norm_v_cf = np.linalg.norm(v_cf)
-        if norm_proj_if > 1e-6 and norm_v_cf > 1e-6:
-            cos_phi = np.dot(proj_if, v_cf) / (norm_proj_if * norm_v_cf)
-            if(cos_phi > 1.0 or cos_phi < -1.0):
-                raise ValueError("cos_phi is not correct: ", cos_phi)
-                # cos_phi = np.clip(cos_phi, -1.0, 1.0)
-            phi = np.arccos(cos_phi)
-
-            normal_vector = np.cross(v_cf, proj_if)
-            norm_normal = np.linalg.norm(normal_vector)
-            
-            if norm_normal > 1e-8:
-                normal_vector /= norm_normal  # Normalize the normal vector
-            else:
-                raise ValueError("Can't define a valid normal vector (vectors are collinear).")
-            
-            # Determine the sign of phi based on the direction of the normal vector
-            cross_proj_cf = np.cross(v_cf, proj_if)
-            if np.dot(normal_vector, cross_proj_cf) < 0:
-                phi = -phi
-        else:
-            raise ValueError(f"proj_if or v_cf is 0 for atom {atom_index}")
-        return np.array([distance.euclidean(coords[atom_index], focal_atom_coord), np.pi / 2, abs(phi), np.sign(phi)])
-    
+        if is_collinear(focal_atom_coord, c1_atom_coord, current_atom_coord):
+            log.error("f,c1,i are collinear in atom", atom_index)
+            #? sign
+            return np.array([distance.euclidean(current_atom_coord, focal_atom_coord), np.pi / 2, 0, np.sign(0)])
+        
+        r, theta, phi, sign_phi = calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_atom_coord, current_atom_coord)
+        return np.array([r, theta, phi, sign_phi])
+        
     # Here we have f,c1,c2
     if is_collinear(focal_atom_coord, c1_atom_coord, c2_atom_coord):
         raise ValueError("f,c1,c2 are colinear", atom_index)
-        # return np.array([-1])
     
     # Calculate spherical coordinates
-    current_atom_coord = coords[atom_index]
 
     r, theta, phi, sign_phi = calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_atom_coord, c2_atom_coord)
 
-
-    # if atom_index == 6:
-    #     print("current_atom_coord: ", current_atom_coord, " focal_atom_coord: ", focal_atom_coord, "c1_atom_coord: ", c1_atom_coord, "c2_atom_coord: ", c2_atom_coord)
-        # print("v_cf: ", np.linalg.norm(v_cf))
-        # print("v_c2f: ", np.linalg.norm(v_c2f))
-        # print("v_if:", v_if)
-        # print("r: ", r)
-        # print("cos_theta", cos_theta)
-        # print("theta", theta)
-        # print("proj_if", proj_if)
-        # print("norm_proj_if", norm_proj_if)
-        # print("norm_v_cf", norm_v_cf)
-        # print(phi)
-    
     # e1 = v_cf / np.linalg.norm(v_cf)
     # e2 = np.cross(normal_vector_unit, e1)
     # proj_if = v_if - (np.dot(v_if, normal_vector_unit)) * normal_vector_unit
