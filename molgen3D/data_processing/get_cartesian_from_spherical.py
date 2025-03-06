@@ -43,9 +43,9 @@ def is_collinear(p1, p2, p3, tolerance=1e-4):
     cross_product = np.cross(v1, v2)
     return np.allclose(cross_product, [0, 0, 0], atol=tolerance)
 
-def calc_spherical_to_cartesian(r, theta, phi, sign_phi, p_f, p_c1, p_c2):
-    v1 = p_c1 - p_f
-    v2 = p_c2 - p_f
+def calc_spherical_to_cartesian(r, theta, phi, sign_phi, focal_atom_coord, c1_atom_coord, c2_atom_coord):
+    v1 = c1_atom_coord - focal_atom_coord
+    v2 = c2_atom_coord - focal_atom_coord
     
     # Orthonormal basis
     e1 = v1 / np.linalg.norm(v1)
@@ -65,7 +65,7 @@ def calc_spherical_to_cartesian(r, theta, phi, sign_phi, p_f, p_c1, p_c2):
     global_relative_pos = rotation_matrix @ local_relative_pos
     
     # Assign global position
-    pos = p_f + global_relative_pos
+    pos = focal_atom_coord + global_relative_pos
     return pos
 
 def assign_cartesian_coordinates(mol, descriptors):
@@ -111,72 +111,78 @@ def assign_cartesian_coordinates(mol, descriptors):
         pos = []
         
         if f != -1 and c1 != -1 and c2 != -1:
-            p_f = atom_positions.get(f)
-            p_c1 = atom_positions.get(c1)
-            p_c2 = atom_positions.get(c2)
+            focal_atom_coord = atom_positions.get(f)
+            c1_atom_coord = atom_positions.get(c1)
+            c2_atom_coord = atom_positions.get(c2)
             
-            pos = calc_spherical_to_cartesian(r, theta, phi, sign, p_f, p_c1, p_c2)
+            pos = calc_spherical_to_cartesian(r, theta, phi, sign, focal_atom_coord, c1_atom_coord, c2_atom_coord)
 
         elif f != -1 and c1 != -1:
             if id != 2:
                 print(f"c2 was not found for atom {id}")
 
-            p_f = atom_positions.get(f)
-            p_c1 = atom_positions.get(c1)
-            if p_f is None or p_c1 is None:
-                print(f"Atom {id}: Reference atoms positions not fully defined. Assigning default position at origin.")
-                pos = np.array([0.0, 0.0, 0.0])
-            else:
-                v1 = p_c1 - p_f
-                e1 = v1 / np.linalg.norm(v1)
-                
-                # rng = [0.5,0.5,1]
-                rng = np.random.RandomState(42)
-                while True:
-                    arbitrary_vector = rng.rand(3) - 0.5  # Generate a vector with components between -0.5 and 0.5
-                    if np.linalg.norm(np.cross(e1, arbitrary_vector)) > 1e-6: # Ensure not collinear
-                        break # Exit loop if we found a non-collinear vector
-               
-                # Calculate e2 using cross product with the arbitrary vector, this will really be 
-                e2_dir = np.cross(e1, arbitrary_vector)
+            focal_atom_coord = atom_positions.get(f)
+            c1_atom_coord = atom_positions.get(c1)
+        
+            v1 = c1_atom_coord - focal_atom_coord
+            e1 = v1 / np.linalg.norm(v1)
+            # if is_collinear(focal_atom_coord, c1_atom_coord, current_atom_coord):
+            #     log.error("f,c1,i are collinear in atom", atom_index)
+            #     # check if i is on the ray from f to c1
+            #     f_c1 = c1_atom_coord - focal_atom_coord
+            #     f_i = current_atom_coord - focal_atom_coord
+            #     if np.dot(f_i, f_c1) < 0: # 180 degrees
+            #         return np.array([distance.euclidean(current_atom_coord, focal_atom_coord), np.pi / 2, np.pi, 1])
+            #     return np.array([distance.euclidean(current_atom_coord, focal_atom_coord), np.pi / 2, 0, 0])
+
+            
+            # rng = [0.5,0.5,1]
+            rng = np.random.RandomState(42)
+            while True:
+                arbitrary_vector = rng.rand(3) - 0.5  # Generate a vector with components between -0.5 and 0.5
+                if np.linalg.norm(np.cross(e1, arbitrary_vector)) > 1e-6: # Ensure not collinear
+                    break # Exit loop if we found a non-collinear vector
+            
+            # Calculate e2 using cross product with the arbitrary vector, this will really be 
+            e2_dir = np.cross(e1, arbitrary_vector)
+            norm_e2_dir = np.linalg.norm(e2_dir)
+            if norm_e2_dir < 1e-6: # Vectors are collinear
+                log.error("collinear during decoding")
+                if np.allclose(arbitrary_vector, [1, 0, 0]):
+                    e2_dir = np.cross(e1, np.array([0, 1, 0]))
+                elif np.allclose(arbitrary_vector, [0, 1, 0]):
+                    e2_dir = np.cross(e1, np.array([0, 0, 1]))
+                else:
+                    e2_dir = np.cross(e1, np.array([1, 0, 0]))
                 norm_e2_dir = np.linalg.norm(e2_dir)
-                if norm_e2_dir < 1e-6: # Vectors are collinear
-                    log.error("collinear during decoding")
-                    if np.allclose(arbitrary_vector, [1, 0, 0]):
-                        e2_dir = np.cross(e1, np.array([0, 1, 0]))
-                    elif np.allclose(arbitrary_vector, [0, 1, 0]):
-                        e2_dir = np.cross(e1, np.array([0, 0, 1]))
-                    else:
-                        e2_dir = np.cross(e1, np.array([1, 0, 0]))
-                    norm_e2_dir = np.linalg.norm(e2_dir)
 
-                e2 = e2_dir / norm_e2_dir # Normalize e2
+            e2 = e2_dir / norm_e2_dir # Normalize e2
 
-                e3 = np.cross(e1, e2)
-                e3 /= np.linalg.norm(e3)
-                
-                # Create rotation matrix
-                rotation_matrix = np.vstack([e1, e2, e3]).T  # 3x3 matrix
-                
-                # Convert spherical to Cartesian in local coordinates
-                actual_phi = sign * phi
-                local_relative_pos = relative(r, theta, actual_phi)
-                
-                # Rotate to global coordinates
-                global_relative_pos = rotation_matrix @ local_relative_pos
-                
-                # Assign global position
-                pos = p_f + global_relative_pos
+            e3 = np.cross(e1, e2)
+            e3 /= np.linalg.norm(e3)
+            
+            # Create rotation matrix
+            rotation_matrix = np.vstack([e1, e2, e3]).T  # 3x3 matrix
+            
+            # Convert spherical to Cartesian in local coordinates
+            actual_phi = sign * phi
+            local_relative_pos = relative(r, theta, actual_phi)
+            
+            # Rotate to global coordinates
+            global_relative_pos = rotation_matrix @ local_relative_pos
+            
+            # Assign global position
+            pos = focal_atom_coord + global_relative_pos
                 
         elif f != -1:
             if id != 1:
                 print(f"c1 was not found for atom {id}")
-            p_f = atom_positions.get(f)
-            if p_f is None:
+            focal_atom_coord = atom_positions.get(f)
+            if focal_atom_coord is None:
                 print(f"Atom {id}: Reference atom position not defined. Assigning default position at origin.")
                 pos = np.array([0.0, 0.0, 0.0])
             else:
-                pos = p_f + np.array([r, 0.0, 0.0])
+                pos = focal_atom_coord + np.array([r, 0.0, 0.0])
 
         else:
             if id != 0:
