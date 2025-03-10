@@ -10,7 +10,7 @@ from loguru import logger as log
 
 exclude_h = False
 
-def is_collinear(p1, p2, p3, tolerance=1e-4):
+def is_collinear(p1, p2, p3, tolerance=1e-3):
     v1 = p2 - p1
     v2 = p3 - p1
     cross_product = np.cross(v1, v2)
@@ -65,6 +65,7 @@ def get_ans(mol, descriptors):
 
     canonical_smiles = Chem.MolToSmiles(mol, canonical=True, isomericSmiles=False)
     atom_order = ast.literal_eval(mol.GetProp('_smilesAtomOutputOrder'))
+    # print(atom_order)
     original_index, atom_name = get_new_atom(mol, atom_order)
 
     smiles_id = 0
@@ -168,12 +169,13 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
     current_atom_coord = coords[atom_index]
 
     f, c1, c2, focal_atom_coord, c1_atom_coord, c2_atom_coord = find_ref_points(atom_index)
-
-    # log.info(f"atom idx: {atom_index}, smiles idx: {smiles_index}, f: {sdf_to_smiles.get(f, -1)}, c1: {sdf_to_smiles.get(c1, -1)}, c2: {sdf_to_smiles.get(c2, -1)}")
-    # log.info(f"focal_atom_coord: {focal_atom_coord}")
-    # log.info(f"c1_atom_coord: {c1_atom_coord}")
-    # log.info(f"c2_atom_coord: {c2_atom_coord}")
-
+    # log.info("smiles idx: {}, f: {}, c1: {}, c2: {}".format(
+    #     sdf_to_smiles.get(atom_index, 'N/A'),
+    #     sdf_to_smiles.get(f, 'N/A'),
+    #     sdf_to_smiles.get(c1, 'N/A'),
+    #     sdf_to_smiles.get(c2, 'N/A')
+    # ))
+    
     if f == -1: 
         if smiles_index != 0:
             raise ValueError(f"f was not found for mol {mol_id}, atom {atom_index}, {sdf_to_smiles[atom_index]}")
@@ -187,16 +189,16 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
         if smiles_index != 2:
             log.error(f"c2 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
         #assume that the point is on XY plane
+        #?
         if is_collinear(focal_atom_coord, c1_atom_coord, current_atom_coord):
-            raise ValueError("f,c1,i are colinear", atom_index)
-        # if is_collinear(focal_atom_coord, c1_atom_coord, current_atom_coord):
-        #     log.error("f,c1,i are collinear in atom", atom_index)
-        #     # check if i is on the ray from f to c1
-        #     f_c1 = c1_atom_coord - focal_atom_coord
-        #     f_i = current_atom_coord - focal_atom_coord
-        #     if np.dot(f_i, f_c1) < 0: # 180 degrees
-        #         return np.array([distance.euclidean(current_atom_coord, focal_atom_coord), np.pi / 2, np.pi, 1])
-        #     return np.array([distance.euclidean(current_atom_coord, focal_atom_coord), np.pi / 2, 0, 0])
+            # raise ValueError("f,c1,i are colinear", atom_index)
+            log.error("f,c1,i are collinear in atom", atom_index)
+            # check if i is on the ray from f to c1
+            f_c1 = c1_atom_coord - focal_atom_coord
+            f_i = current_atom_coord - focal_atom_coord
+            if np.dot(f_i, f_c1) < 0: # 180 degrees
+                return np.array([distance.euclidean(current_atom_coord, focal_atom_coord), np.pi / 2, np.pi, 1])
+            return np.array([distance.euclidean(current_atom_coord, focal_atom_coord), np.pi / 2, 0, 0])
         
         r, theta, phi, sign_phi = calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_atom_coord, current_atom_coord)
         return np.array([r, theta, phi, sign_phi])
@@ -204,7 +206,7 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
     # Here we have f,c1,c2
     if is_collinear(focal_atom_coord, c1_atom_coord, c2_atom_coord):
         raise ValueError("f,c1,c2 are colinear", atom_index)
-    
+
     # Calculate spherical coordinates
 
     r, theta, phi, sign_phi = calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_atom_coord, c2_atom_coord)

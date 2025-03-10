@@ -37,7 +37,7 @@ def relative(r, theta, phi):
     z = r * np.cos(theta)
     return np.array([x, y, z])
 
-def is_collinear(p1, p2, p3, tolerance=1e-4):
+def is_collinear(p1, p2, p3, tolerance=1e-3):
     v1 = p2 - p1
     v2 = p3 - p1
     cross_product = np.cross(v1, v2)
@@ -118,23 +118,29 @@ def assign_cartesian_coordinates(mol, descriptors):
             pos = calc_spherical_to_cartesian(r, theta, phi, sign, focal_atom_coord, c1_atom_coord, c2_atom_coord)
 
         elif f != -1 and c1 != -1:
-            if id != 2:
-                print(f"c2 was not found for atom {id}")
+            # if id != 2:
+            #     print(f"c2 was not found for atom {id}")
 
             focal_atom_coord = atom_positions.get(f)
             c1_atom_coord = atom_positions.get(c1)
         
             v1 = c1_atom_coord - focal_atom_coord
             e1 = v1 / np.linalg.norm(v1)
-            # if is_collinear(focal_atom_coord, c1_atom_coord, current_atom_coord):
-            #     log.error("f,c1,i are collinear in atom", atom_index)
-            #     # check if i is on the ray from f to c1
-            #     f_c1 = c1_atom_coord - focal_atom_coord
-            #     f_i = current_atom_coord - focal_atom_coord
-            #     if np.dot(f_i, f_c1) < 0: # 180 degrees
-            #         return np.array([distance.euclidean(current_atom_coord, focal_atom_coord), np.pi / 2, np.pi, 1])
-            #     return np.array([distance.euclidean(current_atom_coord, focal_atom_coord), np.pi / 2, 0, 0])
 
+            #?
+            if abs(theta - np.pi/2) < 1e-3 and (abs(phi) < 1e-3 or abs(phi - np.pi) < 1e-3):
+                if abs(phi) < 1e-3:
+                    # the point is on the ray from f to c1 and has "r" distance from f 
+                    # print("fc1i")
+                    pos = focal_atom_coord + r * e1
+                else:
+                    # print("c1fi.")
+                    # the point is on the ray from c1 to f and has "r" distance from f 
+                    pos = focal_atom_coord - r * e1
+
+                atom_positions[id] = pos
+                conf.SetAtomPosition(id, tuple(pos))
+                continue
             
             # rng = [0.5,0.5,1]
             rng = np.random.RandomState(42)
