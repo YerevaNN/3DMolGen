@@ -322,9 +322,9 @@ def process_and_find_descriptors(sdf, val_indices):
     #     file.close()
 
 if __name__ == '__main__':
-    out_file = "output_gen_with_H.txt"
+    out_file = "outputs/output_gen_with_H.txt"
     if exclude_h:
-        out_file = "output_gen.txt"
+        out_file = "outputs/output_gen.txt"
     sys.stdout = open(out_file, "w") 
     sdf_file = '/auto/home/menuab/pcqm4m-v2-train.sdf'
     val_indices_file = "/auto/home/menuab/code/3DMolGen/data/pcqm/pcqm4v2_valid_indice.txt"

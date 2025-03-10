@@ -247,37 +247,37 @@ def reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf):
     writer.close()
     print(f"\nAll molecules have been written to '{output_sdf}'")
 
-out_file = "output_inv_with_H.txt"
-if exclude_h:
-    out_file = "output_inv.txt"
-sys.stdout = open(out_file, "w") 
+if __name__ == '__main__':
+    out_file = "outputs/output_inv_with_H.txt"
+    if exclude_h:
+        out_file = "outputs/output_inv.txt"
+    sys.stdout = open(out_file, "w") 
 
-data_file = "/auto/home/filya/3DMolGen/molgen3D/data_processing/mol_9496_.jsonl"
-# data_file = "/auto/home/filya/3DMolGen/train_embedded_spherical_with_H/train_data_0.jsonl"
-# if exclude_h:
-#     data_file = "/auto/home/filya/3DMolGen/train_embedded_spherical/train_data_0.jsonl"
+    data_file = "/auto/home/filya/3DMolGen/molgen3D/data_processing/mol_9496_.jsonl"
+    # data_file = "/auto/home/filya/3DMolGen/train_embedded_spherical_with_H/train_data_0.jsonl"
+    # if exclude_h:
+    #     data_file = "/auto/home/filya/3DMolGen/train_embedded_spherical/train_data_0.jsonl"
 
-embedded_smiles_list = []
-with open(data_file, 'r') as f:
-    for line_number, line in enumerate(f):
-        try:
-            json_object = json.loads(line)
-            if "conformers" in json_object:
-                conformers_data = json_object["conformers"]
-                if isinstance(conformers_data, dict) and "embedded_smiles" in conformers_data:
-                    embedded_smiles_list.append(conformers_data["embedded_smiles"])
+    embedded_smiles_list = []
+    with open(data_file, 'r') as f:
+        for line_number, line in enumerate(f):
+            try:
+                json_object = json.loads(line)
+                if "conformers" in json_object:
+                    conformers_data = json_object["conformers"]
+                    if isinstance(conformers_data, dict) and "embedded_smiles" in conformers_data:
+                        embedded_smiles_list.append(conformers_data["embedded_smiles"])
+                    else:
+                        print(f"Warning: 'embedded_smiles' key not found within 'conformers' on line {line_number} or 'conformers' is not in expected format.")
                 else:
-                    print(f"Warning: 'embedded_smiles' key not found within 'conformers' on line {line_number} or 'conformers' is not in expected format.")
-            else:
-                print(f"Warning: 'conformers' key not found in JSON object on line {line_number}.")
+                    print(f"Warning: 'conformers' key not found in JSON object on line {line_number}.")
 
-        except json.JSONDecodeError as e:
-            print(f"Error: JSONDecodeError on line {line_number}: {e}")
-            print(f"Line causing error: {line.strip()}")
+            except json.JSONDecodeError as e:
+                print(f"Error: JSONDecodeError on line {line_number}: {e}")
+                print(f"Line causing error: {line.strip()}")
 
-output_sdf = "mol_9496-rec.sdf"
-# output_sdf = "reconstructed_mols/reconstructed_molecules_1_with_H.sdf"
-# if exclude_h:
-#     output_sdf = "reconstructed_mols/reconstructed_molecules_1.sdf"
-#     output_sdf = "reconstructed_mols/reconstructed_molecules_1.sdf"
-reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf)
+    output_sdf = "mol_9496-rec.sdf"
+    # output_sdf = "reconstructed_mols/reconstructed_molecules_1_with_H.sdf"
+    # if exclude_h:
+    #     output_sdf = "reconstructed_mols/reconstructed_molecules_1.sdf"
+    reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf)
