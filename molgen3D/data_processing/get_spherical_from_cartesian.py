@@ -113,7 +113,8 @@ def calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_
         if(cos_phi > 1.0 or cos_phi < -1.0):
             log.error(f"cos_theta is not correct: {cos_theta}")
             cos_phi = np.clip(cos_phi, -1.0, 1.0)
-            phi = np.arccos(cos_phi)
+        
+        phi = np.arccos(cos_phi)
 
         cross_proj_cf = np.cross(v_cf, proj_if)
         if np.dot(normal_vector, cross_proj_cf) < 0: # cospi = -1, cos0 = 1
