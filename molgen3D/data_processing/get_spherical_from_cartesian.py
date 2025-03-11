@@ -105,6 +105,7 @@ def calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_
     proj_if = v_if - r * cos_theta * normal_vector_unit
     norm_proj_if = np.linalg.norm(proj_if)
     if norm_proj_if < 1e-7: #theta is 0, phi ?
+        # log.error("here")
         phi = 0
     else:
         proj_if /= norm_proj_if
@@ -186,13 +187,17 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
         #assume that the point is on the OX ray
         return np.array([distance.euclidean(current_atom_coord, focal_atom_coord), np.pi / 2, 0, np.sign(0)])
     if c2 == -1:
-        if smiles_index != 2:
-            log.error(f"c2 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
+        # if smiles_index != 2:
+        #     log.error(f"c2 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
+        
+        # if smiles_index != 2 and not is_collinear(focal_atom_coord, c1_atom_coord, current_atom_coord):
+        #     raise ValueError(f"buuu c2 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
+
         #assume that the point is on XY plane
         #?
         if is_collinear(focal_atom_coord, c1_atom_coord, current_atom_coord):
-            # raise ValueError("f,c1,i are colinear", atom_index)
-            log.error("f,c1,i are collinear in atom", atom_index)
+            # log.error("f,c1,i are collinear in atom", atom_index)
+            
             # check if i is on the ray from f to c1
             f_c1 = c1_atom_coord - focal_atom_coord
             f_i = current_atom_coord - focal_atom_coord
