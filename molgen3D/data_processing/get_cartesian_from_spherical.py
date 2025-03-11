@@ -18,15 +18,12 @@ def parse_embedded_smiles(embedded_smiles, embedding_type="spherical"):
         atom = token[0]
         descriptor_str = token[2]
         if descriptor_str:
-            try:
-                descriptor = [float(x) for x in descriptor_str.split(',')]
-                if embedding_type == "spherical" and len(descriptor) != 4:
-                    raise ValueError
-                elif embedding_type == "cartesian" and len(descriptor) != 3:
-                    raise ValueError
-                descriptors.append(descriptor)
-            except:
+            descriptor = [float(x) for x in descriptor_str.split(',')]
+            if embedding_type == "spherical" and len(descriptor) != 4:
                 raise ValueError(f"Invalid descriptor format for atom {atom}: '{descriptor_str}'")
+            elif embedding_type == "cartesian" and len(descriptor) != 3:
+                raise ValueError(f"Invalid descriptor format for atom {atom}: '{descriptor_str}'")
+            descriptors.append(descriptor)
     
     smiles = re.sub(r'<[^>]+>', '', embedded_smiles) # exclude <...>s
     return smiles, descriptors
@@ -216,8 +213,6 @@ def parse_molecule_with_spherical_coordinates(embedded_smiles):
 def reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf):
     """Reconstructs molecules from embedded SMILES and writes to an SDF file."""
     writer = Chem.SDWriter(output_sdf)
-    if writer is None:
-        raise ValueError(f"Could not create SDF writer for {output_sdf}")
     for idx, embedded_smiles in enumerate(embedded_smiles_list):
         if idx == 200000:
             break

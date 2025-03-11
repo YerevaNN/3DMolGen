@@ -126,6 +126,26 @@ def calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_
 
 def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sdf, coords):
     """Calculates generation descriptors for a specific atom in a molecule."""
+    # def find_next_atom(begin_sdf_id, sdf_id1, atom_positions, exclude_atoms = [], sdf_id2 = -1):
+    #     begin_smiles_id = sdf_to_smiles[begin_sdf_id]
+    #     smiles_id1 = sdf_to_smiles[sdf_id1]
+    #     this_atom1 = mol.GetAtomWithIdx(sdf_id1)
+    #     neighbors1 = [neighbor.GetIdx() for neighbor in this_atom1.GetNeighbors() if neighbor not in exclude_atoms]
+    #     neighbors2 = []
+    #     smiles_id2 = -1
+    #     if sdf_id2 != -1:
+    #         smiles_id2 = sdf_to_smiles[sdf_id2]
+    #         this_atom2 = mol.GetAtomWithIdx(sdf_id2)
+    #         neighbors2 = [neighbor.GetIdx() for neighbor in this_atom2.GetNeighbors() if neighbor not in exclude_atoms]
+    #     for i in range(begin_smiles_id - 1, -1, -1):
+    #         if i == smiles_id1 or i == smiles_id2:
+    #             continue
+    #         if smiles_to_sdf[i] in neighbors1 or smiles_to_sdf[i] in neighbors2:
+    #             if smiles_id2 != -1 and is_collinear(atom_positions[sdf_id1], atom_positions[sdf_id2], atom_positions[smiles_to_sdf[i]]):
+    #                 continue
+    #             return smiles_to_sdf[i]
+    #     return -1
+
     def find_next_atom(begin_sdf_id, sdf_id1, atom_positions, sdf_id2 = -1):
         begin_smiles_id = sdf_to_smiles[begin_sdf_id]
         smiles_id1 = sdf_to_smiles[sdf_id1]
@@ -146,7 +166,50 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
                 return smiles_to_sdf[i]
         return -1
     
+    
     def find_ref_points(atom_index):
+        # def without_coordinates():
+        #     best = []
+        #     exclude_focal = []
+        #     exclude_c1 = []
+        #     while True:
+        #         f = find_next_atom(atom_index, atom_index, coords, exclude_focal)
+        #         if f == -1:
+        #             while len(best) < 3:
+        #                 best.append(-1)
+        #             return best
+        #         c1 = find_next_atom(atom_index, f, coords, exclude_c1)
+        #         if c1 == -1:
+        #             exclude_focal.append(f)
+        #             exclude_c1 = []
+        #             if len(best) < 1:
+        #                 best = [f]
+        #             continue
+        #         c2 = find_next_atom(atom_index, c1, coords, [], f)
+        #         if c2 != -1:
+        #             # print(f"atom {atom_index} -> f:{focal_atom_index}, c1:{c1_atom_index}, c2:{c2_atom_index}")
+        #             return f, c1, c2
+        #         best = [f, c1]
+        #         exclude_c1.append(c1)
+        #         if len(exclude_focal) > len(coords) or len(exclude_c1) > len(coords):
+        #             break
+
+        #     # If the loop exits without finding c2, return the best found so far
+        #     while len(best) < 3:
+        #         best.append(-1)
+        #     return best
+
+        # f, c1, c2 = without_coordinates()
+        # focal_atom_coord = -1
+        # if f != -1:
+        #     focal_atom_coord = coords[f]
+        # c1_atom_coord = -1
+        # if c1 != -1:
+        #     c1_atom_coord = coords[c1]
+        # c2_atom_coord = -1
+        # if c2 != -1:
+        #     c2_atom_coord = coords[c2]
+        # return f, c1, c2, focal_atom_coord, c1_atom_coord, c2_atom_coord
         f = -1
         c1 = -1
         c2 = -1
@@ -209,7 +272,7 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
         return np.array([r, theta, phi, sign_phi])
         
     # Here we have f,c1,c2
-    if is_collinear(focal_atom_coord, c1_atom_coord, c2_atom_coord):
+    if is_collinear(focal_atom_coord, c1_atom_coord, c2_atom_coord): #shouldnt enter this
         raise ValueError("f,c1,c2 are colinear", atom_index)
 
     # Calculate spherical coordinates
@@ -344,7 +407,4 @@ if __name__ == '__main__':
                 val_indices.append(index)
             except ValueError:
                 raise ValueError(f"Skipping invalid line: {line.strip()}")
-    try:
-        process_and_find_descriptors(sdf_file, val_indices)
-    except ValueError as e:
-        raise ValueError(f"Error: {e}")
+    process_and_find_descriptors(sdf_file, val_indices)
