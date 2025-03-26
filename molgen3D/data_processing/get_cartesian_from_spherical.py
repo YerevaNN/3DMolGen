@@ -65,8 +65,16 @@ def calc_spherical_to_cartesian(r, theta, phi, sign_phi, focal_atom_coord, c1_at
     pos = focal_atom_coord + global_relative_pos
     return pos
 
-def assign_cartesian_coordinates(mol, descriptors):
+def assign_cartesian_coordinates(mol, descriptors, verbose=False, idx=None):
     """Returns the molecule with assigned 3D coordinates."""  
+    def find_non_adjacent_c2(atom_positions, id, f, c1):
+        for i in range(id - 1, -1, -1):
+            if i == f or i == c1:
+                continue
+            if not is_collinear(atom_positions[f], atom_positions[c1], atom_positions[i]):
+                return i
+        return -1
+    
     def find_next_atom(begin_smiles_id, smiles_id1, atom_positions, smiles_id2 = -1): #smiles ids same as sdf ids
         this_atom1 = mol.GetAtomWithIdx(smiles_id1)
         neighbors1 = [neighbor.GetIdx() for neighbor in this_atom1.GetNeighbors()]
@@ -96,31 +104,37 @@ def assign_cartesian_coordinates(mol, descriptors):
         f = -1
         c1 = -1
         c2 = -1
+        focal_atom_coord = -1
+        c1_atom_coord = -1
+        c2_atom_coord = -1
         
         f = find_next_atom(id, id, atom_positions)
         if f != -1:
+            focal_atom_coord = atom_positions.get(f)
             c1 = find_next_atom(id, f, atom_positions)
             if c1 != -1:
+                c1_atom_coord = atom_positions.get(c1)
                 c2 = find_next_atom(id, c1, atom_positions, f)
-        
+                if c2 != -1:
+                    c2_atom_coord = atom_positions.get(c2)
+                # + c2 finding
+                # else:
+                #     c2 = find_non_adjacent_c2(atom_positions, id, f, c1)
+                #     if c2 != -1:
+                #         c2_atom_coord = atom_positions.get(c2)
+
         # print("smiles idx:", id, "f:", f, "c1:", c1, "c2:", c2)
 
         pos = []
         
         if f != -1 and c1 != -1 and c2 != -1:
-            focal_atom_coord = atom_positions.get(f)
-            c1_atom_coord = atom_positions.get(c1)
-            c2_atom_coord = atom_positions.get(c2)
-            
             pos = calc_spherical_to_cartesian(r, theta, phi, sign, focal_atom_coord, c1_atom_coord, c2_atom_coord)
 
         elif f != -1 and c1 != -1:
-            # if id != 2:
-            #     print(f"c2 was not found for atom {id}")
+            if id != 2 and verbose:
+                print(f"c2 was not found for mol {idx}, atom {id}")
+                sys.stdout.flush()
 
-            focal_atom_coord = atom_positions.get(f)
-            c1_atom_coord = atom_positions.get(c1)
-        
             v1 = c1_atom_coord - focal_atom_coord
             e1 = v1 / np.linalg.norm(v1)
 
@@ -149,8 +163,9 @@ def assign_cartesian_coordinates(mol, descriptors):
             # Calculate e2 using cross product with the arbitrary vector, this will really be 
             e2_dir = np.cross(e1, arbitrary_vector)
             norm_e2_dir = np.linalg.norm(e2_dir)
-            if norm_e2_dir < 1e-6: # Vectors are collinear
-                log.error("collinear during decoding")
+            if norm_e2_dir < 1e-6 and verbose: # Vectors are collinear
+                print(f"collinear during decoding for mol {idx}")
+                sys.stdout.flush()
                 if np.allclose(arbitrary_vector, [1, 0, 0]):
                     e2_dir = np.cross(e1, np.array([0, 1, 0]))
                 elif np.allclose(arbitrary_vector, [0, 1, 0]):
@@ -178,18 +193,15 @@ def assign_cartesian_coordinates(mol, descriptors):
             pos = focal_atom_coord + global_relative_pos
                 
         elif f != -1:
-            if id != 1:
-                print(f"c1 was not found for atom {id}")
-            focal_atom_coord = atom_positions.get(f)
-            if focal_atom_coord is None:
-                print(f"Atom {id}: Reference atom position not defined. Assigning default position at origin.")
-                pos = np.array([0.0, 0.0, 0.0])
-            else:
-                pos = focal_atom_coord + np.array([r, 0.0, 0.0])
+            if id != 1 and verbose:
+                print(f"c1 was not found for mol {idx}, atom {id}")
+                sys.stdout.flush()
+            pos = focal_atom_coord + np.array([r, 0.0, 0.0])
 
         else:
-            if id != 0:
-                print(f"f was not found for atom {id}")
+            if id != 0 and verbose:
+                print(f"f was not found for mol {idx}, atom {id}")
+                sys.stdout.flush()
             pos = np.array([0.0, 0.0, 0.0])
 
         atom_positions[id] = pos
@@ -199,7 +211,7 @@ def assign_cartesian_coordinates(mol, descriptors):
 
     return mol
 
-def parse_molecule_with_spherical_coordinates(embedded_smiles):
+def parse_molecule_with_spherical_coordinates(embedded_smiles, verbose=False, idx = None):
     smiles, descriptors = parse_embedded_smiles(embedded_smiles)
     mol = Chem.MolFromSmiles(smiles, sanitize=False)
     if exclude_h:
@@ -207,7 +219,10 @@ def parse_molecule_with_spherical_coordinates(embedded_smiles):
         mol = Chem.SanitizeMol(mol)
     if mol is None: 
         raise ValueError(f"Invalid SMILES '{smiles}'")
-    return assign_cartesian_coordinates(mol, descriptors)
+    if verbose:
+        print(f"Parsing molecule with spherical coordinates: {embedded_smiles} mol: {idx}")
+        sys.stdout.flush()
+    return assign_cartesian_coordinates(mol, descriptors, verbose, idx)
 
 
 def reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf):
@@ -247,6 +262,7 @@ def reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf):
     
     writer.close()
     print(f"\nAll molecules have been written to '{output_sdf}'")
+    sys.stdout.flush()
 
 if __name__ == '__main__':
     out_file = "outputs/output_inv_with_H.txt"

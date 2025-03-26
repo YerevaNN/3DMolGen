@@ -82,7 +82,7 @@ def get_ans(mol, descriptors):
             i += 1
     return ans
 
-def calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_atom_coord, c2_atom_coord):
+def calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_atom_coord, c2_atom_coord, verbose=False, idx=None):
     r = distance.euclidean(current_atom_coord, focal_atom_coord)
 
     v_cf = c1_atom_coord - focal_atom_coord
@@ -96,7 +96,9 @@ def calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_
     # Calculate theta (polar angle)
     cos_theta = np.dot(v_if, normal_vector_unit) / r # r is norm_v_if
     if(cos_theta > 1.0 or cos_theta < -1.0):
-        log.error(f"cos_theta is not correct: {cos_theta}")
+        if verbose:
+            print(f"cos_theta: {cos_theta} is out of range: for molecule {idx}")
+            sys.stdout.flush()
         cos_theta = np.clip(cos_theta, -1.0, 1.0)
     theta = np.arccos(cos_theta)
 
@@ -105,15 +107,22 @@ def calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_
     proj_if = v_if - r * cos_theta * normal_vector_unit
     norm_proj_if = np.linalg.norm(proj_if)
     if norm_proj_if < 1e-7: #theta is 0, phi ?
-        # log.error("here")
+        if verbose:
+            print(f"case, where i doubted for molecule {idx}")
+            sys.stdout.flush()
+
         phi = 0
+        
     else:
         proj_if /= norm_proj_if
         v_cf /= np.linalg.norm(v_cf) # norm_v_cf is not 0, bcs cur c1 is not f
         
         cos_phi = np.dot(proj_if, v_cf) 
         if(cos_phi > 1.0 or cos_phi < -1.0):
-            log.error(f"cos_theta is not correct: {cos_theta}")
+            if verbose:
+                print(f"cos_phi: {cos_phi} is out of range: for molecule {idx}")
+                sys.stdout.flush()
+
             cos_phi = np.clip(cos_phi, -1.0, 1.0)
         
         phi = np.arccos(cos_phi)
@@ -124,7 +133,7 @@ def calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_
 
     return r, theta, abs(phi), np.sign(phi)
 
-def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sdf, coords):
+def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sdf, coords, verbose=False, idx=None):
     """Calculates generation descriptors for a specific atom in a molecule."""
     # def find_next_atom(begin_sdf_id, sdf_id1, atom_positions, exclude_atoms = [], sdf_id2 = -1):
     #     begin_smiles_id = sdf_to_smiles[begin_sdf_id]
@@ -164,52 +173,21 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
                 if smiles_id2 != -1 and is_collinear(atom_positions[sdf_id1], atom_positions[sdf_id2], atom_positions[smiles_to_sdf[i]]):
                     continue
                 return smiles_to_sdf[i]
+        
         return -1
     
     
     def find_ref_points(atom_index):
-        # def without_coordinates():
-        #     best = []
-        #     exclude_focal = []
-        #     exclude_c1 = []
-        #     while True:
-        #         f = find_next_atom(atom_index, atom_index, coords, exclude_focal)
-        #         if f == -1:
-        #             while len(best) < 3:
-        #                 best.append(-1)
-        #             return best
-        #         c1 = find_next_atom(atom_index, f, coords, exclude_c1)
-        #         if c1 == -1:
-        #             exclude_focal.append(f)
-        #             exclude_c1 = []
-        #             if len(best) < 1:
-        #                 best = [f]
-        #             continue
-        #         c2 = find_next_atom(atom_index, c1, coords, [], f)
-        #         if c2 != -1:
-        #             # print(f"atom {atom_index} -> f:{focal_atom_index}, c1:{c1_atom_index}, c2:{c2_atom_index}")
-        #             return f, c1, c2
-        #         best = [f, c1]
-        #         exclude_c1.append(c1)
-        #         if len(exclude_focal) > len(coords) or len(exclude_c1) > len(coords):
-        #             break
+        def find_non_adjacent_c2(f, c1):
+            begin_smiles_id = sdf_to_smiles[atom_index]
+            for i in range(begin_smiles_id - 1, -1, -1):
+                sdf_id = smiles_to_sdf[i]
+                if sdf_id == f or sdf_id == c1:
+                    continue
+                if not is_collinear(coords[f], coords[c1], coords[sdf_id]):
+                    return sdf_id
+            return -1
 
-        #     # If the loop exits without finding c2, return the best found so far
-        #     while len(best) < 3:
-        #         best.append(-1)
-        #     return best
-
-        # f, c1, c2 = without_coordinates()
-        # focal_atom_coord = -1
-        # if f != -1:
-        #     focal_atom_coord = coords[f]
-        # c1_atom_coord = -1
-        # if c1 != -1:
-        #     c1_atom_coord = coords[c1]
-        # c2_atom_coord = -1
-        # if c2 != -1:
-        #     c2_atom_coord = coords[c2]
-        # return f, c1, c2, focal_atom_coord, c1_atom_coord, c2_atom_coord
         f = -1
         c1 = -1
         c2 = -1
@@ -226,9 +204,15 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
                 c2 = find_next_atom(atom_index, c1, coords, f)
                 if c2 != -1:
                     c2_atom_coord = coords[c2]
+                # + c2 finding
+                # else:
+                    # c2 = find_non_adjacent_c2(f, c1)
+                    # if c2 != -1:
+                    #     c2_atom_coord = coords[c2]
+        
         return f, c1, c2, focal_atom_coord, c1_atom_coord, c2_atom_coord
 
-
+    
     atom_index = smiles_to_sdf[smiles_index]
     current_atom_coord = coords[atom_index]
 
@@ -239,7 +223,9 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
     #     sdf_to_smiles.get(c1, 'N/A'),
     #     sdf_to_smiles.get(c2, 'N/A')
     # ))
-    
+    if idx == 94510:
+        print("Found that mol")
+        sys.stdout.flush()
     if f == -1: 
         if smiles_index != 0:
             raise ValueError(f"f was not found for mol {mol_id}, atom {atom_index}, {sdf_to_smiles[atom_index]}")
@@ -250,17 +236,20 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
         #assume that the point is on the OX ray
         return np.array([distance.euclidean(current_atom_coord, focal_atom_coord), np.pi / 2, 0, np.sign(0)])
     if c2 == -1:
-        # if smiles_index != 2:
-        #     log.error(f"c2 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
-        
+        if smiles_index != 2 and verbose:
+            print(f"c2 was not found for molecule {idx}, atom sdf_id:{atom_index}, sm_id:{sdf_to_smiles[atom_index]}")
+            sys.stdout.flush()
+
         # if smiles_index != 2 and not is_collinear(focal_atom_coord, c1_atom_coord, current_atom_coord):
-        #     raise ValueError(f"buuu c2 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
+        #     raise ValueError(f"aaa c2 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
 
         #assume that the point is on XY plane
         #?
         if is_collinear(focal_atom_coord, c1_atom_coord, current_atom_coord):
-            # log.error("f,c1,i are collinear in atom", atom_index)
-            
+            if verbose:
+                print(f"f,c1,i are collinear for molecule {idx}, atom sdf_id:{atom_index}, sm_id:{sdf_to_smiles[atom_index]}")
+                sys.stdout.flush()
+
             # check if i is on the ray from f to c1
             f_c1 = c1_atom_coord - focal_atom_coord
             f_i = current_atom_coord - focal_atom_coord
@@ -277,13 +266,18 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
 
     # Calculate spherical coordinates
 
-    r, theta, phi, sign_phi = calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_atom_coord, c2_atom_coord)
+    r, theta, phi, sign_phi = calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_atom_coord, c2_atom_coord, verbose)
 
     # e1 = v_cf / np.linalg.norm(v_cf)
     # e2 = np.cross(normal_vector_unit, e1)
     # proj_if = v_if - (np.dot(v_if, normal_vector_unit)) * normal_vector_unit
     # phi = np.arctan2(np.dot(proj_if, e2), np.dot(proj_if, e1))
             
+    if verbose:
+        # print(f"atom {smiles_index} -> f:{sdf_to_smiles[f]}, c1:{sdf_to_smiles[c1]}, c2:{sdf_to_smiles[c2]}")
+        # print(f"r {r}, theta:{theta}, phi:{phi}, sign_phi:{sign_phi}")
+        sys.stdout.flush()
+
     return np.array([r, theta, phi, sign_phi])
 
     
@@ -295,13 +289,19 @@ def get_json(mol, embedded, sample):
             "conformers": {"embedded_smiles": embedded}}
     
 
-def get_mol_descriptors(mol, mol_id, precision=4):
+def get_mol_descriptors(mol, mol_id, precision=4, verbose=False, idx=None):
     conformer = mol.GetConformer()
     coords = conformer.GetPositions()
     smiles, smiles_to_sdf, sdf_to_smiles = get_smiles(mol) 
     all_descriptors = []
+    
+    if verbose:
+        print(f"Calculating descriptors for molecule {idx}")
+        print(smiles_to_sdf)
+        sys.stdout.flush()
+
     for i in range(len(smiles)):
-        descriptors = calculate_descriptors(mol, mol_id, i, sdf_to_smiles, smiles_to_sdf, coords)
+        descriptors = calculate_descriptors(mol, mol_id, i, sdf_to_smiles, smiles_to_sdf, coords, verbose, idx)
         if descriptors.size and descriptors[0] != -1:
             desc_str = ",".join(f"{val:.{precision}f}" for val in descriptors)
             desc_str = desc_str[:-5] # give the sign as an integer
@@ -311,8 +311,8 @@ def get_mol_descriptors(mol, mol_id, precision=4):
     
     return all_descriptors
 
-def embed_coordinates_spherical(mol, smiles, order, precision=4):
-    all_descriptors = get_mol_descriptors(mol, 0, precision)
+def embed_coordinates_spherical(mol, smiles, order, precision=4, verbose=False, idx=None):
+    all_descriptors = get_mol_descriptors(mol, 0, precision, verbose, idx)
     return get_ans(mol, all_descriptors)
 
 def process_and_find_descriptors(sdf, val_indices):
