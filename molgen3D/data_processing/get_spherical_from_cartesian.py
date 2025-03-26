@@ -133,49 +133,28 @@ def calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_
 
     return r, theta, abs(phi), np.sign(phi)
 
-def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sdf, coords, verbose=False, idx=None):
-    """Calculates generation descriptors for a specific atom in a molecule."""
-    # def find_next_atom(begin_sdf_id, sdf_id1, atom_positions, exclude_atoms = [], sdf_id2 = -1):
-    #     begin_smiles_id = sdf_to_smiles[begin_sdf_id]
-    #     smiles_id1 = sdf_to_smiles[sdf_id1]
-    #     this_atom1 = mol.GetAtomWithIdx(sdf_id1)
-    #     neighbors1 = [neighbor.GetIdx() for neighbor in this_atom1.GetNeighbors() if neighbor not in exclude_atoms]
-    #     neighbors2 = []
-    #     smiles_id2 = -1
-    #     if sdf_id2 != -1:
-    #         smiles_id2 = sdf_to_smiles[sdf_id2]
-    #         this_atom2 = mol.GetAtomWithIdx(sdf_id2)
-    #         neighbors2 = [neighbor.GetIdx() for neighbor in this_atom2.GetNeighbors() if neighbor not in exclude_atoms]
-    #     for i in range(begin_smiles_id - 1, -1, -1):
-    #         if i == smiles_id1 or i == smiles_id2:
-    #             continue
-    #         if smiles_to_sdf[i] in neighbors1 or smiles_to_sdf[i] in neighbors2:
-    #             if smiles_id2 != -1 and is_collinear(atom_positions[sdf_id1], atom_positions[sdf_id2], atom_positions[smiles_to_sdf[i]]):
-    #                 continue
-    #             return smiles_to_sdf[i]
-    #     return -1
-
-    def find_next_atom(begin_sdf_id, sdf_id1, atom_positions, sdf_id2 = -1):
-        begin_smiles_id = sdf_to_smiles[begin_sdf_id]
-        smiles_id1 = sdf_to_smiles[sdf_id1]
-        this_atom1 = mol.GetAtomWithIdx(sdf_id1)
-        neighbors1 = [neighbor.GetIdx() for neighbor in this_atom1.GetNeighbors()]
-        neighbors2 = []
-        smiles_id2 = -1
-        if sdf_id2 != -1:
-            smiles_id2 = sdf_to_smiles[sdf_id2]
-            this_atom2 = mol.GetAtomWithIdx(sdf_id2)
-            neighbors2 = [neighbor.GetIdx() for neighbor in this_atom2.GetNeighbors()]
-        for i in range(begin_smiles_id - 1, -1, -1):
-            if i == smiles_id1 or i == smiles_id2:
+def find_next_atom(mol, sdf_to_smiles, smiles_to_sdf, begin_smiles_id, atom_positions, sdf_id1, sdf_id2 = -1):
+    smiles_id1 = sdf_to_smiles[sdf_id1]
+    this_atom1 = mol.GetAtomWithIdx(sdf_id1)
+    neighbors1 = [neighbor.GetIdx() for neighbor in this_atom1.GetNeighbors()]
+    neighbors2 = []
+    smiles_id2 = -1
+    if sdf_id2 != -1:
+        smiles_id2 = sdf_to_smiles[sdf_id2]
+        this_atom2 = mol.GetAtomWithIdx(sdf_id2)
+        neighbors2 = [neighbor.GetIdx() for neighbor in this_atom2.GetNeighbors()]
+    for i in range(begin_smiles_id - 1, -1, -1):
+        if i == smiles_id1 or i == smiles_id2:
+            continue
+        if smiles_to_sdf[i] in neighbors1 or smiles_to_sdf[i] in neighbors2:
+            if smiles_id2 != -1 and is_collinear(atom_positions[sdf_id1], atom_positions[sdf_id2], atom_positions[smiles_to_sdf[i]]):
                 continue
-            if smiles_to_sdf[i] in neighbors1 or smiles_to_sdf[i] in neighbors2:
-                if smiles_id2 != -1 and is_collinear(atom_positions[sdf_id1], atom_positions[sdf_id2], atom_positions[smiles_to_sdf[i]]):
-                    continue
-                return smiles_to_sdf[i]
-        
-        return -1
+            return smiles_to_sdf[i]
     
+    return -1
+
+def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sdf, coords, verbose=False, idx=None):
+    """Calculates generation descriptors for a specific atom in a molecule."""    
     
     def find_ref_points(atom_index):
         def find_non_adjacent_c2(f, c1):
@@ -195,13 +174,13 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
         c1_atom_coord = -1
         c2_atom_coord = -1
 
-        f = find_next_atom(atom_index, atom_index, coords)
+        f = find_next_atom(mol, sdf_to_smiles, smiles_to_sdf, smiles_index, coords, atom_index)
         if f != -1:
             focal_atom_coord = coords[f]
-            c1 = find_next_atom(atom_index, f, coords)
+            c1 = find_next_atom(mol, sdf_to_smiles, smiles_to_sdf, smiles_index, coords, f)
             if c1 != -1:
                 c1_atom_coord = coords[c1]
-                c2 = find_next_atom(atom_index, c1, coords, f)
+                c2 = find_next_atom(mol, sdf_to_smiles, smiles_to_sdf, smiles_index, coords, c1, f)
                 if c2 != -1:
                     c2_atom_coord = coords[c2]
                 # + c2 finding
