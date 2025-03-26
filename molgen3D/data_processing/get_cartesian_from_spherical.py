@@ -5,7 +5,7 @@ import sys
 import json
 import numpy as np
 from loguru import logger as log 
-from get_spherical_from_cartesian import find_next_atom
+from get_spherical_from_cartesian import find_ref_points
 exclude_h = False
 
 def parse_embedded_smiles(embedded_smiles, embedding_type="spherical"):
@@ -67,48 +67,18 @@ def calc_spherical_to_cartesian(r, theta, phi, sign_phi, focal_atom_coord, c1_at
 
 def assign_cartesian_coordinates(mol, descriptors, verbose=False, idx=None):
     """Returns the molecule with assigned 3D coordinates."""  
-    def find_non_adjacent_c2(atom_positions, id, f, c1):
-        for i in range(id - 1, -1, -1):
-            if i == f or i == c1:
-                continue
-            if not is_collinear(atom_positions[f], atom_positions[c1], atom_positions[i]):
-                return i
-        return -1
-    
     conf = Chem.Conformer(mol.GetNumAtoms())
     mol.AddConformer(conf)
     conf = mol.GetConformer()
-    
     atom_positions = {}
     
     for id, descriptor in enumerate(descriptors):
         # print("Atom", id)
         r, theta, phi, sign = descriptor
 
-        f = -1
-        c1 = -1
-        c2 = -1
-        focal_atom_coord = -1
-        c1_atom_coord = -1
-        c2_atom_coord = -1
-
         sdf_to_smiles = {i: i for i in range(mol.GetNumAtoms())}
         smiles_to_sdf = {i: i for i in range(mol.GetNumAtoms())}
-        
-        f = find_next_atom(mol, sdf_to_smiles, smiles_to_sdf, id, atom_positions, id)
-        if f != -1:
-            focal_atom_coord = atom_positions.get(f)
-            c1 = find_next_atom(mol, sdf_to_smiles, smiles_to_sdf, id, atom_positions, f)
-            if c1 != -1:
-                c1_atom_coord = atom_positions.get(c1)
-                c2 = find_next_atom(mol, sdf_to_smiles, smiles_to_sdf, id, atom_positions, c1, f)
-                if c2 != -1:
-                    c2_atom_coord = atom_positions.get(c2)
-                # + c2 finding
-                # else:
-                #     c2 = find_non_adjacent_c2(atom_positions, id, f, c1)
-                #     if c2 != -1:
-                #         c2_atom_coord = atom_positions.get(c2)
+        f, c1, c2, focal_atom_coord, c1_atom_coord, c2_atom_coord = find_ref_points(mol, sdf_to_smiles, smiles_to_sdf, atom_positions, id)
 
         # print("smiles idx:", id, "f:", f, "c1:", c1, "c2:", c2)
 
