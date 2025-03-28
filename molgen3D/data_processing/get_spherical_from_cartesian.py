@@ -10,7 +10,7 @@ from loguru import logger as log
 
 exclude_h = False
 
-def is_collinear(p1, p2, p3, tolerance=1e-3):
+def is_collinear(p1, p2, p3, tolerance=1.2e-3):
     v1 = p2 - p1
     v2 = p3 - p1
     cross_product = np.cross(v1, v2)
@@ -106,11 +106,10 @@ def calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_
     phi = 0
     proj_if = v_if - r * cos_theta * normal_vector_unit
     norm_proj_if = np.linalg.norm(proj_if)
-    if norm_proj_if < 1e-7: #theta is 0, phi ?
+    if norm_proj_if < 1e-7: #theta==0 => np.sin(theta)==0, so phi doesnt matter in calculation of the coordinate, x,y will be 0 anyways)
         if verbose:
-            print(f"case, where i doubted for molecule {idx}")
+            print(f"theta is 0 for molecule {idx}")
             sys.stdout.flush()
-
         phi = 0
         
     else:
@@ -131,8 +130,14 @@ def calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_
         if np.dot(normal_vector, cross_proj_cf) < 0: # cospi = -1, cos0 = 1
             phi = -phi
 
+    # e1 = v_cf / np.linalg.norm(v_cf)
+    # e2 = np.cross(normal_vector_unit, e1)
+    # proj_if = v_if - (np.dot(v_if, normal_vector_unit)) * normal_vector_unit
+    # phi = np.arctan2(np.dot(proj_if, e2), np.dot(proj_if, e1))
+
     return r, theta, abs(phi), np.sign(phi)
 
+# logic for finding ref points
 def find_ref_points(mol, sdf_to_smiles, smiles_to_sdf, coords, atom_index):
     def find_next_atom(begin_smiles_id, atom_positions, sdf_id1, sdf_id2 = -1):
         smiles_id1 = sdf_to_smiles[sdf_id1]
@@ -182,13 +187,14 @@ def find_ref_points(mol, sdf_to_smiles, smiles_to_sdf, coords, atom_index):
             if c2 != -1:
                 c2_atom_coord = coords[c2]
             # + c2 finding
-            # else:
-                # c2 = find_non_adjacent_c2(f, c1)
-                # if c2 != -1:
-                #     c2_atom_coord = coords[c2]
+            else:
+                c2 = find_non_adjacent_c2(f, c1)
+                if c2 != -1:
+                    c2_atom_coord = coords[c2]
     return f, c1, c2, focal_atom_coord, c1_atom_coord, c2_atom_coord
 
 
+# this is the main logic besides the math(which is likely to be correct)
 def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sdf, coords, verbose=False, idx=None):
     """Calculates generation descriptors for a specific atom in a molecule."""    
        
@@ -202,28 +208,21 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
     #     sdf_to_smiles.get(c1, 'N/A'),
     #     sdf_to_smiles.get(c2, 'N/A')
     # ))
-    if idx == 94510:
-        print("Found that mol")
-        sys.stdout.flush()
     if f == -1: 
         if smiles_index != 0:
             raise ValueError(f"f was not found for mol {mol_id}, atom {atom_index}, {sdf_to_smiles[atom_index]}")
-        return np.array([0, np.pi / 2, 0, np.sign(0)])
+        return np.array([0, np.pi / 2, 0, 0])
     if c1 == -1:
         if smiles_index != 1:
             raise ValueError(f"c1 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
         #assume that the point is on the OX ray
-        return np.array([distance.euclidean(current_atom_coord, focal_atom_coord), np.pi / 2, 0, np.sign(0)])
+        return np.array([distance.euclidean(current_atom_coord, focal_atom_coord), np.pi / 2, 0, 0])
     if c2 == -1:
         if smiles_index != 2 and verbose:
             print(f"c2 was not found for molecule {idx}, atom sdf_id:{atom_index}, sm_id:{sdf_to_smiles[atom_index]}")
             sys.stdout.flush()
 
-        # if smiles_index != 2 and not is_collinear(focal_atom_coord, c1_atom_coord, current_atom_coord):
-        #     raise ValueError(f"aaa c2 was not found for atom {atom_index}, {sdf_to_smiles[atom_index]}")
-
         #assume that the point is on XY plane
-        #?
         if is_collinear(focal_atom_coord, c1_atom_coord, current_atom_coord):
             if verbose:
                 print(f"f,c1,i are collinear for molecule {idx}, atom sdf_id:{atom_index}, sm_id:{sdf_to_smiles[atom_index]}")
@@ -240,21 +239,14 @@ def calculate_descriptors(mol, mol_id, smiles_index, sdf_to_smiles, smiles_to_sd
         return np.array([r, theta, phi, sign_phi])
         
     # Here we have f,c1,c2
-    if is_collinear(focal_atom_coord, c1_atom_coord, c2_atom_coord): #shouldnt enter this
+    if is_collinear(focal_atom_coord, c1_atom_coord, c2_atom_coord): #shouldnt enter this due to the check in find_ref_points
         raise ValueError("f,c1,c2 are colinear", atom_index)
-
-    # Calculate spherical coordinates
 
     r, theta, phi, sign_phi = calculate_spherical_from_cartesian(current_atom_coord, focal_atom_coord, c1_atom_coord, c2_atom_coord, verbose)
 
-    # e1 = v_cf / np.linalg.norm(v_cf)
-    # e2 = np.cross(normal_vector_unit, e1)
-    # proj_if = v_if - (np.dot(v_if, normal_vector_unit)) * normal_vector_unit
-    # phi = np.arctan2(np.dot(proj_if, e2), np.dot(proj_if, e1))
-            
     if verbose:
-        # print(f"atom {smiles_index} -> f:{sdf_to_smiles[f]}, c1:{sdf_to_smiles[c1]}, c2:{sdf_to_smiles[c2]}")
-        # print(f"r {r}, theta:{theta}, phi:{phi}, sign_phi:{sign_phi}")
+        print(f"atom {smiles_index} -> f:{sdf_to_smiles[f]}, c1:{sdf_to_smiles[c1]}, c2:{sdf_to_smiles[c2]}")
+        print(f"r {r}, theta:{theta}, phi:{phi}, sign_phi:{sign_phi}")
         sys.stdout.flush()
 
     return np.array([r, theta, phi, sign_phi])
@@ -294,96 +286,96 @@ def embed_coordinates_spherical(mol, smiles, order, precision=4, verbose=False, 
     all_descriptors = get_mol_descriptors(mol, 0, precision, verbose, idx)
     return get_ans(mol, all_descriptors)
 
-def process_and_find_descriptors(sdf, val_indices):
-    # supplier = Chem.SDMolSupplier(sdf, sanitize=exclude_h, removeHs=exclude_h)
-    supplier = Chem.SDMolSupplier("mol_9496-rec.sdf", sanitize=exclude_h, removeHs=exclude_h)
-    dataset = PCQM4Mv2Dataset(root = '/auto/home/menuab', only_smiles = True)
+# def process_and_find_descriptors(sdf, val_indices):
+#     # supplier = Chem.SDMolSupplier(sdf, sanitize=exclude_h, removeHs=exclude_h)
+#     supplier = Chem.SDMolSupplier("mol_9496-rec.sdf", sanitize=exclude_h, removeHs=exclude_h)
+#     dataset = PCQM4Mv2Dataset(root = '/auto/home/menuab', only_smiles = True)
 
-    train_data = []
-    val_data = []
-    for i, mol in enumerate(supplier): #3378606
-        # if i < 9496:
-        #     continue
-        # if i > 9496:
-        #     break
-        # writer = Chem.SDWriter("mol_9496-gen.sdf")
-        # writer.write(mol)
-        # writer.close()
-        # if i == 200000:
-        #     break
-        if i % 1000 == 0:
-            print(f"Mol {i}...")
-            sys.stdout.flush()
-        if not mol:
-            raise ValueError(f"Failed to process mol {i}")
-            # return
-        else:
-            all_descriptors = get_mol_descriptors(mol, i)
-            descriptors = get_ans(mol, all_descriptors)
-            if descriptors != "no descriptors":
-                json_string = get_json(mol, descriptors, dataset[i])
+#     train_data = []
+#     val_data = []
+#     for i, mol in enumerate(supplier): #3378606
+#         # if i < 9496:
+#         #     continue
+#         # if i > 9496:
+#         #     break
+#         # writer = Chem.SDWriter("mol_9496-gen.sdf")
+#         # writer.write(mol)
+#         # writer.close()
+#         # if i == 200000:
+#         #     break
+#         if i % 1000 == 0:
+#             print(f"Mol {i}...")
+#             sys.stdout.flush()
+#         if not mol:
+#             raise ValueError(f"Failed to process mol {i}")
+#             # return
+#         else:
+#             all_descriptors = get_mol_descriptors(mol, i)
+#             descriptors = get_ans(mol, all_descriptors)
+#             if descriptors != "no descriptors":
+#                 json_string = get_json(mol, descriptors, dataset[i])
                 
-                if i in val_indices:
-                    val_data.append(json_string)
-                else:
-                    train_data.append(json_string)
-            else:
-                raise ValueError(f"Excluding mol {i}")
+#                 if i in val_indices:
+#                     val_data.append(json_string)
+#                 else:
+#                     train_data.append(json_string)
+#             else:
+#                 raise ValueError(f"Excluding mol {i}")
 
-    current_file = None
-    data_item = train_data[0]
-    current_file = open(f"mol_9496_.jsonl", 'w')
-    json.dump(data_item, current_file)
-    current_file.write('\n')
-    current_file.close()
+#     current_file = None
+#     data_item = train_data[0]
+#     current_file = open(f"mol_9496_.jsonl", 'w')
+#     json.dump(data_item, current_file)
+#     current_file.write('\n')
+#     current_file.close()
 
 
-    # train_folder = "train_embedded_spherical_with_H"
-    # if exclude_h:
-    #     train_folder = "train_embedded_spherical"
-    # os.makedirs(train_folder, exist_ok=True)
+#     # train_folder = "train_embedded_spherical_with_H"
+#     # if exclude_h:
+#     #     train_folder = "train_embedded_spherical"
+#     # os.makedirs(train_folder, exist_ok=True)
 
-    # file_counter = 0
-    # current_file = None
-    # new_file_freq = 1000000
+#     # file_counter = 0
+#     # current_file = None
+#     # new_file_freq = 1000000
 
-    # for i, data_item in enumerate(train_data):
-    #     if i % new_file_freq == 0:
-    #         if current_file:
-    #             current_file.close()
-    #         current_file = open(os.path.join(train_folder, f"train_data_{file_counter}.jsonl"), 'w')
-    #         file_counter += 1
+#     # for i, data_item in enumerate(train_data):
+#     #     if i % new_file_freq == 0:
+#     #         if current_file:
+#     #             current_file.close()
+#     #         current_file = open(os.path.join(train_folder, f"train_data_{file_counter}.jsonl"), 'w')
+#     #         file_counter += 1
 
-    #     if current_file:
-    #         json.dump(data_item, current_file)
-    #         current_file.write('\n')
+#     #     if current_file:
+#     #         json.dump(data_item, current_file)
+#     #         current_file.write('\n')
 
-    # if current_file:
-    #     current_file.close()
+#     # if current_file:
+#     #     current_file.close()
 
-    # valid_folder = "valid_embedded_spherical_with_H"
-    # if exclude_h:
-    #     valid_folder = "valid_embedded_spherical"
-    # os.makedirs(valid_folder, exist_ok=True)
-    # with open(os.path.join(valid_folder, "valid_data.jsonl"), "w") as file:
-    #     for d in val_data:
-    #         json.dump(d, file)
-    #         file.write("\n")
-    #     file.close()
+#     # valid_folder = "valid_embedded_spherical_with_H"
+#     # if exclude_h:
+#     #     valid_folder = "valid_embedded_spherical"
+#     # os.makedirs(valid_folder, exist_ok=True)
+#     # with open(os.path.join(valid_folder, "valid_data.jsonl"), "w") as file:
+#     #     for d in val_data:
+#     #         json.dump(d, file)
+#     #         file.write("\n")
+#     #     file.close()
 
-if __name__ == '__main__':
-    out_file = "outputs/output_gen_with_H.txt"
-    if exclude_h:
-        out_file = "outputs/output_gen.txt"
-    sys.stdout = open(out_file, "w") 
-    sdf_file = '/auto/home/menuab/pcqm4m-v2-train.sdf'
-    val_indices_file = "/auto/home/menuab/code/3DMolGen/data/pcqm/pcqm4v2_valid_indice.txt"
-    val_indices = []
-    with open(val_indices_file, 'r') as f:
-        for line in f:
-            try:
-                index = int(line.strip())
-                val_indices.append(index)
-            except ValueError:
-                raise ValueError(f"Skipping invalid line: {line.strip()}")
-    process_and_find_descriptors(sdf_file, val_indices)
+# if __name__ == '__main__':
+#     out_file = "outputs/output_gen_with_H.txt"
+#     if exclude_h:
+#         out_file = "outputs/output_gen.txt"
+#     sys.stdout = open(out_file, "w") 
+#     sdf_file = '/auto/home/menuab/pcqm4m-v2-train.sdf'
+#     val_indices_file = "/auto/home/menuab/code/3DMolGen/data/pcqm/pcqm4v2_valid_indice.txt"
+#     val_indices = []
+#     with open(val_indices_file, 'r') as f:
+#         for line in f:
+#             try:
+#                 index = int(line.strip())
+#                 val_indices.append(index)
+#             except ValueError:
+#                 raise ValueError(f"Skipping invalid line: {line.strip()}")
+#     process_and_find_descriptors(sdf_file, val_indices)

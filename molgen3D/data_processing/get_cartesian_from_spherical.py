@@ -34,7 +34,7 @@ def relative(r, theta, phi):
     z = r * np.cos(theta)
     return np.array([x, y, z])
 
-def is_collinear(p1, p2, p3, tolerance=1e-3):
+def is_collinear(p1, p2, p3, tolerance=1.2e-3):
     v1 = p2 - p1
     v2 = p3 - p1
     cross_product = np.cross(v1, v2)
@@ -65,7 +65,8 @@ def calc_spherical_to_cartesian(r, theta, phi, sign_phi, focal_atom_coord, c1_at
     pos = focal_atom_coord + global_relative_pos
     return pos
 
-def assign_cartesian_coordinates(mol, descriptors, verbose=False, idx=None):
+# this is the main logic besides the math(which is likely to be correct)
+def calculate_cartesian_from__spherical(mol, descriptors, verbose=False, idx=None):
     """Returns the molecule with assigned 3D coordinates."""  
     conf = Chem.Conformer(mol.GetNumAtoms())
     mol.AddConformer(conf)
@@ -95,14 +96,12 @@ def assign_cartesian_coordinates(mol, descriptors, verbose=False, idx=None):
             v1 = c1_atom_coord - focal_atom_coord
             e1 = v1 / np.linalg.norm(v1)
 
-            #?
+            #case where f,c1,i are collinear
             if abs(theta - np.pi/2) < 1e-3 and (abs(phi) < 1e-3 or abs(phi - np.pi) < 1e-3):
                 if abs(phi) < 1e-3:
                     # the point is on the ray from f to c1 and has "r" distance from f 
-                    # print("fc1i")
                     pos = focal_atom_coord + r * e1
                 else:
-                    # print("c1fi.")
                     # the point is on the ray from c1 to f and has "r" distance from f 
                     pos = focal_atom_coord - r * e1
 
@@ -110,28 +109,15 @@ def assign_cartesian_coordinates(mol, descriptors, verbose=False, idx=None):
                 conf.SetAtomPosition(id, tuple(pos))
                 continue
             
-            # rng = [0.5,0.5,1]
             rng = np.random.RandomState(42)
             while True:
                 arbitrary_vector = rng.rand(3) - 0.5  # Generate a vector with components between -0.5 and 0.5
                 if np.linalg.norm(np.cross(e1, arbitrary_vector)) > 1e-6: # Ensure not collinear
                     break # Exit loop if we found a non-collinear vector
             
-            # Calculate e2 using cross product with the arbitrary vector, this will really be 
-            e2_dir = np.cross(e1, arbitrary_vector)
-            norm_e2_dir = np.linalg.norm(e2_dir)
-            if norm_e2_dir < 1e-6 and verbose: # Vectors are collinear
-                print(f"collinear during decoding for mol {idx}")
-                sys.stdout.flush()
-                if np.allclose(arbitrary_vector, [1, 0, 0]):
-                    e2_dir = np.cross(e1, np.array([0, 1, 0]))
-                elif np.allclose(arbitrary_vector, [0, 1, 0]):
-                    e2_dir = np.cross(e1, np.array([0, 0, 1]))
-                else:
-                    e2_dir = np.cross(e1, np.array([1, 0, 0]))
-                norm_e2_dir = np.linalg.norm(e2_dir)
-
-            e2 = e2_dir / norm_e2_dir # Normalize e2
+            # Calculate e2 using cross product with the arbitrary vector, and calculate e3
+            e2 = np.cross(e1, arbitrary_vector)
+            e2 /= np.linalg.norm(e2)
 
             e3 = np.cross(e1, e2)
             e3 /= np.linalg.norm(e3)
@@ -162,9 +148,7 @@ def assign_cartesian_coordinates(mol, descriptors, verbose=False, idx=None):
             pos = np.array([0.0, 0.0, 0.0])
 
         atom_positions[id] = pos
-
         conf.SetAtomPosition(id, tuple(pos))
-        # print(f"Coords: {pos}")
 
     return mol
 
@@ -179,79 +163,79 @@ def parse_molecule_with_spherical_coordinates(embedded_smiles, verbose=False, id
     if verbose:
         print(f"Parsing molecule with spherical coordinates: {embedded_smiles} mol: {idx}")
         sys.stdout.flush()
-    return assign_cartesian_coordinates(mol, descriptors, verbose, idx)
+    return calculate_cartesian_from__spherical(mol, descriptors, verbose, idx)
 
 
-def reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf):
-    """Reconstructs molecules from embedded SMILES and writes to an SDF file."""
-    writer = Chem.SDWriter(output_sdf)
-    for idx, embedded_smiles in enumerate(embedded_smiles_list):
-        if idx == 200000:
-            break
-        try:
-            if idx % 5000 == 0:
-                print(idx)
-                sys.stdout.flush()
+# def reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf):
+#     """Reconstructs molecules from embedded SMILES and writes to an SDF file."""
+#     writer = Chem.SDWriter(output_sdf)
+#     for idx, embedded_smiles in enumerate(embedded_smiles_list):
+#         if idx == 200000:
+#             break
+#         try:
+#             if idx % 5000 == 0:
+#                 print(idx)
+#                 sys.stdout.flush()
 
-            smiles, descriptors = parse_embedded_smiles(embedded_smiles)
-            # print(f"\nProcessing Molecule {idx}...")
-            # print(f"SMILES: {smiles}")
-            # print(f"Descriptors: {descriptors}")
+#             smiles, descriptors = parse_embedded_smiles(embedded_smiles)
+#             # print(f"\nProcessing Molecule {idx}...")
+#             # print(f"SMILES: {smiles}")
+#             # print(f"Descriptors: {descriptors}")
 
-            mol = Chem.MolFromSmiles(smiles, sanitize=False)
-            if exclude_h:
-                mol = Chem.RemoveHs(mol)
-                mol = Chem.SanitizeMol(mol)
-            if mol is None:
-                print(f"Molecule {idx+1}: Invalid SMILES '{smiles}'.")
-                continue
+#             mol = Chem.MolFromSmiles(smiles, sanitize=False)
+#             if exclude_h:
+#                 mol = Chem.RemoveHs(mol)
+#                 mol = Chem.SanitizeMol(mol)
+#             if mol is None:
+#                 print(f"Molecule {idx+1}: Invalid SMILES '{smiles}'.")
+#                 continue
 
-            mol_with_coords = assign_cartesian_coordinates(mol, descriptors)
+#             mol_with_coords = assign_cartesian_coordinates(mol, descriptors)
             
-            # Optional: Optimize geometry (e.g., using UFF)
-            # AllChem.UFFOptimizeMolecule(mol_with_coords)
+#             # Optional: Optimize geometry (e.g., using UFF)
+#             # AllChem.UFFOptimizeMolecule(mol_with_coords)
             
-            writer.write(mol_with_coords)
-            # print(f"Molecule {idx}: Successfully reconstructed and written to SDF.")
+#             writer.write(mol_with_coords)
+#             # print(f"Molecule {idx}: Successfully reconstructed and written to SDF.")
         
-        except Exception as e:
-            print(f"Molecule {idx+1}: Error - {str(e)}")
+#         except Exception as e:
+#             print(f"Molecule {idx+1}: Error - {str(e)}")
     
-    writer.close()
-    print(f"\nAll molecules have been written to '{output_sdf}'")
-    sys.stdout.flush()
+#     writer.close()
+#     print(f"\nAll molecules have been written to '{output_sdf}'")
+#     sys.stdout.flush()
 
-if __name__ == '__main__':
-    out_file = "outputs/output_inv_with_H.txt"
-    if exclude_h:
-        out_file = "outputs/output_inv.txt"
-    sys.stdout = open(out_file, "w") 
+# if __name__ == '__main__':
+#     out_file = "outputs/output_inv_with_H.txt"
+#     if exclude_h:
+#         out_file = "outputs/output_inv.txt"
+#     sys.stdout = open(out_file, "w") 
 
-    data_file = "/auto/home/filya/3DMolGen/molgen3D/data_processing/mol_9496_.jsonl"
-    # data_file = "/auto/home/filya/3DMolGen/train_embedded_spherical_with_H/train_data_0.jsonl"
-    # if exclude_h:
-    #     data_file = "/auto/home/filya/3DMolGen/train_embedded_spherical/train_data_0.jsonl"
+#     data_file = "/auto/home/filya/3DMolGen/molgen3D/data_processing/mol_9496_.jsonl"
+#     # data_file = "/auto/home/filya/3DMolGen/train_embedded_spherical_with_H/train_data_0.jsonl"
+#     # if exclude_h:
+#     #     data_file = "/auto/home/filya/3DMolGen/train_embedded_spherical/train_data_0.jsonl"
 
-    embedded_smiles_list = []
-    with open(data_file, 'r') as f:
-        for line_number, line in enumerate(f):
-            try:
-                json_object = json.loads(line)
-                if "conformers" in json_object:
-                    conformers_data = json_object["conformers"]
-                    if isinstance(conformers_data, dict) and "embedded_smiles" in conformers_data:
-                        embedded_smiles_list.append(conformers_data["embedded_smiles"])
-                    else:
-                        print(f"Warning: 'embedded_smiles' key not found within 'conformers' on line {line_number} or 'conformers' is not in expected format.")
-                else:
-                    print(f"Warning: 'conformers' key not found in JSON object on line {line_number}.")
+#     embedded_smiles_list = []
+#     with open(data_file, 'r') as f:
+#         for line_number, line in enumerate(f):
+#             try:
+#                 json_object = json.loads(line)
+#                 if "conformers" in json_object:
+#                     conformers_data = json_object["conformers"]
+#                     if isinstance(conformers_data, dict) and "embedded_smiles" in conformers_data:
+#                         embedded_smiles_list.append(conformers_data["embedded_smiles"])
+#                     else:
+#                         print(f"Warning: 'embedded_smiles' key not found within 'conformers' on line {line_number} or 'conformers' is not in expected format.")
+#                 else:
+#                     print(f"Warning: 'conformers' key not found in JSON object on line {line_number}.")
 
-            except json.JSONDecodeError as e:
-                print(f"Error: JSONDecodeError on line {line_number}: {e}")
-                print(f"Line causing error: {line.strip()}")
+#             except json.JSONDecodeError as e:
+#                 print(f"Error: JSONDecodeError on line {line_number}: {e}")
+#                 print(f"Line causing error: {line.strip()}")
 
-    output_sdf = "mol_9496-rec.sdf"
-    # output_sdf = "reconstructed_mols/reconstructed_molecules_1_with_H.sdf"
-    # if exclude_h:
-    #     output_sdf = "reconstructed_mols/reconstructed_molecules_1.sdf"
-    reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf)
+#     output_sdf = "mol_9496-rec.sdf"
+#     # output_sdf = "reconstructed_mols/reconstructed_molecules_1_with_H.sdf"
+#     # if exclude_h:
+#     #     output_sdf = "reconstructed_mols/reconstructed_molecules_1.sdf"
+#     reconstruct_sdf_from_embedded_smiles(embedded_smiles_list, output_sdf)
