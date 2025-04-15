@@ -16,7 +16,9 @@ __pycache__/
 
 data/
 results/
-
+eval_results/
+gen_results/
+notebooks/
 # Log files
 *.log
 *.csv
