@@ -4,143 +4,21 @@ import ast
 from rdkit import Chem
 import os.path as osp
 from typing import Dict
-import pickle
 import json
 import datamol as dm
 import numpy as np
 from loguru import logger as log
 from tqdm import tqdm
-<<<<<<< HEAD:data_processing/preprocessing_forked_ET_Flow.py
-from get_spherical_from_cartesian import get_smiles, get_mol_descriptors
 import re
-=======
 import random
 random.seed(42)
->>>>>>> 392db4e (restructure project (dependencies not fixed)):molgen3D/data_processing/preprocessing_forked_ET_Flow.py
 
-def load_pkl(file_path: str):
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"File {file_path} does not exist.")
-    with open(file_path, "rb") as f:
-        return pickle.load(f)
-    
-def load_json(path):
-<<<<<<< HEAD:data_processing/preprocessing_forked_ET_Flow.py
-    with open(path, "r") as fp:  # Unpickling
-=======
-    """Loads json file"""
-    with open(path, "r") as fp:  
->>>>>>> 392db4e (restructure project (dependencies not fixed)):molgen3D/data_processing/preprocessing_forked_ET_Flow.py
-        return json.load(fp)
-    
-def embed_coordinates(mol, smiles, order):
-    # Get the conformer's positions
-    conf = mol.GetConformer()
-    
-    # Split the SMILES into tokens
-    tokens = []
-    i = 0
-    n = len(smiles)
-    while i < n:
-        if smiles[i] == '[':
-            # Parse bracketed atom
-            j = i + 1
-            while j < n and smiles[j] != ']':
-                j += 1
-            if j >= n:
-                j = n - 1
-            tokens.append(('atom', smiles[i:j+1]))
-            i = j + 1
-        elif smiles[i] in {'-', '=', '#', ':', '/', '\\'}:
-            # Bond symbols
-            tokens.append(('bond', smiles[i]))
-            i += 1
-        elif smiles[i].isdigit() or smiles[i] == '%':
-            # Handle ring numbers
-            if smiles[i] == '%':
-                if i + 2 < n and smiles[i+1].isdigit() and smiles[i+2].isdigit():
-                    tokens.append(('ring', smiles[i:i+3]))
-                    i += 3
-                else:
-                    tokens.append(('ring', smiles[i]))
-                    i += 1
-            else:
-                j = i
-                while j < n and smiles[j].isdigit():
-                    j += 1
-                tokens.append(('ring', smiles[i:j]))
-                i = j
-        elif smiles[i] in {'(', ')'}:
-            # Branch
-            tokens.append(('branch', smiles[i]))
-            i += 1
-        elif smiles[i].isupper() or smiles[i].islower():
-            # Element symbol followed by optional digits
-            start = i
-            # Parse element
-            if smiles[i].isupper() and i + 1 < n and smiles[i+1].islower():
-                i += 2
-            else:
-                i += 1
-            # Parse digits
-            while i < n and smiles[i].isdigit():
-                i += 1
-            tokens.append(('atom', smiles[start:i]))
-        else:
-            # Unknown character, skip
-            i += 1
-    
-    # Extract atom tokens and validate count
-    atom_tokens = [token[1] for token in tokens if token[0] == 'atom']
-    if len(atom_tokens) != len(order):
-        raise ValueError("Mismatch between atom tokens count and order list length.")
-    
-    # Generate coordinate strings for each atom in order
-    coord_strings = []
-    for atom_idx in order:
-        pos = conf.GetAtomPosition(atom_idx)
-        coord_str = f"<{pos.x:.4f},{pos.y:.4f},{pos.z:.4f}>"
-        coord_strings.append(coord_str)
-    
-    # Replace atom tokens with embedded coordinates
-    current_atom = 0
-    new_tokens = []
-    for token in tokens:
-        if token[0] == 'atom':
-            new_token = f"{token[1][:-1]}{coord_strings[current_atom]}]"
-            new_tokens.append(new_token)
-            current_atom += 1
-        else:
-            new_tokens.append(token[1])
-    
-    # Join tokens to form the new SMILES
-    embedded_smiles = ''.join(new_tokens)
-    return embedded_smiles
+from molgen3D.utils.utils import load_pkl, load_json
+from molgen3D.utils.data_processing_utils import encode_cartesian_raw    
 
-
-def get_spherical_embedded(mol, canonical_smiles, embedded_smiles, geom_id, precision=4):
-    descriptors_smiles_indexation = get_mol_descriptors(mol, geom_id)
-    smiles_list, smiles_to_sdf, sdf_to_smiles = get_smiles(mol)
-    descriptors = []
-    for i in range(len(descriptors_smiles_indexation)):
-        descriptors.append(descriptors_smiles_indexation[sdf_to_smiles[i]]) #descriptors[i] -> of the i-th atom in sdf indexation, sdf_to_smiles[i]-th atom in smiles indexation
-    for atm_ind in range(len(descriptors)):
-        desc_string = descriptors[atm_ind]
-        number_strings = re.findall(r"[-+]?\d*\.\d+|\d+", desc_string)
-        descriptor = [float(num) for num in number_strings]
-        r, theta, abs_phi, sign_phi = descriptor
-        embedded_smiles = embedded_smiles.replace(f":{atm_ind}]", f"<{r:.{precision}f},{theta:.{precision}f},{abs_phi:.{precision}f},{int(sign_phi)}>]")
-    return {"canonical_smiles": canonical_smiles,
-            "geom_id": geom_id, 
-            "embedded_smiles": embedded_smiles}
-
-embedding_func_selector = {
-<<<<<<< HEAD:data_processing/preprocessing_forked_ET_Flow.py
-    "cartesian": get_cartesian_embedded,
-    "spherical": get_spherical_embedded
-=======
-    "cartesian": embed_coordinates
->>>>>>> 392db4e (restructure project (dependencies not fixed)):molgen3D/data_processing/preprocessing_forked_ET_Flow.py
+encoding_func_selector = {
+    "cartesian": encode_cartesian_raw,
+    # "spherical": get_spherical_embedded
 }
 
 def read_mol(
@@ -192,7 +70,7 @@ def preprocess(raw_path: str, dest_folder_path: str, indices_path, embedding_typ
     log.info(f"Reading files from {raw_path}")
     partitions = ["qm9", "drugs"]
     total_confs, total_mols = 0, 0
-    embedding_func = embedding_func_selector[embedding_type]
+    embedding_func = encoding_func_selector[embedding_type]
 
     for partition in partitions:
         train_list, valid_list = [], []
