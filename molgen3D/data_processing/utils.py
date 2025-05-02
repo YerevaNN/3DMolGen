@@ -1,0 +1,112 @@
+import re
+import ast
+from rdkit import Chem
+from rdkit.Geometry import Point3D
+
+from rdkit.Chem.rdchem import HybridizationType
+from rdkit.Chem.rdchem import BondType as BT
+from rdkit.Chem.rdchem import ChiralType
+
+dihedral_pattern = Chem.MolFromSmarts('[*]~[*]~[*]~[*]')
+chirality = {ChiralType.CHI_TETRAHEDRAL_CW: -1.,
+             ChiralType.CHI_TETRAHEDRAL_CCW: 1.,
+             ChiralType.CHI_UNSPECIFIED: 0,
+             ChiralType.CHI_OTHER: 0}
+
+bonds = {BT.SINGLE: 0, BT.DOUBLE: 1, BT.TRIPLE: 2, BT.AROMATIC: 3}
+qm9_types = {'H': 0, 'C': 1, 'N': 2, 'O': 3, 'F': 4}
+drugs_types = {'H': 0, 'Li': 1, 'B': 2, 'C': 3, 'N': 4, 'O': 5, 'F': 6, 'Na': 7, 'Mg': 8, 'Al': 9, 'Si': 10,
+               'P': 11, 'S': 12, 'Cl': 13, 'K': 14, 'Ca': 15, 'V': 16, 'Cr': 17, 'Mn': 18, 'Cu': 19, 'Zn': 20,
+               'Ga': 21, 'Ge': 22, 'As': 23, 'Se': 24, 'Br': 25, 'Ag': 26, 'In': 27, 'Sb': 28, 'I': 29, 'Gd': 30,
+               'Pt': 31, 'Au': 32, 'Hg': 33, 'Bi': 34}
+
+def truncate(x, precision=4):
+    s = repr(x)            # full‑precision repr, e.g. '-0.123456789'
+    if '.' in s:
+        intp, frac = s.split('.', 1)
+        frac = (frac + '000')[:precision]   # pad then cut off
+        return f"{intp}.{frac}"
+    else:
+        return s  # integer
+
+def encode_cartesian_raw(mol, precision=4):
+    mol = Chem.RemoveHs(mol)
+    smiles = Chem.MolToSmiles(mol, canonical=True, isomericSmiles=True)
+    atom_order = list(map(int, ast.literal_eval(mol.GetProp('_smilesAtomOutputOrder'))))
+    # Get the conformer's positions
+    conf = mol.GetConformer()
+    pos = conf.GetPositions()
+
+    pattern = r'\[[^\[\]]+\]|Br|Cl|Si|[BCNOFPSIcbnosprse]|[0-9]+|=|#|-|\+|/|\\|\(|\)'
+    tokens = re.findall(pattern, smiles)
+
+    out = []
+    atom_idx = 0
+    for tok in tokens:
+        # if it's an atom symbol (including bracket‐atom)
+        if re.fullmatch(r'\[[^\[\]]+\]|Br|Cl|Si|[BCNOFPSIcbnosprse]', tok):
+            ai = atom_order[atom_idx]
+            x,y,z = pos[ai]
+            out.append(f"{tok}<{truncate(x, precision)},{truncate(y, precision)},{truncate(z, precision)}>")
+            atom_idx += 1
+        else:
+            out.append(tok)
+
+    embedded_smiles = "".join(out)
+    return embedded_smiles, smiles
+
+def decode_cartesian_raw(embedded_smiles):
+    """
+    Reconstruct an RDKit Mol with 3D coordinates from an 'embedded' SMILES string,
+    where each atom token is immediately followed by '<x,y,z>'.
+
+    Parameters
+    ----------
+    embedded_smiles : str
+        SMILES string with per-atom coordinates embedded, e.g.
+        'Br<1.234,-0.567,2.890>C<1.890,0.123,0.456>(=C<...>/c<...>1c<...>...)'
+
+    Returns
+    -------
+    mol : rdkit.Chem.Mol
+        RDKit molecule with one conformer whose atom positions match the embedded coordinates.
+    """
+    # Regex: (1) atom-with-coords OR (2) other SMILES tokens
+    atom_coord_pattern = r'(\[[^\[\]]+\]|Br|Cl|Si|[BCNOFPSIcbnosprse])<([^>]+)>'
+    other_pattern = r'([0-9]+|=|#|-|\+|/|\\|\(|\))'
+    regex = re.compile(f'{atom_coord_pattern}|{other_pattern}')
+    
+    tokens = []
+    coords = []
+    
+    for match in regex.finditer(embedded_smiles):
+        atom = match.group(1)
+        coord_str = match.group(2)
+        other = match.group(3)
+        
+        if atom:
+            # We matched an atom with coords
+            tokens.append(atom)
+            x_str, y_str, z_str = coord_str.split(',')
+            coords.append((float(x_str), float(y_str), float(z_str)))
+        elif other:
+            # We matched a SMILES syntax token
+            tokens.append(other)
+    
+    # Rebuild clean SMILES by joining tokens
+    clean_smiles = ''.join(tokens)
+    
+    # Create RDKit Mol (implicit Hs, but consistent with encoding where RemoveHs was used)
+    mol = Chem.MolFromSmiles(clean_smiles)
+    if mol is None:
+        raise ValueError("Failed to parse SMILES: " + clean_smiles)
+    
+    # Build a new conformer and set atom positions
+    conf = Chem.Conformer(mol.GetNumAtoms())
+    for idx, (x, y, z) in enumerate(coords):
+        conf.SetAtomPosition(idx, Point3D(x, y, z))
+    mol.AddConformer(conf, assignId=True)
+    
+    return mol
+
+
