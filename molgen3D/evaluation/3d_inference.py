@@ -10,10 +10,11 @@ from collections import defaultdict, Counter
 import submitit
 import os
 from datetime import datetime
+torch.set_grad_enabled(False)
 
 # from utils import parse_molecule_with_coordinates
 from molgen3D.config.sampling_config import sampling_configs, gen_num_codes
-from molgen3D.utils.data_processing_utils import decode_cartesian_raw
+from molgen3D.data_processing.utils import decode_cartesian_raw
 torch.backends.cudnn.benchmark = True
 
 def set_seed(seed=42):
@@ -30,7 +31,7 @@ def load_model_tokenizer(model_path, tokenizer_path, torch_dtype="float32", atte
     tokenizer  = AutoTokenizer.from_pretrained(tokenizer_path, padding_side='left')
     model = AutoModelForCausalLM.from_pretrained(model_path, 
                                                  torch_dtype=getattr(torch, torch_dtype),
-                                                 device_map=device)
+                                                 device_map=device).eval()
     tokenizer.pad_token = tokenizer.eos_token
     model.generation_config.pad_token_id = tokenizer.pad_token_id
     print(f"{model.dtype=}, {model.device=}")
@@ -59,13 +60,14 @@ def process_batch(model, tokenizer, batch, gen_config):
         canonical_smiles_list.extend([canonical_smiles] * num_gens)
 
     tokenized_prompts = tokenizer(prompts, return_tensors="pt", padding=True).to(model.device)
-    outputs = model.generate(
-        input_ids=tokenized_prompts["input_ids"], 
-        attention_mask=tokenized_prompts["attention_mask"],
-        max_new_tokens=3000, 
-        eos_token_id=128329, 
-        kwargs=gen_config,
-    )
+    with torch.no_grad():
+        outputs = model.generate(
+            input_ids=tokenized_prompts["input_ids"], 
+            attention_mask=tokenized_prompts["attention_mask"],
+            max_new_tokens=2000, 
+            eos_token_id=128329, 
+            generation_config=gen_config,
+        )
     decoded_outputs = tokenizer.batch_decode(outputs)
     for geom_smiles, canonical_smiles, out in zip(geom_smiles_list, canonical_smiles_list, decoded_outputs):
         logger.info(f"\n{geom_smiles=}")
@@ -79,14 +81,14 @@ def process_batch(model, tokenizer, batch, gen_config):
                 try:
                     mol_obj = decode_cartesian_raw(generated_conformer)
                     generations[geom_smiles].append(mol_obj)
-                    # logger.info(f"correct generation: \n{canonical_smiles=}\n{generated_smiles=}")
                 except:
                     logger.info(f"smiles fails parsing: \n{canonical_smiles=}\n{generated_smiles=}")
                     stats["mol_parse_fail"] += 1
         else:
             stats["no_eos"] += 1
             logger.info(f"no eos: \n{canonical_smiles=}\n{out[out.find('[/SMILES]')+len('[/SMILES]'):]}")
-
+    del tokenized_prompts, outputs, decoded_outputs
+    torch.cuda.empty_cache()
     return generations, stats
 
 
@@ -158,9 +160,9 @@ if __name__ == "__main__":
         paths = yaml.safe_load(f)
     
     executor = submitit.AutoExecutor(folder="~/slurm_jobs/conf_gen/job_%j")
-    # node = "a100"
-    # # executor = submitit.local.local.LocalExecutor(folder="~/slurm_jobs/conf_gen/job_%j")
-    node = "local"
+    node = "all"
+    # executor = submitit.local.local.LocalExecutor(folder="~/slurm_jobs/conf_gen/job_%j")
+    # node = "local"
     n_gpus = 1
     experiment_name = "conf_gen"
     executor.update_parameters(
@@ -169,28 +171,28 @@ if __name__ == "__main__":
         gpus_per_node=n_gpus,
         nodes=1,
         mem_gb=80,
-        cpus_per_task=n_gpus * 15,
+        cpus_per_task=n_gpus * 5,
         slurm_additional_parameters={"partition": node},
     )
 
     inference_config = {
-        "model_path": paths["model_paths"]["27M_1x_path"],
+        "model_path": paths["model_paths"]["new_model"],
         "tokenizer_path": paths["tokenizer_path"],
         "test_data_path": paths["test_data_path"],
-        "batch_size": 100,
+        "batch_size": 10,
         "num_gens": gen_num_codes["2k_per_conf"],
         "gen_config": sampling_configs["top_p_sampling"], 
-        "device": "cuda:0",
+        "device": "cuda",
         "results_path": paths["results_path"],
-        "run_name": "27m_1x_2k_toppsampling",  # Track run details
+        "run_name": "new1b",  # Track run details
     }
 
     # run locally
-    generations, stats = run_inference(inference_config=inference_config)
+    # generations, stats = run_inference(inference_config=inference_config)
     
     # # run on slurm
-    # job = executor.submit(run_inference, 
-    #                       inference_config=inference_config)
+    job = executor.submit(run_inference, 
+                          inference_config=inference_config)
 
     ## run grid search
     # param_grid = {
