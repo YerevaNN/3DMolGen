@@ -1,40 +1,33 @@
 from rdkit import Chem
-import ast
-import re
+import os.path as osp
+from statistics import mode, StatisticsError
+import numpy as np
+import pandas as pd
 
-def parse_molecule_with_coordinates(input_str):
-    # Extract SMILES by removing coordinate annotations
-    extracted_smiles = re.sub(r'<[^>]+>', '', input_str)
-    
-    # Parse the extracted SMILES
-    mol = Chem.AddHs(Chem.MolFromSmiles(extracted_smiles))
+def clean_confs(smi, confs):
+    good_ids = []
+    smi = Chem.MolToSmiles(Chem.MolFromSmiles(smi), isomericSmiles=False)
+    for i, c in enumerate(confs):
+        conf_smi = Chem.MolToSmiles(Chem.RemoveHs(c), isomericSmiles=False)
+        if conf_smi == smi:
+            good_ids.append(i)
+    return [confs[i] for i in good_ids]
 
-    if mol is None:
-        raise ValueError("Failed to parse the extracted SMILES.")
-    canonical = Chem.MolToSmiles(mol, canonical=True, allHsExplicit=True)
-    
-    # Retrieve the atom output order from the molecule's properties
-    if not mol.HasProp('_smilesAtomOutputOrder'):
-        raise ValueError("SMILES atom output order not found.")
-    atom_output_order = ast.literal_eval(mol.GetProp('_smilesAtomOutputOrder'))
-    
-    # Parse coordinates from the input string
-    coords = []
-    atom_pattern = re.compile(r'\[([^<]+)<([^>]+)>\]')
-    for match in atom_pattern.finditer(input_str):
-        coord_str = match.group(2)
-        coord = list(map(float, coord_str.split(',')))
-        coords.append(coord)
-    
-    # Verify coordinate count matches atom count
-    if len(coords) != mol.GetNumAtoms():
-        raise ValueError("Mismatch between number of coordinates and atoms.")
-    
-    # Create conformer and assign coordinates
-    conf = Chem.Conformer(mol.GetNumAtoms())
-    for input_idx, atom_idx in enumerate(atom_output_order):
-        x, y, z = coords[input_idx]
-        conf.SetAtomPosition(atom_idx, Chem.rdGeometry.Point3D(x, y, z))
-    mol.AddConformer(conf)
-    
-    return mol
+def correct_smiles(true_confs):
+
+    conf_smis = []
+    for c in true_confs:
+        conf_smi = Chem.MolToSmiles(Chem.RemoveHs(c))
+        conf_smis.append(conf_smi)
+
+    try:
+        common_smi = mode(conf_smis)
+    except StatisticsError:
+        return None  # these should be cleaned by hand
+
+    if np.sum([common_smi == smi for smi in conf_smis]) == len(conf_smis):
+        return mode(conf_smis)
+    else:
+        print('consensus', common_smi)  # these should probably also be investigated manually
+        return common_smi
+        # return None
