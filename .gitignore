@@ -14,7 +14,7 @@ data/
 *.pyd
 __pycache__/
 
-data/
+#data/
 results/
 eval_results/
 gen_results/
