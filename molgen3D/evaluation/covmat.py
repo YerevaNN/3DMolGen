@@ -96,8 +96,8 @@ class CovMatEvaluator(object):
         # gen_mols = {}
         missing_mols = 0
         for smiles in ref_data.keys():
-
-            gen_mols = gen_data.get(smiles,None)
+            canonical_smiles = ref_data[smiles]['canonical_smiles']
+            gen_mols = gen_data.get(canonical_smiles,None)
             if not gen_mols:
                 # print(f"mol doesnt exist for {smiles}")
                 missing_mols += 1

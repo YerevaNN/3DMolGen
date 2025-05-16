@@ -15,6 +15,8 @@ torch.set_grad_enabled(False)
 # from utils import parse_molecule_with_coordinates
 from molgen3D.config.sampling_config import sampling_configs, gen_num_codes
 from molgen3D.data_processing.utils import decode_cartesian_raw
+from molgen3D.evaluation.utils import extract_between
+
 torch.backends.cudnn.benchmark = True
 
 def set_seed(seed=42):
@@ -27,10 +29,11 @@ def set_seed(seed=42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def load_model_tokenizer(model_path, tokenizer_path, torch_dtype="float32", attention_imp="flash_attention_2", device="auto"):
+def load_model_tokenizer(model_path, tokenizer_path, torch_dtype, attention_imp="flash_attention_2", device="auto"):
     tokenizer  = AutoTokenizer.from_pretrained(tokenizer_path, padding_side='left')
     model = AutoModelForCausalLM.from_pretrained(model_path, 
                                                  torch_dtype=getattr(torch, torch_dtype),
+                                                #  attn_implementation=attention_imp,
                                                  device_map=device).eval()
     tokenizer.pad_token = tokenizer.eos_token
     model.generation_config.pad_token_id = tokenizer.pad_token_id
@@ -46,20 +49,11 @@ def save_results(results_path, generations, stats):
         results_file_txt.write(f"{stats=}")
 
 
-def process_batch(model, tokenizer, batch, gen_config):
-    prompts, geom_smiles_list, canonical_smiles_list, generations = [], [], [], defaultdict(list)
+def process_batch(model, tokenizer, batch, gen_config, tag_pattern):
+    generations = defaultdict(list)
     stats = {"smiles_mismatch":0, "mol_parse_fail" :0, "no_eos":0}
-
-    for sample in batch:
-        geom_smiles = sample["geom_smiles"]
-        canonical_smiles = sample["canonical_smiles"]
-        num_gens =  sample["num_gens"]
-        num_prompts = 1 if inference_config["gen_config"].num_beams > 1 else num_gens
-        prompts.extend([f"[SMILES]{sample['canonical_smiles']}[/SMILES]"] * num_prompts)
-        geom_smiles_list.extend([geom_smiles] * num_gens)
-        canonical_smiles_list.extend([canonical_smiles] * num_gens)
-
-    tokenized_prompts = tokenizer(prompts, return_tensors="pt", padding=True).to(model.device)
+    tokenized_prompts = tokenizer(batch, return_tensors="pt", padding=True).to(model.device)
+    logger.info(f"\n*******\n{len(batch)=} {max(len(b) for b in batch)=} {tokenized_prompts['input_ids'].shape=}")
     with torch.no_grad():
         outputs = model.generate(
             input_ids=tokenized_prompts["input_ids"], 
@@ -69,18 +63,19 @@ def process_batch(model, tokenizer, batch, gen_config):
             generation_config=gen_config,
         )
     decoded_outputs = tokenizer.batch_decode(outputs)
-    for geom_smiles, canonical_smiles, out in zip(geom_smiles_list, canonical_smiles_list, decoded_outputs):
-        logger.info(f"\n{geom_smiles=}")
-        if "[/CONFORMER]" in out:
-            generated_conformer = out[out.find("[CONFORMER]")+len("[CONFORMER]"):out.find("[/CONFORMER]")]
-            generated_smiles = re.sub(r'<[^>]*>', '', generated_conformer) 
+    for out in decoded_outputs:
+        canonical_smiles = extract_between(out, "[SMILES]", "[/SMILES]")
+        generated_conformer = extract_between(out, "[CONFORMER]", "[/CONFORMER]")
+        logger.info(f"\n{canonical_smiles=}\nlen out {len(out)=} {out=}")
+        if generated_conformer:
+            generated_smiles = tag_pattern.sub('', generated_conformer)         
             if generated_smiles != canonical_smiles:
                 logger.info(f"smiles mismatch: \n{canonical_smiles=}\n{generated_smiles=}")
                 stats["smiles_mismatch"] += 1
             else:
                 try:
                     mol_obj = decode_cartesian_raw(generated_conformer)
-                    generations[geom_smiles].append(mol_obj)
+                    generations[canonical_smiles].append(mol_obj)
                 except:
                     logger.info(f"smiles fails parsing: \n{canonical_smiles=}\n{generated_smiles=}")
                     stats["mol_parse_fail"] += 1
@@ -102,50 +97,27 @@ def run_inference(inference_config: dict):
 
     model, tokenizer = load_model_tokenizer(model_path=inference_config["model_path"],
                                             tokenizer_path=inference_config["tokenizer_path"],
+                                            torch_dtype=inference_config["torch_dtype"],
                                             device=inference_config["device"])
     
     with open(inference_config["test_data_path"],'rb') as test_data_file:
         test_data = cloudpickle.load(test_data_file)
 
     num_gens_co = inference_config["num_gens"]
-    # num_gens_co = int(num_gens_co[0]) if type(num_gens_co) == str else num_gens_co
-
-    batch, generations = [], defaultdict(list)
-    batch_size = 0
+    tag_pattern = re.compile(r'<[^>]*>')
+    mols_list, batch, generations = [], [], defaultdict(list)
     stats = Counter({"smiles_mismatch":0, "mol_parse_fail" :0, "no_eos":0})
-    for sample in tqdm(test_data.values()):
-        num_confs = sample["num_confs"] 
-        num_gens = (num_confs * int(num_gens_co[0])) if type(num_gens_co) == str else num_gens_co
-        sample["num_gens"] = num_gens
-        if batch_size + num_gens <= inference_config["batch_size"]:
-            batch.append(sample)
-            batch_size += num_gens
-            if inference_config["gen_config"].num_beams > 1:
-                inference_config["batch_size"] = num_gens
-                inference_config["gen_config"].num_beams = num_gens
-                inference_config["gen_config"].num_beam_groups = num_gens
-                inference_config["gen_config"].num_return_sequences = num_gens
-        else:
-            outputs, stats_ = process_batch(model, 
-                                            tokenizer, 
-                                            batch, 
-                                            inference_config["gen_config"])
-            generations.update(outputs)
-            stats.update(stats_)
-            batch = [sample]
-            batch_size = num_gens
-            if inference_config["gen_config"].num_beams > 1:
-                inference_config["batch_size"] = num_gens
-                inference_config["gen_config"].num_beams = num_gens
-                inference_config["gen_config"].num_beam_groups = num_gens
-                inference_config["gen_config"].num_return_sequences = num_gens
+    for en, sample in enumerate(tqdm(test_data.values())):
+        num_gens = (sample["num_confs"] * int(num_gens_co[0])) if type(num_gens_co) == str else num_gens_co
+        mols_list.extend([f"[SMILES]{sample['canonical_smiles']}[/SMILES]"] * num_gens)
 
-    outputs, stats_ = process_batch(model, 
-                                    tokenizer, 
-                                    batch, 
-                                    inference_config["gen_config"])
-    generations.update(outputs) 
-    stats.update(stats_)
+    # Inference loop
+    for i in tqdm(range(0, len(mols_list), inference_config["batch_size"])):
+        batch = mols_list[i:i + inference_config["batch_size"]]
+        outputs, stats_ = process_batch(model, tokenizer, batch, inference_config["gen_config"], tag_pattern)
+        generations.update(outputs)
+        stats.update(stats_)
+        torch.cuda.empty_cache()  # Clear GPU memory after each batch
 
     save_results(results_path, generations, stats)
 
@@ -160,7 +132,7 @@ if __name__ == "__main__":
         paths = yaml.safe_load(f)
     
     executor = submitit.AutoExecutor(folder="~/slurm_jobs/conf_gen/job_%j")
-    node = "all"
+    node = "h100"
     # executor = submitit.local.local.LocalExecutor(folder="~/slurm_jobs/conf_gen/job_%j")
     # node = "local"
     n_gpus = 1
@@ -170,21 +142,23 @@ if __name__ == "__main__":
         timeout_min=24 * 24 * 60,
         gpus_per_node=n_gpus,
         nodes=1,
+        # slurm_gres="shard:80",
         mem_gb=80,
-        cpus_per_task=n_gpus * 5,
+        cpus_per_task=n_gpus * 15,
         slurm_additional_parameters={"partition": node},
     )
 
     inference_config = {
-        "model_path": paths["model_paths"]["new_model"],
+        "model_path": paths["model_paths"]["new100"],
         "tokenizer_path": paths["tokenizer_path"],
         "test_data_path": paths["test_data_path"],
-        "batch_size": 10,
+        "torch_dtype": "float32",
+        "batch_size": 256,
         "num_gens": gen_num_codes["2k_per_conf"],
         "gen_config": sampling_configs["top_p_sampling"], 
         "device": "cuda",
         "results_path": paths["results_path"],
-        "run_name": "new1b",  # Track run details
+        "run_name": "100m_bs256_fl32_t1.p.8",  # Track run details
     }
 
     # run locally
