@@ -9,8 +9,10 @@ model_paths:
   27M_10x_path: "/nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-27M_conformers/e079ba5527c040a88a35f8e8/step-426000"
   100M_120p_path: "/nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-100M_conformers/c29bd453f4ff497d8c99c8f7/step-30000"
   new_model: "/nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-1B_conformers/5ef3d8f4b9c2499f9d82c36c/step-10000"
+  new170: "/nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-170M_conformers/723a4ada660e4227b29a904a/step-10000"
+  new100: "/nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-100M_conformers/970772628302408f96b05877/step-10000"
 
 tokenizer_path: "/auto/home/menuab/code/YNNtitan/torchtitan/tokenizers/Llama-3.2-chem-1B-v1"
 # test_data_path: "/auto/home/menuab/code/3DMolGen/data/geom_test_set/drugs_test_inference.pickle"
-test_data_path: "/auto/home/menuab/code/3DMolGen/data/geom_drugs_test_set/drugs_test_inference.pickle"
+test_data_path: "/auto/home/menuab/code/3DMolGen/drugs_test_inference_.pickle"
 results_path: "/auto/home/menuab/code/3DMolGen/gen_results"
