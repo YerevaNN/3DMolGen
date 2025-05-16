@@ -3,10 +3,10 @@ import os
 from covmat import CovMatEvaluator, print_covmat_results
 from loguru import logger as log
 
-with open("/auto/home/menuab/code/3DMolGen/data/geom_drugs_test_set/drugs_test_inference.pickle", 'rb') as f:
+with open("/auto/home/menuab/code/3DMolGen/drugs_test_inference_.pickle", 'rb') as f:
     true_mols = pickle.load(f)
 
-gens_directory = "2025-03-19-10:13_1b_80p_2k_toppsampling"
+gens_directory = "2025-05-14-21:32_1b_bs64_fl32"
 gens_path = os.path.join("/auto/home/menuab/code/3DMolGen/gen_results/", gens_directory)
 
 results_path = os.path.join("/auto/home/menuab/code/3DMolGen/eval_results", gens_directory)

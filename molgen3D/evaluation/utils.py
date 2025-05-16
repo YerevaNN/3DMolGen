@@ -31,3 +31,12 @@ def correct_smiles(true_confs):
         print('consensus', common_smi)  # these should probably also be investigated manually
         return common_smi
         # return None
+
+def extract_between(text, start_marker, end_marker):
+    start = text.find(start_marker)
+    if start != -1:
+        start += len(start_marker)  # Move to the end of the start marker
+        end = text.find(end_marker, start)
+        if end != -1:
+            return text[start:end]
+    return ""  # Return empty if markers are not found
