@@ -12,8 +12,8 @@ beam_search_config = GenerationConfig(
 
 top_p_sampling_config = GenerationConfig (
   do_sample=True,
-  temperature=0.8,
-  top_p=0.9
+  temperature=1.0,
+  top_p=0.8
 )
 
 min_p_sampling_config= GenerationConfig(
