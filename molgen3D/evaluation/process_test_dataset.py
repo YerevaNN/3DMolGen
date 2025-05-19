@@ -63,8 +63,7 @@ for i in range(len(test_mols)):
         mol_count += 1
         print(f"num original confs {test_mols[i][1]} num correct confs {num_confs}, {geom_smiles}")
         
-    except e:
-        print(e)
+    except:
         print(i , '---')
     conf_count += num_confs
 
