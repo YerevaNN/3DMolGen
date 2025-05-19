@@ -3,6 +3,7 @@ import torch
 import cloudpickle
 import random
 import yaml
+import itertools
 import re
 from tqdm import tqdm
 from loguru import logger
@@ -148,51 +149,54 @@ if __name__ == "__main__":
         slurm_additional_parameters={"partition": node},
     )
 
-    inference_config = {
-        "model_path": paths["model_paths"]["new100"],
-        "tokenizer_path": paths["tokenizer_path"],
-        "test_data_path": paths["test_data_path"],
-        "torch_dtype": "float32",
-        "batch_size": 256,
-        "num_gens": gen_num_codes["2k_per_conf"],
-        "gen_config": sampling_configs["top_p_sampling"], 
-        "device": "cuda",
-        "results_path": paths["results_path"],
-        "run_name": "100m_bs256_fl32_t1.p.8",  # Track run details
-    }
+    # inference_config = {
+    #     "model_path": paths["model_paths"]["new1b"],
+    #     "tokenizer_path": paths["tokenizer_path"],
+    #     "test_data_path": paths["test_data_path"],
+    #     "torch_dtype": "bfloat16", 
+    #     "batch_size": 128,
+    #     "num_gens": gen_num_codes["2k_per_conf"], 
+    #     "gen_config": sampling_configs["top_p_sampling"], 
+    #     "device": "cuda",
+    #     "results_path": paths["results_path"],
+    #     "run_name": "1b_bs128_bf16_t.8p.8",  # Track run details
+    # }
 
     # run locally
     # generations, stats = run_inference(inference_config=inference_config)
     
     # # run on slurm
-    job = executor.submit(run_inference, 
-                          inference_config=inference_config)
+    # job = executor.submit(run_inference, 
+    #                       inference_config=inference_config)
 
-    ## run grid search
-    # param_grid = {
-    #     "model_path": list(paths["model_paths"].keys()),
-    #     "num_gens": list(gen_num_codes.keys()),
-    #     "gen_config": list(sampling_configs.keys()),
-    # }
+    # run grid search
+    param_grid = {
+        # "model_path": ["m380_1e", "m380_2e", "m380_3e", "m380_4e"],
+        "model_path": ["b1_1e", "b1_2e", "b1_3e", "b1_4e"],
+        # "num_gens": list(gen_num_codes.keys()),
+        "gen_config": ["min_p_sampling1", "min_p_sampling2", "min_p_sampling3",
+                       "top_p_sampling1", "top_p_sampling2", "top_p_sampling3",],
+    }
 
-    # jobs = []
-    # with executor.batch():
-    #     for model_key, num_gens_key, gen_config_key in itertools.product(*param_grid.values()):
-    #         # Update inference config dynamically
-    #         inference_config = {
-    #             "model_path": paths["model_paths"][model_key],
-    #             "tokenizer_path": paths["tokenizer_path"],
-    #             "test_data_path": paths["test_data_path"],
-    #             "batch_size": 200,
-    #             "num_gens": gen_num_codes[num_gens_key],
-    #             "gen_config": sampling_configs[gen_config_key], 
-    #             "device": "auto",
-    #             "results_path": results_path,
-    #             "run_name": f"{model_key}_{num_gens_key}_{gen_config_key}",  # Track run details
-    #         }
+    jobs = []
+    with executor.batch():
+        for model_key, gen_config_key in itertools.product(*param_grid.values()):
+            # Update inference config dynamically
+            inference_config = {
+                "model_path": paths["model_paths"][model_key],
+                "tokenizer_path": paths["tokenizer_path"],
+                "test_data_path": paths["test_data_path"],
+                "torch_dtype": "bfloat16",
+                "batch_size": 256,
+                "num_gens": gen_num_codes["2k_per_conf"],
+                "gen_config": sampling_configs[gen_config_key], 
+                "device": "cuda",
+                "results_path": paths["results_path"],
+                "run_name": f"{model_key}_{gen_config_key}",  # Track run details
+            }
 
-    #         # Submit job
-    #         job = executor.submit(run_inference, inference_config)
-    #         jobs.append(job)
+            # Submit job
+            job = executor.submit(run_inference, inference_config)
+            jobs.append(job)
 
     
