@@ -54,7 +54,6 @@ def process_batch(model, tokenizer, batch, gen_config, tag_pattern):
     generations = defaultdict(list)
     stats = {"smiles_mismatch":0, "mol_parse_fail" :0, "no_eos":0}
     tokenized_prompts = tokenizer(batch, return_tensors="pt", padding=True).to(model.device)
-    logger.info(f"\n*******\n{len(batch)=} {max(len(b) for b in batch)=} {tokenized_prompts['input_ids'].shape=}")
     with torch.no_grad():
         outputs = model.generate(
             input_ids=tokenized_prompts["input_ids"], 
@@ -67,22 +66,22 @@ def process_batch(model, tokenizer, batch, gen_config, tag_pattern):
     for out in decoded_outputs:
         canonical_smiles = extract_between(out, "[SMILES]", "[/SMILES]")
         generated_conformer = extract_between(out, "[CONFORMER]", "[/CONFORMER]")
-        logger.info(f"\n{canonical_smiles=}\nlen out {len(out)=} {out=}")
+        # logger.info(f"\n{canonical_smiles=}\nlen out {len(out)=} {out=}")
         if generated_conformer:
             generated_smiles = tag_pattern.sub('', generated_conformer)         
             if generated_smiles != canonical_smiles:
-                logger.info(f"smiles mismatch: \n{canonical_smiles=}\n{generated_smiles=}")
+                logger.info(f"smiles mismatch: \n{canonical_smiles=}\n{generated_smiles=}\n{out=}")
                 stats["smiles_mismatch"] += 1
             else:
                 try:
                     mol_obj = decode_cartesian_raw(generated_conformer)
                     generations[canonical_smiles].append(mol_obj)
                 except:
-                    logger.info(f"smiles fails parsing: \n{canonical_smiles=}\n{generated_smiles=}")
+                    logger.info(f"smiles fails parsing: \n{canonical_smiles=}\n{generated_smiles=}\n{out=}")
                     stats["mol_parse_fail"] += 1
         else:
             stats["no_eos"] += 1
-            logger.info(f"no eos: \n{canonical_smiles=}\n{out[out.find('[/SMILES]')+len('[/SMILES]'):]}")
+            logger.info(f"no eos: \n{out=}")
     del tokenized_prompts, outputs, decoded_outputs
     torch.cuda.empty_cache()
     return generations, stats
@@ -116,7 +115,8 @@ def run_inference(inference_config: dict):
     for i in tqdm(range(0, len(mols_list), inference_config["batch_size"])):
         batch = mols_list[i:i + inference_config["batch_size"]]
         outputs, stats_ = process_batch(model, tokenizer, batch, inference_config["gen_config"], tag_pattern)
-        generations.update(outputs)
+        for k, v in outputs.items():
+            generations[k].extend(v)
         stats.update(stats_)
         torch.cuda.empty_cache()  # Clear GPU memory after each batch
 
@@ -149,54 +149,54 @@ if __name__ == "__main__":
         slurm_additional_parameters={"partition": node},
     )
 
-    # inference_config = {
-    #     "model_path": paths["model_paths"]["new1b"],
-    #     "tokenizer_path": paths["tokenizer_path"],
-    #     "test_data_path": paths["test_data_path"],
-    #     "torch_dtype": "bfloat16", 
-    #     "batch_size": 128,
-    #     "num_gens": gen_num_codes["2k_per_conf"], 
-    #     "gen_config": sampling_configs["top_p_sampling"], 
-    #     "device": "cuda",
-    #     "results_path": paths["results_path"],
-    #     "run_name": "1b_bs128_bf16_t.8p.8",  # Track run details
-    # }
+    inference_config = {
+        "model_path": paths["model_paths"]["m380_4e"],
+        "tokenizer_path": paths["tokenizer_path"],
+        "test_data_path": paths["test_data_path"],
+        "torch_dtype": "bfloat16", 
+        "batch_size": 256,
+        "num_gens": gen_num_codes["1k_per_conf"], 
+        "gen_config": sampling_configs["top_p_sampling1"], 
+        "device": "cuda",
+        "results_path": paths["results_path"],
+        "run_name": "bugfixtest",  # Track run details
+    }
 
     # run locally
     # generations, stats = run_inference(inference_config=inference_config)
     
     # # run on slurm
-    # job = executor.submit(run_inference, 
-    #                       inference_config=inference_config)
+    job = executor.submit(run_inference, 
+                          inference_config=inference_config)
 
     # run grid search
-    param_grid = {
-        # "model_path": ["m380_1e", "m380_2e", "m380_3e", "m380_4e"],
-        "model_path": ["b1_1e", "b1_2e", "b1_3e", "b1_4e"],
-        # "num_gens": list(gen_num_codes.keys()),
-        "gen_config": ["min_p_sampling1", "min_p_sampling2", "min_p_sampling3",
-                       "top_p_sampling1", "top_p_sampling2", "top_p_sampling3",],
-    }
+    # param_grid = {
+    #     # "model_path": ["m380_1e", "m380_2e", "m380_3e", "m380_4e"],
+    #     "model_path": ["b1_1e", "b1_2e", "b1_3e", "b1_4e"],
+    #     # "num_gens": list(gen_num_codes.keys()),
+    #     "gen_config": ["min_p_sampling1", "min_p_sampling2", "min_p_sampling3",
+    #                    "top_p_sampling1", "top_p_sampling2", "top_p_sampling3",],
+    # }
 
-    jobs = []
-    with executor.batch():
-        for model_key, gen_config_key in itertools.product(*param_grid.values()):
-            # Update inference config dynamically
-            inference_config = {
-                "model_path": paths["model_paths"][model_key],
-                "tokenizer_path": paths["tokenizer_path"],
-                "test_data_path": paths["test_data_path"],
-                "torch_dtype": "bfloat16",
-                "batch_size": 256,
-                "num_gens": gen_num_codes["2k_per_conf"],
-                "gen_config": sampling_configs[gen_config_key], 
-                "device": "cuda",
-                "results_path": paths["results_path"],
-                "run_name": f"{model_key}_{gen_config_key}",  # Track run details
-            }
+    # jobs = []
+    # with executor.batch():
+    #     for model_key, gen_config_key in itertools.product(*param_grid.values()):
+    #         # Update inference config dynamically
+    #         inference_config = {
+    #             "model_path": paths["model_paths"][model_key],
+    #             "tokenizer_path": paths["tokenizer_path"],
+    #             "test_data_path": paths["test_data_path"],
+    #             "torch_dtype": "bfloat16",
+    #             "batch_size": 256,
+    #             "num_gens": gen_num_codes["2k_per_conf"],
+    #             "gen_config": sampling_configs[gen_config_key], 
+    #             "device": "cuda",
+    #             "results_path": paths["results_path"],
+    #             "run_name": f"{model_key}_{gen_config_key}",  # Track run details
+    #         }
 
-            # Submit job
-            job = executor.submit(run_inference, inference_config)
-            jobs.append(job)
+    #         # Submit job
+    #         job = executor.submit(run_inference, inference_config)
+    #         jobs.append(job)
 
     
