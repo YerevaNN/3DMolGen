@@ -3,10 +3,10 @@ import os
 from covmat import CovMatEvaluator, print_covmat_results
 from loguru import logger as log
 
-with open("/auto/home/menuab/code/3DMolGen/drugs_test_inference_.pickle", 'rb') as f:
+with open("/auto/home/menuab/code/3DMolGen/data/geom_drugs_test_set/drugs_test_inference.pickle", 'rb') as f:
     true_mols = pickle.load(f)
 
-gens_directory = "2025-05-14-21:32_1b_bs64_fl32"
+gens_directory = "2025-05-24-12:36_b1_4e_min_p_sampling12"
 gens_path = os.path.join("/auto/home/menuab/code/3DMolGen/gen_results/", gens_directory)
 
 results_path = os.path.join("/auto/home/menuab/code/3DMolGen/eval_results", gens_directory)
@@ -36,7 +36,7 @@ for pickle_path in sorted(pickles):
     # get dataframe of results
     cov_df, matching_metrics = print_covmat_results(results)
 
-    results_file.writelines(f"resutls for {pickle_path}\nnumber of missing mols {missing}\n"\
+    results_file.writelines(f"resutls for {pickle_path}\nnumber of missing mols {len(missing)}\n{missing}\n"\
                             f"{matching_metrics}\n{cov_df.iloc[14]}\n")
 results_file.close()
     
