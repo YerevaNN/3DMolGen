@@ -11,7 +11,7 @@ from copy import deepcopy
 
 from posebusters.modules.identity import check_identity
 from posebusters.modules.rmsd import check_rmsd
-from evaluation.conformer import get_conformer_statistics
+# from evaluation.conformer import get_conformer_statistics
 
 import logging
 
@@ -257,7 +257,7 @@ if __name__ == "__main__":
             print(f"Generated {len(mols)} conformers")
             return mols
 
-    from evaluation.dataset import SDFileDataset
+    from molgen3D.extra.dataset import SDFileDataset
 
     dataset = SDFileDataset(DATA, process_batch=ProcessBatchRDkit())
 
