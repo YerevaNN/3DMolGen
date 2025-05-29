@@ -94,13 +94,13 @@ class CovMatEvaluator(object):
         jobs = []
         # true_mols = {}
         # gen_mols = {}
-        missing_mols = 0
+        missing_mols = []
         for smiles in ref_data.keys():
             canonical_smiles = ref_data[smiles]['canonical_smiles']
             gen_mols = gen_data.get(canonical_smiles,None)
             if not gen_mols:
                 # print(f"mol doesnt exist for {smiles}")
-                missing_mols += 1
+                missing_mols.append(smiles)
                 continue
 
             ref_confs = ref_data[smiles]['confs']
@@ -184,7 +184,7 @@ if __name__ == "__main__":
     with open("/auto/home/menuab/code/3DMolGen/drugs_test_inference.pickle", 'rb') as f:
         true_mols = pickle.load(f)
 
-    evaluator = CovMatEvaluator(num_workers=2)
+    evaluator = CovMatEvaluator(num_workers=20)
     results, rmsd_results, missing_mols = evaluator(ref_data=true_mols, gen_data=model_preds)
     # print(results)
     log.info("Evaluation finished...")
