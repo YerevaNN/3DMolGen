@@ -114,11 +114,22 @@ def run_inference(inference_config: dict):
     # Inference loop
     for i in tqdm(range(0, len(mols_list), inference_config["batch_size"])):
         batch = mols_list[i:i + inference_config["batch_size"]]
-        outputs, stats_ = process_batch(model, tokenizer, batch, inference_config["gen_config"], tag_pattern)
-        for k, v in outputs.items():
-            generations[k].extend(v)
-        stats.update(stats_)
-        torch.cuda.empty_cache()  # Clear GPU memory after each batch
+        if max([len(b) for b in batch]) > 100:
+            mid = len(batch) // 2
+            sub_batches = [batch[:mid], batch[mid:]]
+        else:
+            sub_batches = [batch]
+        for sub_batch in sub_batches:
+            outputs, stats_ = process_batch(model, tokenizer, sub_batch, inference_config["gen_config"], tag_pattern)
+            for k, v in outputs.items():
+                generations[k].extend(v)
+            stats.update(stats_)
+            torch.cuda.empty_cache() 
+        # outputs, stats_ = process_batch(model, tokenizer, batch, inference_config["gen_config"], tag_pattern)
+        # for k, v in outputs.items():
+        #     generations[k].extend(v)
+        # stats.update(stats_)
+        # torch.cuda.empty_cache()  # Clear GPU memory after each batch
 
     save_results(results_path, generations, stats)
 
@@ -149,54 +160,60 @@ if __name__ == "__main__":
         slurm_additional_parameters={"partition": node},
     )
 
-    inference_config = {
-        "model_path": paths["model_paths"]["m380_4e"],
-        "tokenizer_path": paths["tokenizer_path"],
-        "test_data_path": paths["test_data_path"],
-        "torch_dtype": "bfloat16", 
-        "batch_size": 256,
-        "num_gens": gen_num_codes["1k_per_conf"], 
-        "gen_config": sampling_configs["top_p_sampling1"], 
-        "device": "cuda",
-        "results_path": paths["results_path"],
-        "run_name": "bugfixtest",  # Track run details
-    }
+    # inference_config = {
+    #     "model_path": paths["model_paths"]["m380_4e"],
+    #     "tokenizer_path": paths["tokenizer_path"],
+    #     "test_data_path": paths["test_data_path"],
+    #     "torch_dtype": "bfloat16", 
+    #     "batch_size": 1024,
+    #     "num_gens": gen_num_codes["1k_per_conf"], 
+    #     "gen_config": sampling_configs["top_p_sampling1"], 
+    #     "device": "cuda",
+    #     "results_path": paths["results_path"],
+    #     "run_name": "bugfixtest",  # Track run details
+    # }
 
     # run locally
     # generations, stats = run_inference(inference_config=inference_config)
     
     # # run on slurm
-    job = executor.submit(run_inference, 
-                          inference_config=inference_config)
+    # job = executor.submit(run_inference, 
+    #                       inference_config=inference_config)
 
     # run grid search
-    # param_grid = {
-    #     # "model_path": ["m380_1e", "m380_2e", "m380_3e", "m380_4e"],
-    #     "model_path": ["b1_1e", "b1_2e", "b1_3e", "b1_4e"],
-    #     # "num_gens": list(gen_num_codes.keys()),
-    #     "gen_config": ["min_p_sampling1", "min_p_sampling2", "min_p_sampling3",
-    #                    "top_p_sampling1", "top_p_sampling2", "top_p_sampling3",],
-    # }
+    param_grid = {
+        # "model_path": ["m380_1e", "m380_2e", "m380_3e", "m380_4e", "b1_1e", "b1_2e", "b1_3e", "b1_4e"],
+        "model_path": ["b1_4e"],
+        # "num_gens": list(gen_num_codes.keys()),
+        # "gen_config": ['top_p_sampling1'],
+        # "gen_config": ["top_p_sampling1", "top_p_sampling2", "top_p_sampling3","top_p_sampling4", "top_p_sampling5", "top_p_sampling6",
+        #                 "top_p_sampling7", "top_p_sampling8", "top_p_sampling9", "top_p_sampling10", 
+        #                 "top_p_sampling11", "top_p_sampling12", "top_p_sampling13", "top_p_sampling14", 
+        #                 "top_p_sampling15", "top_p_sampling16"],
+        "gen_config": ["min_p_sampling1", "min_p_sampling2", "min_p_sampling3","min_p_sampling4", "min_p_sampling5", "min_p_sampling6",
+                        "min_p_sampling7", "min_p_sampling8", "min_p_sampling9", "min_p_sampling10", 
+                        "min_p_sampling11", "min_p_sampling12"],
+    }
 
-    # jobs = []
-    # with executor.batch():
-    #     for model_key, gen_config_key in itertools.product(*param_grid.values()):
-    #         # Update inference config dynamically
-    #         inference_config = {
-    #             "model_path": paths["model_paths"][model_key],
-    #             "tokenizer_path": paths["tokenizer_path"],
-    #             "test_data_path": paths["test_data_path"],
-    #             "torch_dtype": "bfloat16",
-    #             "batch_size": 256,
-    #             "num_gens": gen_num_codes["2k_per_conf"],
-    #             "gen_config": sampling_configs[gen_config_key], 
-    #             "device": "cuda",
-    #             "results_path": paths["results_path"],
-    #             "run_name": f"{model_key}_{gen_config_key}",  # Track run details
-    #         }
+    jobs = []
+    with executor.batch():
+        for model_key, gen_config_key in itertools.product(*param_grid.values()):
+            # Update inference config dynamically
+            inference_config = {
+                "model_path": paths["model_paths"][model_key],
+                "tokenizer_path": paths["tokenizer_path"],
+                "test_data_path": paths["test_data_path"],
+                "torch_dtype": "bfloat16",
+                "batch_size": 256 if "380" in model_key else 256,
+                "num_gens": gen_num_codes["2k_per_conf"],
+                "gen_config": sampling_configs[gen_config_key], 
+                "device": "cuda",
+                "results_path": paths["results_path"],
+                "run_name": f"{model_key}_{gen_config_key}",  # Track run details
+            }
 
-    #         # Submit job
-    #         job = executor.submit(run_inference, inference_config)
-    #         jobs.append(job)
+            # Submit job
+            job = executor.submit(run_inference, inference_config)
+            jobs.append(job)
 
     
