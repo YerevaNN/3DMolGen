@@ -5,11 +5,17 @@ import pandas as pd
 import random
 from concurrent.futures import ProcessPoolExecutor
 import itertools
+import submitit
 
 def _bust_smi(smi, mols, config, full_report):
     try:
         b = PoseBusters(config=config)
-        m = b.bust(mols, None, None, full_report=full_report).mean().to_dict()
+        # run checks and collect per‐conformer results
+        dfb = b.bust(mols, None, None, full_report=full_report)
+        # average per-test metrics
+        m = dfb.mean().to_dict()
+        # percent of conformers that passed all tests
+        m['pass_percentage'] = dfb.all(axis=1).mean() * 100
         m['smiles'] = smi
         m['error'] = ''
         return m
@@ -35,6 +41,14 @@ def run_all_posebusters(data, config="mol", full_report=False,
         fail_smiles = []
     summary = df[df['error']==''].mean(numeric_only=True).to_frame().T
     summary.insert(0, 'smiles', 'ALL')
+
+    df.to_csv("posebusters_detailed.csv", index=False)
+    summary.to_csv("posebusters_summary.csv", index=False)
+    with open("posebusters_failures.txt", "w") as f:
+        f.write("\n".join(fail_smiles))
+    with open("posebusters_errors.txt", "w") as f:
+        f.write("\n".join(error_smiles))
+
     return df, summary, fail_smiles, error_smiles
 
 def load_data(path):
@@ -54,6 +68,12 @@ if __name__ == "__main__":
                         help="Max allowed failure_rate per SMILES.")
     parser.add_argument("--sample_size", type=int, default=None,
                         help="Number of SMILES to randomly sample.")
+    parser.add_argument("--use_submitit", action="store_true",
+                        help="Submit the job to SLURM via submitit.")
+    parser.add_argument("--mem_gb", type=int, default=16,
+                        help="Memory (GB) per job.")
+    parser.add_argument("--timeout_min", type=int, default=60,
+                        help="Timeout (minutes) for job.")
 
     args = parser.parse_args()
 
@@ -63,6 +83,27 @@ if __name__ == "__main__":
         items = list(data.items())
         data = dict(random.sample(items, k=min(args.sample_size, len(items))))
         print(f"Sampled {len(data)} SMILES for processing.")
+
+    if args.use_submitit:
+        executor = submitit.AutoExecutor(folder="~/slurm_jobs/posebusters_%j")
+        executor.update_parameters(
+            name="posebusters",
+            timeout_min=args.timeout_min,
+            cpus_per_task=args.max_workers,
+            mem_gb=args.mem_gb,
+            nodes=1,
+            slurm_partition="h100",
+        )
+        job = executor.submit(
+            run_all_posebusters,
+            data,
+            args.config,
+            args.full_report,
+            args.max_workers,
+            args.fail_threshold
+        )
+        print(f"Submitted Submitit job with ID {job.job_id}")
+        exit(0)
 
     df, summary, fail_smiles, error_smiles = run_all_posebusters(
         data,
