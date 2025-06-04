@@ -43,10 +43,10 @@ def load_model_tokenizer(model_path, tokenizer_path, torch_dtype, attention_imp=
     return model, tokenizer
 
 def save_results(results_path, generations, stats):
-    with open(os.path.join(results_path, "generation_resutls.pickle"), 'wb') as results_file_pickle:
+    with open(os.path.join(results_path, "generation_results.pickle"), 'wb') as results_file_pickle:
         cloudpickle.dump(generations, results_file_pickle, protocol=4)
     
-    with open(os.path.join(results_path, "generation_resutls.txt"), 'w') as results_file_txt:
+    with open(os.path.join(results_path, "generation_results.txt"), 'w') as results_file_txt:
         results_file_txt.write(f"{stats=}")
 
 
