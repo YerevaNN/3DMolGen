@@ -1,9 +1,10 @@
 import os
 import pickle
+import multiprocessing
 from posebusters import PoseBusters
 import pandas as pd
 import random
-from concurrent.futures import ProcessPoolExecutor
+from loky import ProcessPoolExecutor
 import itertools
 import submitit
 
@@ -74,7 +75,8 @@ if __name__ == "__main__":
                         help="Memory (GB) per job.")
     parser.add_argument("--timeout_min", type=int, default=60,
                         help="Timeout (minutes) for job.")
-
+    parser.add_argument("--num_jobs", type=int, default=1,
+                        help="Split data into this many Submitit jobs.")
     args = parser.parse_args()
 
     data = load_data(args.data_path)
@@ -85,7 +87,9 @@ if __name__ == "__main__":
         print(f"Sampled {len(data)} SMILES for processing.")
 
     if args.use_submitit:
-        executor = submitit.AutoExecutor(folder="~/slurm_jobs/posebusters_%j")
+        # expand tilde
+        folder = os.path.expanduser("~/slurm_jobs/posebusters_%j")
+        executor = submitit.AutoExecutor(folder=folder)
         executor.update_parameters(
             name="posebusters",
             timeout_min=args.timeout_min,
@@ -94,15 +98,23 @@ if __name__ == "__main__":
             nodes=1,
             slurm_partition="h100",
         )
-        job = executor.submit(
-            run_all_posebusters,
-            data,
-            args.config,
-            args.full_report,
-            args.max_workers,
-            args.fail_threshold
-        )
-        print(f"Submitted Submitit job with ID {job.job_id}")
+        # split into chunks
+        items = list(data.items())
+        n = args.num_jobs
+        chunk_size = (len(items) + n - 1) // n
+        for i in range(n):
+            chunk = dict(items[i*chunk_size:(i+1)*chunk_size])
+            if not chunk:
+                continue
+            job = executor.submit(
+                run_all_posebusters,
+                chunk,
+                args.config,
+                args.full_report,
+                args.max_workers,
+                args.fail_threshold
+            )
+            print(f"Submitted job {job.job_id} for chunk {i+1}/{n}")
         exit(0)
 
     df, summary, fail_smiles, error_smiles = run_all_posebusters(
