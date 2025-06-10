@@ -1,5 +1,6 @@
 model:
-  checkpoint_path: /nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-380M_conformers/e184d4d867804fbd8a8c45bf/step-30000/
+  # checkpoint_path: /nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-380M_conformers/e184d4d867804fbd8a8c45bf/step-30000/
+  checkpoint_path: /nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-380M_conformers/b4707c6bf8b54cba8febe9fc/step-8500/
   tokenizer_path: /auto/home/menuab/code/YNNtitan/torchtitan/tokenizers/Llama-3.2-chem-1B-v1
   mol_tags: ["[SMILES]", "[/SMILES]"]
   conf_tags: ["[CONFORMER]", "[/CONFORMER]"]
@@ -37,3 +38,6 @@ grpo:
 # Dataset
 dataset:
   dataset_path: /auto/home/menuab/cartesianisomeric/grpo/train_data_1.jsonl
+
+run:
+  name: 380m_1e
