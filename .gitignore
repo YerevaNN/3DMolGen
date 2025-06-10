@@ -18,6 +18,7 @@ results/
 eval_results/
 gen_results/
 notebooks/
+wandb/
 # Log files
 *.log
 *.csv
