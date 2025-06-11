@@ -1,6 +1,7 @@
 import os
 import pickle
 import multiprocessing
+import numpy as np
 from posebusters import PoseBusters
 import pandas as pd
 import random
@@ -25,6 +26,8 @@ def _bust_smi(smi, mols, config, full_report):
 
 def run_all_posebusters(data, config="mol", full_report=False,
                         max_workers=16, fail_threshold=0.0):
+    num_smiles = len(data)
+    num_conformers = sum(len(mols) for mols in data.values())
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         results = list(executor.map(
             _bust_smi,
@@ -42,6 +45,8 @@ def run_all_posebusters(data, config="mol", full_report=False,
         fail_smiles = []
     summary = df[df['error']==''].mean(numeric_only=True).to_frame().T
     summary.insert(0, 'smiles', 'ALL')
+    summary.insert(1, 'num_smiles', num_smiles)
+    summary.insert(2, 'num_conformers', num_conformers)
 
     df.to_csv("posebusters_detailed.csv", index=False)
     summary.to_csv("posebusters_summary.csv", index=False)
@@ -80,6 +85,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     data = load_data(args.data_path)
+
+    num_conformers = sum([len(mols) for mols in data.values()])
+    print(f"Loaded {len(data)} SMILES with {num_conformers} conformers for processing.")
 
     if args.sample_size:
         items = list(data.items())
@@ -127,7 +135,6 @@ if __name__ == "__main__":
 
     out_dir = os.path.dirname(os.path.abspath(args.data_path))
     df.to_csv(os.path.join(out_dir, "posebusters_detailed.csv"), index=False)
-    summary.to_csv(os.path.join(out_dir, "posebusters_summary.csv"), index=False)
 
     if fail_smiles:
         with open(os.path.join(out_dir, "posebusters_failures.txt"), "w") as f:
