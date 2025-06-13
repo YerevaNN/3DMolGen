@@ -1,25 +1,28 @@
 model:
-  checkpoint_path: /lustre/fsw/llmservice_nemo_reasoning/earakelyan/exp/checkpoints/hf-4.49.0/yerevann/Llama-3-1.3B/3fc60253e31447cc83f8f3da/step-20000
-  tokenizer_path: /lustre/fsw/llmservice_nemo_reasoning/earakelyan/exp/tokenizers/Llama-3.2-chem-1B-v1
+  checkpoint_path: /nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-1B_conformers/37cf49f293254a6986b12948/step-40000/
+  tokenizer_path: /auto/home/menuab/code/YNNtitan/torchtitan/tokenizers/Llama-3.2-chem-1B-v1
   mol_tags: ["[SMILES]", "[/SMILES]"]
-  sim_tags: ["[SIMILAR]", "[/SIMILAR]"]
+  conf_tags: ["[CONFORMER]", "[/CONFORMER]"]
   pad_token: <|finetune_right_pad_id|>
   dtype: bf16 # bf16 / fp32
 
 generation:
-  max_new_tokens: 500
+  max_completion_length: 2000
   temperature: 1.0
   do_sample: true
-  repetition_penalty: 1.01
+  repetition_penalty: 1.0
   num_return_sequences: 1
 
+processing:
+  eos_token_id: 128329
+
 grpo:
-  output_dir: /lustre/fsw/llmservice_nemo_reasoning/earakelyan/exp/grpo-hf
+  output_dir: outputs
   learning_rate: 0.0001
   num_epochs: 1
   temperature: 1.0
-  num_generations: 16
-  batch_size: 16
+  num_generations: 8
+  batch_size: 8
   grad_acc_steps: 1
   scheduler: cosine
   # scheduler: constant_with_warmup
@@ -33,6 +36,7 @@ grpo:
 
 # Dataset
 dataset:
-  task_names: ["dock.parp1"]
-  mol_log_dirs: ["results/grpo-hf/llama3_380m_opt/2025-05-26-opt/exp-0"]
-  num_samples: 300
+  dataset_path: /auto/home/menuab/cartesianisomeric/grpo/train_data_1.jsonl
+
+run:
+  name: 380m_1e
