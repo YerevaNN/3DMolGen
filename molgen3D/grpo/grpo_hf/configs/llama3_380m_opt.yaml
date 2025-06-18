@@ -18,7 +18,7 @@ processing:
   eos_token_id: 128329
 
 grpo:
-  output_dir: ./outputs
+  output_dir: ./grpo_outputs
   learning_rate: 0.0002
   max_steps: 5000
   temperature: 1.0
