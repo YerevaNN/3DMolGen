@@ -1,44 +1,123 @@
-# 3DMOLGEN
+# 3DMolGen
 
-## Overview
+3DMolGen is a Python package for 3D molecular generation using language models. It provides tools for training and inference of molecular conformer generation models.
 
-This project is focused on building a system with functionalities such as data processing, model training, evaluation, and utility functions. The structure of the project is organized into different modules:
+## Features
 
-- **vq_vae/**: The main module for the VQ-VAE (Vector Quantized Variational Autoencoder) implementation.
-- **data_processing/**: Scripts for processing and preparing data for VQ-VAE model training.
-- **train/**: Contains code related to training the VQ-VAE model.
-- **evaluation/**: Includes scripts for evaluating both the VQ-VAE model and the generated molecules by main LLM.
-- **scripts/**: Utility scripts for different operations.
-- **tests/**: Unit tests for ensuring code quality.
-- **utils/**: Helper functions, utility scripts and simple data converters.
+- Training of language models for 3D molecular generation
+- Support for various molecular formats (SMILES, 3D coordinates)
+- Integration with Weights & Biases for experiment tracking
+- SLURM support for distributed training
+- Comprehensive evaluation metrics
 
 ## Installation
 
-Create a conda environment and install the required packages using the following commands:
+### Option 1: Using pip (minimal installation)
 
 ```bash
-conda create -n 3dmolgen python=3.11
+pip install molgen3D
+```
+
+### Option 2: Development installation (recommended for contributors)
+
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/molgen3D.git
+cd molgen3D
+```
+
+2. Create and activate a conda environment:
+```bash
+conda env create -f requirements.yml
 conda activate 3dmolgen
-pip install -r requirements.txt
-
-conda install -c conda-forge rdkit openbabel
 ```
 
-## Usage and Contributing
-
-We use `black` formatter for code formatting. Please make sure to install the pre-commit hooks by running the following command:
-
+3. Install the package in development mode:
 ```bash
-chmod +x scripts/install_hooks.sh
-./scripts/install_hooks.sh
+pip install -e .
 ```
 
-## Running the tests
+## Usage
 
-To run the tests, execute the following command:
+### Training
+
+```python
+from molgen3D.grpo.grpo_hf.config import Config
+from molgen3D.grpo.grpo_hf.run_hf import main
+
+# Load configuration
+config = Config.from_yaml("path/to/config.yaml")
+
+# Run training
+main(config, enable_wandb=True)
+```
+
+### Configuration
+
+The package uses YAML configuration files. Here's an example:
+
+```yaml
+model:
+  checkpoint_path: "path/to/model"
+  tokenizer_path: "path/to/tokenizer"
+  mol_tags: ["[SMILES]", "[/SMILES]"]
+  conf_tags: ["[CONFORMER]", "[/CONFORMER]"]
+
+generation:
+  max_completion_length: 1000
+  temperature: 1.0
+  do_sample: true
+
+grpo:
+  output_dir: "./outputs"
+  learning_rate: 0.0001
+  batch_size: 2
+  num_generations: 16
+```
+
+## Development
+
+### Running Tests
 
 ```bash
 pytest tests/
-# or
-pytest tests/path_to_test_file.py
+```
+
+### Code Style
+
+The project uses:
+- Black for code formatting
+- Flake8 for linting
+- MyPy for type checking
+
+To run all checks:
+```bash
+black .
+flake8
+mypy .
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Citation
+
+If you use this code in your research, please cite:
+
+```bibtex
+@software{molgen3d2024,
+  author = {Your Name},
+  title = {3DMolGen: 3D Molecular Generation using Language Models},
+  year = {2024},
+  url = {https://github.com/yourusername/molgen3D}
+}
 ```

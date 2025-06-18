@@ -19,6 +19,7 @@ eval_results/
 gen_results/
 notebooks/
 wandb/
+grpo/grpo_hf/outputs/
 # Log files
 *.log
 *.csv
