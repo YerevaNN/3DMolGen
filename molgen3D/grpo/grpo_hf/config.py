@@ -30,9 +30,9 @@ class ProcessingConfig:
 
 @dataclass
 class GRPOConfig:
+    # Required parameters (no defaults)
     output_dir: str
     learning_rate: float
-    num_epochs: int
     temperature: float
     num_generations: int
     batch_size: int
@@ -45,16 +45,30 @@ class GRPOConfig:
     max_grad_norm: float
     beta: float
     seed: int
+    reward_weight_rmsd: float
+    reward_weight_match: float
+    rmsd_const: float
+    
+    # Optional parameters (with defaults)
+    max_steps: Optional[int] = None
+    num_epochs: Optional[int] = None
 
 
 @dataclass
 class DatasetConfig:
     dataset_path: str
+    smiles_mapping_path: str  # Path to the SMILES mapping JSON file
 
 
 @dataclass
 class RunConfig:
     name: str
+
+
+@dataclass
+class DeviceConfig:
+    device_type: str  # local, a100, h100
+    num_gpus: int
 
 
 @dataclass
@@ -65,6 +79,7 @@ class Config:
     grpo: GRPOConfig
     dataset: DatasetConfig
     run: RunConfig
+    device: DeviceConfig
 
     @classmethod
     def from_yaml(cls, yaml_path: str) -> 'Config':
@@ -85,5 +100,6 @@ class Config:
             processing=ProcessingConfig(**config_dict['processing']),
             grpo=GRPOConfig(**config_dict['grpo']),
             dataset=DatasetConfig(**config_dict['dataset']),
-            run=RunConfig(**config_dict['run'])
-        ) 
+            run=RunConfig(**config_dict['run']),
+            device=DeviceConfig(**config_dict['device'])
+        )
