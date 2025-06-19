@@ -60,21 +60,23 @@ def load_ground_truths(key_mol_smiles, num_gt=1):
         logger.warning(f"No mapping found for SMILES: {key_mol_smiles}")
         return None
     
-    # Load the molecule from the pickle file
-    geom_smiles = geom_smiles.replace("/", "_")
     try:
         mol_pickle = load_pkl(os.path.join("/nfs/ap/mnt/sxtn2/chem/GEOM_data/rdkit_folder", "drugs", geom_smiles + ".pickle"))
         mol_confs = mol_pickle["conformers"][:num_gt]
         mols = [conf['rd_mol'] for conf in mol_confs]
         return mols
     except Exception as e:
-        logger.error(f"Error loading ground truth for {key_mol_smiles}: {e}")
+        logger.error(f"Error loading ground truth for {key_mol_smiles} {geom_smiles}: {e}")
         return None
 
 def get_rmsd(ground_truth, generated_conformer, align=False):
-    generated_mol = decode_cartesian_raw(generated_conformer)
-    rmsd = get_best_rmsd(ground_truth, generated_mol, use_alignmol=False)
-    return rmsd
+    try:
+        generated_mol = decode_cartesian_raw(generated_conformer)
+        rmsd = get_best_rmsd(ground_truth, generated_mol, use_alignmol=align)
+        return rmsd
+    except Exception as e:
+        logger.error(f"Error getting RMSD: {generated_conformer}")
+        return None
 
 def setup_logging(output_dir: str):
     """Setup logging for the run."""

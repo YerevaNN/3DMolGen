@@ -10,21 +10,17 @@ from loguru import logger
 
 @dataclass
 class RunStatistics:
-    """Tracks various statistics during model training and generation."""
-    # Global statistics
+    output_dir: str
     processed_prompts: int = 0
     successful_generations: int = 0
+    distinct_prompts: int = 0
     failed_ground_truth: int = 0
     failed_conformer_generation: int = 0
     failed_matching_smiles: int = 0
     failed_rmsd: int = 0
     rmsd_values: list = field(default_factory=list)
-    
-    # RMSD statistics
     total_rmsd: float = 0.0
     rmsd_counts: int = 0
-    
-    # Timing statistics
     start_time: datetime = field(default_factory=datetime.now)
     
     def add_rmsd(self, rmsd: float) -> None:
@@ -88,9 +84,9 @@ class RunStatistics:
         }
         return stats
 
-    def save(self, run_dir: Path) -> None:
+    def update_stats(self) -> None:
         """Save statistics to a JSON file"""
         stats = self.log_global_stats()
-        stats_file = run_dir / "statistics.json"
-        with open(stats_file, 'w') as f:
+        stats_file = Path(self.output_dir)  / "statistics.json"
+        with open(stats_file, 'w+') as f:
             json.dump(stats, f, indent=4)

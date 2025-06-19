@@ -19,7 +19,7 @@ processing:
 
 grpo:
   output_dir: ./grpo_outputs
-  learning_rate: 0.0002
+  learning_rate: 0.0001
   max_steps: 5000
   temperature: 1.0
   num_generations: 8
@@ -32,9 +32,9 @@ grpo:
   weight_decay: 0.1
   warmup_ratio: 0.2
   max_grad_norm: 0.1
-  beta: 0.005
+  beta: 0.0
   seed: 1
-  reward_weight_rmsd: 1.0
+  reward_weight_rmsd: 0.0
   reward_weight_match: 0.2
   rmsd_const: 1.8
 
@@ -47,4 +47,4 @@ dataset:
   smiles_mapping_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/smiles_mapping.json
 
 run:
-  name: 380m_2e_lr1e-4_4bs*8comp*2gpu*4ga_beta5e-3_rmsd1.0_match0.2
+  name: 380m_1e_lr1e-4_4bs*8comp*2gpu*4ga_beta0_rmsd0.0_match0.2
