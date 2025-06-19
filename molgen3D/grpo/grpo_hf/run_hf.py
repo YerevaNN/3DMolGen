@@ -28,12 +28,11 @@ from molgen3D.grpo.grpo_hf.utils import (
     load_smiles_mapping,
     setup_logging
 )
-from molgen3D.grpo.grpo_hf.rewards import weighted_joint_reward_function
+from molgen3D.grpo.grpo_hf.rewards import reward_function
 
 def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     # Setup logging if output_dir is provided
-    if output_dir:
-        setup_logging(output_dir)
+    setup_logging(output_dir)
     
     logger.info(f"Running GRPO")
     device = "cuda:0"
@@ -43,10 +42,10 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     logger.info("Initialized data paths")
 
     # Initialize statistics object
-    stats = RunStatistics()
+    stats = RunStatistics(output_dir=output_dir)
 
     training_args = TRLGRPOConfig(
-        output_dir=output_dir if output_dir else config.grpo.output_dir,
+        output_dir=output_dir,
         save_strategy="no",
         max_completion_length=config.generation.max_completion_length,
         learning_rate=config.grpo.learning_rate,
@@ -86,7 +85,7 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
 
     # Wrap the reward function to inject stats, tokenizer, and config
     def reward_func(prompts, completions, **kwargs):
-        return weighted_joint_reward_function(prompts, completions, stats, tokenizer, config)
+        return reward_function(prompts, completions, stats, tokenizer, config)
 
     trainer = GRPOTrainer(
         model=model,
@@ -100,8 +99,7 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     trainer.train()
 
     # After training
-    stats.save(Path(output_dir))
-    logger.info(f"Saved run statistics to {Path(output_dir) / 'statistics.json'}")
+    stats.update_stats()
 
     # Save model and tokenizer
     model_dir = Path(output_dir) / "model"
@@ -172,7 +170,7 @@ if __name__ == "__main__":
             gpus_per_node=n_gpus,
             nodes=1,
             mem_gb=80,
-            cpus_per_task=n_gpus * 8,
+            cpus_per_task=n_gpus * 18,
             slurm_additional_parameters={"partition": node},
         )
         # Submit job to SLURM, using output_dir for both output_dir and work_dir
