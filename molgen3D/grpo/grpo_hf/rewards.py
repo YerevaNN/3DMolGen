@@ -15,9 +15,9 @@ def get_rmsd_reward(ground_truth, generated_conformer, config, stats):
     if rmsd is None or np.isnan(rmsd):
         logger.info(f"\n None RMSD value for prompt: {ground_truth} {generated_conformer}")
         stats.failed_rmsd += 1
-        return 0.0, None
-    reward = 1.0 / (1.0 + rmsd / config.grpo.rmsd_const)
-    return reward, rmsd
+        reward = 0.0
+    reward = 1.0 / (1.0 + (rmsd / config.grpo.rmsd_const))
+    return rmsd, reward
         
 def get_match_reward(generated_smiles, canoncial_smiles, len_prompt):
     if generated_smiles == canoncial_smiles:

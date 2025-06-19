@@ -23,14 +23,14 @@ grpo:
   max_steps: 5000
   temperature: 1.0
   num_generations: 8
-  batch_size: 4
+  batch_size: 8
   grad_acc_steps: 4
   scheduler: cosine
   # scheduler: constant_with_warmup
   adam_beta1: 0.9
   adam_beta2: 0.99
   weight_decay: 0.1
-  warmup_ratio: 0.2
+  warmup_ratio: 0.1
   max_grad_norm: 0.1
   beta: 0.0
   seed: 1
@@ -47,4 +47,4 @@ dataset:
   smiles_mapping_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/smiles_mapping.json
 
 run:
-  name: 380m_1e_lr1e-4_4bs*8comp*2gpu*4ga_beta0_rmsd0.0_match0.2
+  name: 380m_1e_lr1e-4_8bs*8comp*2gpu*4ga_beta0_rmsd0.0_match0.2
