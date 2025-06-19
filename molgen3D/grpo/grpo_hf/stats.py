@@ -37,7 +37,7 @@ class RunStatistics:
     @property
     def average_rmsd(self) -> float:
         """Calculate average RMSD across successful generations"""
-        return sum(self.rmsd_values) / len(self.rmsd_values) if self.rmsd_values else 0.0
+        return np.nanmean(self.rmsd_values) if self.rmsd_values else 0.0
     
     @property
     def success_rate(self) -> float:
@@ -72,6 +72,7 @@ class RunStatistics:
         failure_rates = self.failure_rates
         stats = {
             "processed_prompts": self.processed_prompts,
+            "distinct_prompts": self.distinct_prompts,
             "successful_generations": self.successful_generations,
             "failed_ground_truth": self.failed_ground_truth,
             "failed_conformer_generation": self.failed_conformer_generation,
@@ -80,7 +81,7 @@ class RunStatistics:
             "success_rate": self.success_rate,
             "average_rmsd": self.average_rmsd,
             "failure_rates": failure_rates,
-            "runtime_minutes": self.runtime
+            "runtime_minutes": self.runtime,
         }
         return stats
 
