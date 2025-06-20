@@ -75,8 +75,8 @@ def get_rmsd(ground_truth, generated_conformer, align=False):
         rmsd = get_best_rmsd(ground_truth, generated_mol, use_alignmol=align)
         return rmsd
     except Exception as e:
-        logger.error(f"Error getting RMSD: {Chem.MolToSmiles(ground_truth, canonical=True)}\n{generated_conformer}")
-        return 0.0
+        logger.error(f"Error getting RMSD: {Chem.MolToSmiles(ground_truth, canonical=True)}\n{generated_conformer}\n{e}")
+        return None
 
 def setup_logging(output_dir: str):
     """Setup logging for the run."""
