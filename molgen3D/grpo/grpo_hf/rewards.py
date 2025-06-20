@@ -11,13 +11,13 @@ from molgen3D.evaluation.utils import extract_between
 from molgen3D.grpo.grpo_hf.utils import get_rmsd, load_ground_truths
 
 def get_rmsd_reward(ground_truth, generated_conformer, config, stats):
-    rmsd = get_rmsd(ground_truth, generated_conformer, align=False)
-    if rmsd is None or np.isnan(rmsd):
+    rmsd_value = get_rmsd(ground_truth, generated_conformer, align=False)
+    if rmsd_value is None or np.isnan(rmsd_value):
         logger.info(f"\n None RMSD value for prompt: {ground_truth} {generated_conformer}")
         stats.failed_rmsd += 1
-        reward = 0.0
-    reward = 1.0 / (1.0 + (rmsd / config.grpo.rmsd_const))
-    return rmsd, reward
+        rmsd_reward = 0.0
+    rmsd_reward = 1.0 / (1.0 + (rmsd_value / config.grpo.rmsd_const))
+    return rmsd_value, rmsd_reward
         
 def get_match_reward(generated_smiles, canoncial_smiles, len_prompt):
     if generated_smiles == canoncial_smiles:
@@ -86,8 +86,8 @@ def reward_function(prompts, completions, stats, tokenizer, config):
             "reward/rmsd": float(np.nanmean(rmsd_rewards)) if rmsd_rewards else 0.0,
             "reward/match": float(np.nanmean(match_rewards)) if match_rewards else 0.0,
             "reward/combined": float(np.nanmean(combined_rewards)) if combined_rewards else 0.0,
-            "reward/rmsd_raw": float(np.nanmean(rmsd_values)) if rmsd_values else 0.0,
-            "reward/rmsd_raw_std": float(np.nanstd(rmsd_values)) if rmsd_values else 0.0,
+            "rmsd_value": float(np.nanmean(rmsd_values)) if rmsd_values else 0.0,
+            "rmsd_value_std": float(np.nanstd(rmsd_values)) if rmsd_values else 0.0,
         })
     logger.info(f"{'='*40}\n")
 
