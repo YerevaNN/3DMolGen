@@ -76,7 +76,7 @@ def get_rmsd(ground_truth, generated_conformer, align=False):
         return rmsd
     except Exception as e:
         logger.error(f"Error getting RMSD: {Chem.MolToSmiles(ground_truth, canonical=True)}\n{generated_conformer}\n{e}")
-        return None
+        return float('nan')
 
 def setup_logging(output_dir: str):
     """Setup logging for the run."""
