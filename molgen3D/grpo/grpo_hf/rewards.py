@@ -10,13 +10,18 @@ import wandb
 from molgen3D.evaluation.utils import extract_between
 from molgen3D.grpo.grpo_hf.utils import get_rmsd, load_ground_truths
 
+# Global variables
+_smiles_mapping = None
+_geom_data_path = None
+
 def get_rmsd_reward(ground_truth, generated_conformer, config, stats):
     rmsd_value = get_rmsd(ground_truth, generated_conformer, align=False)
     if rmsd_value is None or np.isnan(rmsd_value):
         logger.info(f"\n None RMSD value for prompt: {ground_truth} {generated_conformer}")
         stats.failed_rmsd += 1
         rmsd_reward = 0.0
-    rmsd_reward = 1.0 / (1.0 + (rmsd_value / config.grpo.rmsd_const))
+    else:
+        rmsd_reward = 1.0 / (1.0 + (rmsd_value / config.grpo.rmsd_const))
     return rmsd_value, rmsd_reward
         
 def get_match_reward(generated_smiles, canoncial_smiles, len_prompt):
@@ -45,6 +50,7 @@ def reward_function(prompts, completions, stats, tokenizer, config):
         len_prompt = len(canoncial_smiles)
        
         if prompt_ != prompt:
+            del ground_truths
             ground_truths = load_ground_truths(canoncial_smiles, num_gt=1)
             ground_truth = ground_truths[0] if ground_truths else None
             if ground_truth is None:
