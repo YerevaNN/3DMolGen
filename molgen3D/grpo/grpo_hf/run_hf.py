@@ -1,23 +1,16 @@
 # Standard library imports
 import argparse
 import os
-import shutil
+import sys
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional
-import yaml
-import subprocess
-import sys
 
 # Third-party imports
 import submitit
 import torch
-from datasets import Dataset, Features, Value
+from datasets import Dataset
 from loguru import logger
-from transformers import (
-    AutoTokenizer,
-    AutoModelForCausalLM,
-)
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import GRPOConfig as TRLGRPOConfig
 
 # Local imports
@@ -26,7 +19,9 @@ from molgen3D.grpo.grpo_hf.grpo_trainer import GRPOTrainer
 from molgen3D.grpo.grpo_hf.stats import RunStatistics
 from molgen3D.grpo.grpo_hf.utils import (
     load_smiles_mapping,
-    setup_logging
+    setup_logging,
+    create_code_snapshot,
+    save_config
 )
 from molgen3D.grpo.grpo_hf.rewards import reward_function
 
@@ -111,8 +106,8 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
 def main_job(config: Config, enable_wandb: bool = False, output_dir: str = None, work_dir: str = None):
     if work_dir:
         os.chdir(work_dir)
-        # Install the package from the snapshot, NOT in editable mode
-        subprocess.run([sys.executable, "-m", "pip", "install", "."], check=True)
+        # Add the snapshot directory to Python path for imports
+        sys.path.insert(0, work_dir)
     main(config, enable_wandb, output_dir)
 
 
@@ -138,29 +133,19 @@ if __name__ == "__main__":
     output_dir = os.path.join(config.grpo.output_dir, f"{timestamp}_{config.run.name}")
     os.makedirs(output_dir, exist_ok=True)
 
-    # Save updated config to output directory (overwrite copied config)
-    config_copy_path = os.path.join(output_dir, "config.yaml")
-    def dataclass_to_dict(obj):
-        if hasattr(obj, "__dataclass_fields__"):
-            result = {}
-            for field in obj.__dataclass_fields__:
-                value = getattr(obj, field)
-                result[field] = dataclass_to_dict(value)
-            return result
-        elif isinstance(obj, list):
-            return [dataclass_to_dict(i) for i in obj]
-        else:
-            return obj
-    with open(config_copy_path, "w") as f:
-        yaml.safe_dump(dataclass_to_dict(config), f)
-    
-    logger.info(f"Saved updated config file to {config_copy_path}")
+    # Save updated config to output directory
+    save_config(config, output_dir)
 
     # Run locally or with SLURM based on device_type
     if device_type == "local":
         logger.info("Running locally (no SLURM)")
         main_job(config=config, enable_wandb=cmd_args.wandb, output_dir=output_dir, work_dir=None)
     else:
+        # Create code snapshot
+        snapshot_dir = os.path.join(output_dir, "code_snapshot")
+        os.makedirs(snapshot_dir, exist_ok=True)
+        create_code_snapshot(os.getcwd(), snapshot_dir)
+        
         executor = submitit.AutoExecutor(folder="~/slurm_jobs/grpo/job_%j")
         node = device_type  # 'a100' or 'h100'
         n_gpus = num_gpus
@@ -173,11 +158,15 @@ if __name__ == "__main__":
             cpus_per_task=n_gpus * 18,
             slurm_additional_parameters={"partition": node},
         )
-        # Submit job to SLURM, using output_dir for both output_dir and work_dir
+        
+        # Submit job to SLURM with the snapshot directory
         job = executor.submit(
             main_job,
             config=config,
             enable_wandb=cmd_args.wandb,
             output_dir=output_dir,
-            work_dir=None
+            work_dir=snapshot_dir
         )
+        
+        logger.info(f"Job submitted with ID: {job.job_id}")
+        logger.info(f"Code snapshot created at: {snapshot_dir}")

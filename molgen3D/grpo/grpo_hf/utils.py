@@ -90,3 +90,41 @@ def setup_logging(output_dir: str):
     
     # Add console handler
     logger.add(lambda msg: print(msg), level="INFO", enqueue=True)
+
+def create_code_snapshot(project_root: str, snapshot_dir: str):
+    """Create a minimal code snapshot containing only necessary files."""
+    import subprocess
+    
+    logger.info(f"Creating code snapshot in {snapshot_dir}")
+    
+    # Copy only the molgen3D package structure needed for imports
+    subprocess.run([
+        "rsync", "-av", "--exclude=__pycache__", "--exclude=*.pyc",
+        "--include=molgen3D/", "--include=molgen3D/__init__.py",
+        "--include=molgen3D/grpo/", "--include=molgen3D/grpo/**",
+        "--include=molgen3D/utils/", "--include=molgen3D/utils/**",
+        "--exclude=*",
+        f"{project_root}/", f"{snapshot_dir}/"
+    ], check=True)
+
+def dataclass_to_dict(obj):
+    """Convert dataclass objects to dictionary recursively."""
+    if hasattr(obj, "__dataclass_fields__"):
+        result = {}
+        for field in obj.__dataclass_fields__:
+            value = getattr(obj, field)
+            result[field] = dataclass_to_dict(value)
+        return result
+    elif isinstance(obj, list):
+        return [dataclass_to_dict(i) for i in obj]
+    else:
+        return obj
+
+def save_config(config, output_dir: str):
+    """Save configuration to output directory."""
+    import yaml
+    
+    config_copy_path = os.path.join(output_dir, "config.yaml")
+    with open(config_copy_path, "w") as f:
+        yaml.safe_dump(dataclass_to_dict(config), f)
+    logger.info(f"Saved updated config file to {config_copy_path}")
