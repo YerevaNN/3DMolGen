@@ -7,6 +7,7 @@ from loguru import logger
 
 # Global variables
 _smiles_mapping = None
+_geom_data_path = None
 
 def load_smiles_mapping(mapping_path: str) -> None:
     """Load the SMILES mapping from a JSON file.
