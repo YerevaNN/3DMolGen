@@ -14,11 +14,10 @@ from molgen3D.grpo.grpo_hf.utils import get_rmsd, load_ground_truths
 _smiles_mapping = None
 _geom_data_path = None
 
-def get_rmsd_reward(ground_truth, generated_conformer, config, stats):
+def get_rmsd_reward(ground_truth, generated_conformer, config):
     rmsd_value = get_rmsd(ground_truth, generated_conformer, align=False)
     if rmsd_value is None or np.isnan(rmsd_value):
         logger.info(f"\n None RMSD value for prompt: {ground_truth} {generated_conformer}")
-        stats.failed_rmsd += 1
         rmsd_reward = 0.0
     else:
         rmsd_reward = 1.0 / (1.0 + (rmsd_value / config.grpo.rmsd_const))
@@ -50,33 +49,32 @@ def reward_function(prompts, completions, stats, tokenizer, config):
         len_prompt = len(canoncial_smiles)
        
         if prompt_ != prompt:
-            del ground_truths
             ground_truths = load_ground_truths(canoncial_smiles, num_gt=1)
             ground_truth = ground_truths[0] if ground_truths else None
-            if ground_truth is None:
-                stats.failed_ground_truth += 1
             prompt_ = prompt
             stats.distinct_prompts += 1
-        
+
+        rmsd_reward, match_reward, combined, rmsd_value = 0.0, 0.0, 0.0, float('nan')
         generated_conformer = extract_between(completion, "[CONFORMER]", "[/CONFORMER]")
-        if not generated_conformer:
+        generated_smiles = tag_pattern.sub('', generated_conformer) if generated_conformer else ""
+
+        if ground_truth is None:
+            stats.failed_ground_truth += 1
+        elif not generated_conformer:
             stats.failed_conformer_generation += 1
-        generated_smiles = tag_pattern.sub('', generated_conformer)
-        if generated_smiles != canoncial_smiles:
+        elif generated_smiles != canoncial_smiles:
             stats.failed_matching_smiles += 1
             logger.info(f"\nGenerated SMILES does not match canonical prompt: {prompt}\nSMILES: {generated_smiles}")
         else:
-            stats.successful_generations += 1
-
-        if not generated_conformer or generated_smiles != canoncial_smiles or not ground_truth:
-            rmsd_reward = 0.0
-            rmsd_value = float('nan')
-        else:
-            rmsd_value, rmsd_reward = get_rmsd_reward(ground_truth, generated_conformer, config, stats)
-            rmsd_rewards.append(rmsd_reward)
-            rmsd_values.append(rmsd_value)
-            stats.add_rmsd(rmsd_value)
-
+            rmsd_value, rmsd_reward = get_rmsd_reward(ground_truth, generated_conformer, config)
+            if np.isnan(rmsd_value):
+                stats.failed_rmsd += 1
+            else:
+                stats.successful_generations += 1
+                stats.add_rmsd(rmsd_value)
+                rmsd_rewards.append(rmsd_reward)
+                rmsd_values.append(rmsd_value)
+        
         match_reward = get_match_reward(generated_smiles, canoncial_smiles, len_prompt)
         match_rewards.append(match_reward)
         combined = w_rmsd * rmsd_reward + w_match * match_reward
