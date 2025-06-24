@@ -19,23 +19,24 @@ processing:
 
 grpo:
   output_dir: ./grpo_outputs
-  learning_rate: 0.0001
-  max_steps: 5000
+  learning_rate: 0.0001 # 0.0001
+  # max_steps: 5000
+  num_epochs: 1
   temperature: 1.0
-  num_generations: 8
-  batch_size: 8
+  num_generations: 16
+  per_device_batch_size: 16
   grad_acc_steps: 4
   scheduler: cosine
   # scheduler: constant_with_warmup
   adam_beta1: 0.9
   adam_beta2: 0.99
   weight_decay: 0.1
-  warmup_ratio: 0.1
+  warmup_ratio: 0.05
   max_grad_norm: 0.1
-  beta: 0.0005
+  beta: 0
   seed: 1
   reward_weight_rmsd: 1.0
-  reward_weight_match: 0.2
+  reward_weight_match: 0.3
   rmsd_const: 1.8
 
 device:
@@ -43,8 +44,8 @@ device:
   num_gpus: 2
 
 dataset:
-  dataset_path: /nfs/ap/home/_menuab_/cartesianisomeric/grpo/train_data_1.jsonl
+  dataset_path: /nfs/ap/home/_menuab_/cartesianisomeric/grpo/train_data_full.jsonl
   smiles_mapping_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/smiles_mapping.json
 
 run:
-  name: 380m_1e_lr1e-4_8bs*8comp*2gpu*4ga_beta5e-3_rmsd1.0_match0.2
+  name: 380m_1e_lr1e-4_16bs*16comp*2gpu*4ga_beta0_rewardjoint_1e_alignT_full

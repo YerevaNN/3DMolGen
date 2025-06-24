@@ -35,8 +35,8 @@ class GRPOConfig:
     learning_rate: float
     temperature: float
     num_generations: int
-    batch_size: int
     grad_acc_steps: int
+    per_device_batch_size: int
     scheduler: str
     adam_beta1: float
     adam_beta2: float
