@@ -37,6 +37,7 @@ grpo:
 # Dataset
 dataset:
   dataset_path: /auto/home/menuab/cartesianisomeric/grpo/train_data_1.jsonl
+  smiles_mapping_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/smiles_mapping.json
 
 run:
-  name: 380m_1e
+  name: 1b_1e_lr1e-4_8bs*8comp*2gpu*1ga_beta5e-3_rmsd1.0_match0.2_warmup0.1

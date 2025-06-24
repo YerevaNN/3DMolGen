@@ -15,7 +15,7 @@ _smiles_mapping = None
 _geom_data_path = None
 
 def get_rmsd_reward(ground_truth, generated_conformer, config):
-    rmsd_value = get_rmsd(ground_truth, generated_conformer, align=False)
+    rmsd_value = get_rmsd(ground_truth, generated_conformer, align=True)
     if rmsd_value is None or np.isnan(rmsd_value):
         logger.info(f"\n None RMSD value for prompt: {ground_truth} {generated_conformer}")
         rmsd_reward = 0.0
@@ -88,6 +88,7 @@ def reward_function(prompts, completions, stats, tokenizer, config):
     if wandb.run is not None:
         wandb.log({
             "reward/rmsd": float(np.nanmean(rmsd_rewards)) if rmsd_rewards else 0.0,
+            "reward/rmsd_std": float(np.nanstd(rmsd_rewards)) if rmsd_rewards else 0.0,
             "reward/match": float(np.nanmean(match_rewards)) if match_rewards else 0.0,
             "reward/combined": float(np.nanmean(combined_rewards)) if combined_rewards else 0.0,
             "rmsd_value": float(np.nanmean(rmsd_values)) if rmsd_values else 0.0,
