@@ -64,7 +64,9 @@ def load_ground_truths(key_mol_smiles, num_gt=1):
     try:
         mol_pickle = load_pkl(os.path.join("/nfs/ap/mnt/sxtn2/chem/GEOM_data/rdkit_folder", "drugs", geom_smiles + ".pickle"))
         mol_confs = mol_pickle["conformers"][:num_gt]
-        mols = [conf['rd_mol'] for conf in mol_confs]
+        mols = [mol_confs[0]['rd_mol']]
+        print(f"loaded gn geom id: {mol_confs[0]['geom_id']} with smiles: {Chem.MolToSmiles(mols[0], canonical=True)}")
+        # mols = [conf['rd_mol'] for conf in mol_confs]
         return mols
     except Exception as e:
         logger.error(f"Error loading ground truth for {key_mol_smiles} {geom_smiles}: {e}")

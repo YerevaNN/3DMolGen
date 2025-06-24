@@ -53,14 +53,15 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         temperature=config.grpo.temperature,
         num_generations=config.grpo.num_generations,
         beta=config.grpo.beta,
-        per_device_train_batch_size=config.grpo.batch_size,
+        per_device_train_batch_size=config.grpo.per_device_batch_size,
         gradient_accumulation_steps=config.grpo.grad_acc_steps,
         log_on_each_node=False,
         bf16=True,
         report_to="wandb" if enable_wandb else "none",
         run_name=config.run.name,
         logging_steps=1,
-        max_steps=config.grpo.max_steps,
+        # max_steps=config.grpo.max_steps,
+        num_train_epochs=config.grpo.num_epochs,
     )
 
     model = AutoModelForCausalLM.from_pretrained(
@@ -104,10 +105,16 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
 
 
 def main_job(config: Config, enable_wandb: bool = False, output_dir: str = None, work_dir: str = None):
+    # Convert output_dir to absolute path before changing working directory
+    if output_dir:
+        output_dir = os.path.abspath(output_dir)
+        
     if work_dir:
         os.chdir(work_dir)
         # Add the snapshot directory to Python path for imports
         sys.path.insert(0, work_dir)
+        logger.info(f"Running from code snapshot: {work_dir}")
+        logger.info(f"Logs and results will be saved to: {output_dir}")
     main(config, enable_wandb, output_dir)
 
 
@@ -130,7 +137,7 @@ if __name__ == "__main__":
 
     # Create output directory with timestamp
     timestamp = datetime.now().strftime("%Y-%m-%d-%H:%M")
-    output_dir = os.path.join(config.grpo.output_dir, f"{timestamp}_{config.run.name}")
+    output_dir = os.path.abspath(os.path.join(config.grpo.output_dir, f"{timestamp}_{config.run.name}"))
     os.makedirs(output_dir, exist_ok=True)
 
     # Save updated config to output directory
