@@ -61,9 +61,12 @@ def load_ground_truths(key_mol_smiles, num_gt=1):
         logger.warning(f"No mapping found for SMILES: {key_mol_smiles}")
         return None
     
+    filename = geom_smiles.replace("/", "_").replace("|", "_")
+
     try:
-        mol_pickle = load_pkl(os.path.join("/nfs/ap/mnt/sxtn2/chem/GEOM_data/rdkit_folder", "drugs", geom_smiles + ".pickle"))
+        mol_pickle = load_pkl(os.path.join("/nfs/ap/mnt/sxtn2/chem/GEOM_data/rdkit_folder", "drugs", filename + ".pickle"))
         mol_confs = mol_pickle["conformers"][:num_gt]
+        del mol_pickle
         mols = [mol_confs[0]['rd_mol']]
         print(f"loaded gn geom id: {mol_confs[0]['geom_id']} with smiles: {Chem.MolToSmiles(mols[0], canonical=True)}")
         # mols = [conf['rd_mol'] for conf in mol_confs]
