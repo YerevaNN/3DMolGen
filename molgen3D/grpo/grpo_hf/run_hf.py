@@ -30,7 +30,6 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     setup_logging(output_dir)
     
     logger.info(f"Running GRPO")
-    device = "cuda:0"
 
     # Load SMILES mapping and set GEOM data path
     load_smiles_mapping(config.dataset.smiles_mapping_path)
@@ -67,8 +66,8 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     model = AutoModelForCausalLM.from_pretrained(
         config.model.checkpoint_path,
         torch_dtype=torch.bfloat16,
-        device_map=None
-    ).to(device)
+        device_map="auto"
+    )
     tokenizer = AutoTokenizer.from_pretrained(
         config.model.tokenizer_path,
     )
@@ -162,7 +161,7 @@ if __name__ == "__main__":
             gpus_per_node=n_gpus,
             nodes=1,
             mem_gb=80,
-            cpus_per_task=n_gpus * 18,
+            cpus_per_task=n_gpus * 22,
             slurm_additional_parameters={"partition": node},
         )
         
