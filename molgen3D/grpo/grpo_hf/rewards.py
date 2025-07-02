@@ -41,18 +41,22 @@ def reward_function(prompts, completions, stats, tokenizer, config):
     rmsd_rewards, match_rewards, combined_rewards, rmsd_values = [], [], [], []
 
     tag_pattern = re.compile(r'<[^>]*>')
-    prompt_ = ""
+    
+    ground_truth_cache = {}
 
     for prompt, completion in zip(prompts, completions):
         stats.processed_prompts += 1
         canoncial_smiles = extract_between(prompt, "[SMILES]", "[/SMILES]")
         len_prompt = len(canoncial_smiles)
        
-        if prompt_ != prompt:
+        if canoncial_smiles in ground_truth_cache:
+            ground_truth = ground_truth_cache[canoncial_smiles]
+        else:
             ground_truths = load_ground_truths(canoncial_smiles, num_gt=1)
             ground_truth = ground_truths[0] if ground_truths else None
-            prompt_ = prompt
-            stats.distinct_prompts += 1
+            ground_truth_cache[canoncial_smiles] = ground_truth
+            if ground_truth:
+                stats.distinct_prompts += 1
 
         rmsd_reward, match_reward, combined, rmsd_value = 0.0, 0.0, 0.0, float('nan')
         generated_conformer = extract_between(completion, "[CONFORMER]", "[/CONFORMER]")
@@ -74,16 +78,16 @@ def reward_function(prompts, completions, stats, tokenizer, config):
                 stats.add_rmsd(rmsd_value)
                 rmsd_rewards.append(rmsd_reward)
                 rmsd_values.append(rmsd_value)
-        
+
         match_reward = get_match_reward(generated_smiles, canoncial_smiles, len_prompt)
         match_rewards.append(match_reward)
         combined = w_rmsd * rmsd_reward + w_match * match_reward
         combined_rewards.append(combined)
             
         completion_tokens = len(tokenizer.encode(generated_conformer)) if generated_conformer else 0
-        logger.info(f"\nPrompt: {prompt}\nCompletion: {completion}" +
-                    f"\nRewards-  RMSD reward: {rmsd_reward:.2f}, RMSD value: {rmsd_value}," +
-                    f" Match: {match_reward:.4f}, Combined: {combined:.4f}, Length completion: {completion_tokens} tokens\n")
+        # logger.info(f"\nPrompt: {prompt}\nCompletion: {completion}" +
+        #             f"\nRewards-  RMSD reward: {rmsd_reward:.2f}, RMSD value: {rmsd_value}," +
+        #             f" Match: {match_reward:.4f}, Combined: {combined:.4f}, Length completion: {completion_tokens} tokens\n")
         
     if wandb.run is not None:
         wandb.log({
