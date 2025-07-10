@@ -1,5 +1,6 @@
 # Standard library imports
 import re
+import os
 
 # Third-party imports
 import numpy as np
@@ -85,7 +86,7 @@ def reward_function(prompts, completions, stats, tokenizer, config):
         combined_rewards.append(combined)
             
         completion_tokens = len(tokenizer.encode(generated_conformer)) if generated_conformer else 0
-        # logger.info(f"\nPrompt: {prompt}\nCompletion: {completion}" +
+        # logger.info(f"[PID {os.getpid()}] Prompt: {prompt}\nCompletion: {completion}" +
         #             f"\nRewards-  RMSD reward: {rmsd_reward:.2f}, RMSD value: {rmsd_value}," +
         #             f" Match: {match_reward:.4f}, Combined: {combined:.4f}, Length completion: {completion_tokens} tokens\n")
         
@@ -98,7 +99,7 @@ def reward_function(prompts, completions, stats, tokenizer, config):
             "rmsd_value": float(np.nanmean(rmsd_values)) if rmsd_values else 0.0,
             "rmsd_value_std": float(np.nanstd(rmsd_values)) if rmsd_values else 0.0,
         })
-    logger.info(f"{'='*40}\n")
+    logger.info(f"[PID {os.getpid()}] {'='*40}\n")
 
     stats.update_stats()
     return combined_rewards 
