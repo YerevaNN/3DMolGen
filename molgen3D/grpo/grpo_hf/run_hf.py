@@ -61,12 +61,12 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         logging_steps=1,
         # max_steps=config.grpo.max_steps,
         num_train_epochs=config.grpo.num_epochs,
+        use_liger_loss=True
     )
 
     model = AutoModelForCausalLM.from_pretrained(
         config.model.checkpoint_path,
         torch_dtype=torch.bfloat16,
-        device_map="auto"
     )
     tokenizer = AutoTokenizer.from_pretrained(
         config.model.tokenizer_path,
