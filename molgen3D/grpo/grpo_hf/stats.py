@@ -120,7 +120,10 @@ class RunStatistics:
             }
             for file in stats_files:
                 with open(file, 'r') as f:
-                    stats = json.load(f)
+                    try:
+                        stats = json.load(f)
+                    except json.JSONDecodeError:
+                        continue
                     aggregate["processed_prompts"] += stats.get("processed_prompts", 0)
                     aggregate["distinct_prompts"] += stats.get("distinct_prompts", 0)
                     aggregate["successful_generations"] += stats.get("successful_generations", 0)
