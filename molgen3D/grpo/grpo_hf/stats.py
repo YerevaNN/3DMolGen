@@ -86,8 +86,66 @@ class RunStatistics:
         return stats
 
     def update_stats(self) -> None:
-        """Save statistics to a JSON file"""
-        stats = self.log_global_stats()
-        stats_file = Path(self.output_dir)  / "statistics.json"
-        with open(stats_file, 'w+') as f:
-            json.dump(stats, f, indent=4)
+        import os
+        import time
+        import glob
+        import fcntl
+        pid = os.getpid()
+        stats_dir = Path(self.output_dir)
+        stats_dir.mkdir(parents=True, exist_ok=True)
+        own_stats = self.log_global_stats()
+        own_stats_file = stats_dir / f"statistics_{pid}.json"
+        with open(own_stats_file, 'w') as f:
+            json.dump(own_stats, f, indent=4)
+        lock_file = stats_dir / "statistics.lock"
+        with open(lock_file, 'w') as lock:
+            acquired = False
+            while not acquired:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    acquired = True
+                except BlockingIOError:
+                    time.sleep(0.1)
+            stats_files = glob.glob(str(stats_dir / "statistics_*.json"))
+            aggregate = {
+                "processed_prompts": 0,
+                "distinct_prompts": 0,
+                "successful_generations": 0,
+                "failed_ground_truth": 0,
+                "failed_conformer_generation": 0,
+                "failed_matching_smiles": 0,
+                "failed_rmsd": 0,
+                "rmsd_values": [],
+                "runtime_minutes": 0.0
+            }
+            for file in stats_files:
+                with open(file, 'r') as f:
+                    stats = json.load(f)
+                    aggregate["processed_prompts"] += stats.get("processed_prompts", 0)
+                    aggregate["distinct_prompts"] += stats.get("distinct_prompts", 0)
+                    aggregate["successful_generations"] += stats.get("successful_generations", 0)
+                    aggregate["failed_ground_truth"] += stats.get("failed_ground_truth", 0)
+                    aggregate["failed_conformer_generation"] += stats.get("failed_conformer_generation", 0)
+                    aggregate["failed_matching_smiles"] += stats.get("failed_matching_smiles", 0)
+                    aggregate["failed_rmsd"] += stats.get("failed_rmsd", 0)
+                    aggregate["runtime_minutes"] += stats.get("runtime_minutes", 0.0)
+                    aggregate["rmsd_values"].extend(stats.get("rmsd_values", []))
+            aggregate["success_rate"] = (
+                aggregate["successful_generations"] / aggregate["processed_prompts"]
+                if aggregate["processed_prompts"] > 0 else 0.0
+            )
+            aggregate["average_rmsd"] = (
+                float(np.nanmean(aggregate["rmsd_values"]))
+                if aggregate["rmsd_values"] else 0.0
+            )
+            aggregate["failure_rates"] = {
+                "ground_truth": aggregate["failed_ground_truth"] / aggregate["processed_prompts"] if aggregate["processed_prompts"] > 0 else 0.0,
+                "conformer_generation": aggregate["failed_conformer_generation"] / aggregate["processed_prompts"] if aggregate["processed_prompts"] > 0 else 0.0,
+                "matching_smiles": aggregate["failed_matching_smiles"] / aggregate["processed_prompts"] if aggregate["processed_prompts"] > 0 else 0.0,
+                "rmsd": aggregate["failed_rmsd"] / aggregate["processed_prompts"] if aggregate["processed_prompts"] > 0 else 0.0
+            }
+            aggregate["rmsd_values"] = aggregate["rmsd_values"]
+            stats_file = stats_dir / "statistics.json"
+            with open(stats_file, 'w') as f:
+                json.dump(aggregate, f, indent=4)
+            fcntl.flock(lock, fcntl.LOCK_UN)
