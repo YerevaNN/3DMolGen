@@ -91,7 +91,7 @@ def setup_logging(output_dir: str):
     
     # Add file handler
     log_file = os.path.join(output_dir, "run.log")
-    logger.add(log_file, rotation="100 MB", enqueue=True)
+    logger.add(log_file, rotation="100 MB", enqueue=True, format="{time:HH:mm} | {level} | {message}")
     
     # Add console handler
     logger.add(lambda msg: print(msg), level="INFO", enqueue=True)
