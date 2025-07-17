@@ -99,11 +99,11 @@ def main():
             executor = submitit.AutoExecutor(folder=str(Path.home() / "slurm_jobs/grpo/job_%j"))
         executor.update_parameters(
             name=config.run.name,
-            timeout_min=24 * 60,
+            timeout_min=24 * 24 * 60,
             gpus_per_node=config.device.num_gpus,
             nodes=1,
             mem_gb=80,
-            cpus_per_task=min(config.device.num_gpus * 10, os.cpu_count() or 1),
+            cpus_per_task=config.device.num_gpus * 22,
             slurm_additional_parameters={"partition": config.device.device_type,},
         )
         job = executor.submit(submitit.helpers.CommandFunction(cmd, cwd=str(snapshot_dir)))
