@@ -48,7 +48,7 @@ class GRPOConfig:
     reward_weight_rmsd: float
     reward_weight_match: float
     rmsd_const: float
-    
+    max_ground_truths: int
     # Optional parameters (with defaults)
     max_steps: Optional[int] = None
     num_epochs: Optional[int] = None
@@ -63,7 +63,7 @@ class DatasetConfig:
 @dataclass
 class RunConfig:
     name: str
-
+    log_level: str = "INFO"
 
 @dataclass
 class DeviceConfig:

@@ -29,7 +29,7 @@ from molgen3D.grpo.grpo_hf.rewards import reward_function
 
 def main(config: Config, enable_wandb: bool = False):
     logger.info(f"Running GRPO")
-    setup_logging(config.grpo.output_dir)
+    setup_logging(config.grpo.output_dir, config.run.log_level)
     stats = RunStatistics(output_dir=config.grpo.output_dir)
     load_smiles_mapping(config.dataset.smiles_mapping_path)
     logger.info("Initialized data paths")
@@ -55,8 +55,8 @@ def main(config: Config, enable_wandb: bool = False):
         report_to="wandb" if enable_wandb else "none",
         run_name=config.run.name,
         logging_steps=1,
-        # max_steps=config.grpo.max_steps,
-        num_train_epochs=config.grpo.num_epochs,
+        max_steps=config.grpo.max_steps,
+        # num_train_epochs=config.grpo.num_epochs,
         use_liger_loss=True,
         ddp_find_unused_parameters=False,
     )
