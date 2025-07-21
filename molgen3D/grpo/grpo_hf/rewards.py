@@ -15,14 +15,14 @@ from molgen3D.grpo.grpo_hf.utils import get_rmsd, load_ground_truths
 _smiles_mapping = None
 _geom_data_path = None
 
-def get_rmsd_reward(ground_truth, generated_conformer, config):
-    rmsd_value = get_rmsd(ground_truth, generated_conformer, align=True)
+def get_rmsd_reward(ground_truths, generated_conformer, config):
+    rmsd_value, min_index = get_rmsd(ground_truths, generated_conformer, align=True)
     if rmsd_value is None or np.isnan(rmsd_value):
-        logger.info(f"\n None RMSD value for prompt: {ground_truth} {generated_conformer}")
+        logger.info(f"\n None RMSD value for prompt: {ground_truths[min_index]} {generated_conformer}")
         rmsd_reward = 0.0
     else:
         rmsd_reward = 1.0 / (1.0 + (rmsd_value / config.grpo.rmsd_const))
-    return rmsd_value, rmsd_reward
+    return rmsd_value, rmsd_reward, min_index
         
 def get_match_reward(generated_smiles, canoncial_smiles, len_prompt):
     if generated_smiles == canoncial_smiles:
@@ -49,21 +49,17 @@ def reward_function(prompts, completions, stats, tokenizer, config):
         stats.processed_prompts += 1
         canoncial_smiles = extract_between(prompt, "[SMILES]", "[/SMILES]")
         len_prompt = len(canoncial_smiles)
-       
         if canoncial_smiles in ground_truth_cache:
-            ground_truth = ground_truth_cache[canoncial_smiles]
+            ground_truths = ground_truth_cache[canoncial_smiles]
         else:
-            ground_truths = load_ground_truths(canoncial_smiles, num_gt=1)
-            ground_truth = ground_truths[0] if ground_truths else None
-            ground_truth_cache[canoncial_smiles] = ground_truth
-            if ground_truth:
+            ground_truths = load_ground_truths(canoncial_smiles, num_gt=config.grpo.max_ground_truths)
+            ground_truth_cache[canoncial_smiles] = ground_truths
+            if ground_truths:
                 stats.distinct_prompts += 1
-
-        rmsd_reward, match_reward, combined, rmsd_value = 0.0, 0.0, 0.0, float('nan')
+        rmsd_reward, match_reward, combined, rmsd_value, min_index = 0.0, 0.0, 0.0, float('nan'), -2
         generated_conformer = extract_between(completion, "[CONFORMER]", "[/CONFORMER]")
         generated_smiles = tag_pattern.sub('', generated_conformer) if generated_conformer else ""
-
-        if ground_truth is None:
+        if not ground_truths:
             stats.failed_ground_truth += 1
         elif not generated_conformer:
             stats.failed_conformer_generation += 1
@@ -71,7 +67,7 @@ def reward_function(prompts, completions, stats, tokenizer, config):
             stats.failed_matching_smiles += 1
             logger.info(f"\nGenerated SMILES does not match canonical prompt: {prompt}\nSMILES: {generated_smiles}")
         else:
-            rmsd_value, rmsd_reward = get_rmsd_reward(ground_truth, generated_conformer, config)
+            rmsd_value, rmsd_reward, min_index = get_rmsd_reward(ground_truths, generated_conformer, config)
             if np.isnan(rmsd_value):
                 stats.failed_rmsd += 1
             else:
@@ -80,14 +76,21 @@ def reward_function(prompts, completions, stats, tokenizer, config):
                 rmsd_rewards.append(rmsd_reward)
                 rmsd_values.append(rmsd_value)
 
+            if wandb.run is not None:
+                wandb.log({
+                    "rmsd_value": rmsd_value,
+                    "min_index": min_index,
+                })
+
         match_reward = get_match_reward(generated_smiles, canoncial_smiles, len_prompt)
         match_rewards.append(match_reward)
         combined = w_rmsd * rmsd_reward + w_match * match_reward
         combined_rewards.append(combined)
             
         completion_tokens = len(tokenizer.encode(generated_conformer)) if generated_conformer else 0
-        # logger.info(f"[PID {os.getpid()}] Prompt: {prompt}\nCompletion: {completion}" +
-        #             f"\nRewards-  RMSD reward: {rmsd_reward:.2f}, RMSD value: {rmsd_value}," +
+        # logger.info(f"[PID {os.getpid()}] Prompt: {prompt}"
+        #             # f"Completion: {completion}" +
+        #             f"\nRewards-  RMSD reward: {rmsd_reward:.2f}, RMSD value: {rmsd_value}, index: {min_index}" +
         #             f" Match: {match_reward:.4f}, Combined: {combined:.4f}, Length completion: {completion_tokens} tokens\n")
         
     if wandb.run is not None:
@@ -96,8 +99,6 @@ def reward_function(prompts, completions, stats, tokenizer, config):
             "reward/rmsd_std": float(np.nanstd(rmsd_rewards)) if rmsd_rewards else 0.0,
             "reward/match": float(np.nanmean(match_rewards)) if match_rewards else 0.0,
             "reward/combined": float(np.nanmean(combined_rewards)) if combined_rewards else 0.0,
-            "rmsd_value": float(np.nanmean(rmsd_values)) if rmsd_values else 0.0,
-            "rmsd_value_std": float(np.nanstd(rmsd_values)) if rmsd_values else 0.0,
         })
     logger.info(f"[PID {os.getpid()}] {'='*40}\n")
 
