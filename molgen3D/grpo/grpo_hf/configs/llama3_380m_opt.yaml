@@ -1,51 +1,49 @@
-model:
-  # checkpoint_path: /nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-380M_conformers/e184d4d867804fbd8a8c45bf/step-30000/
-  checkpoint_path: /nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-380M_conformers/b4707c6bf8b54cba8febe9fc/step-8500/
-  tokenizer_path: /auto/home/menuab/code/YNNtitan/torchtitan/tokenizers/Llama-3.2-chem-1B-v1
-  mol_tags: ["[SMILES]", "[/SMILES]"]
-  conf_tags: ["[CONFORMER]", "[/CONFORMER]"]
-  pad_token: <|finetune_right_pad_id|>
-  dtype: bf16 # bf16 / fp32
-
-generation:
-  max_completion_length: 1000
-  temperature: 1.0
-  do_sample: true
-  repetition_penalty: 1.0
-  num_return_sequences: 1
-
-processing:
-  eos_token_id: 128329
-
-grpo:
-  output_dir: ./grpo_outputs
-  learning_rate: 0.0001 # 0.0001
-  # max_steps: 5000
-  num_epochs: 1
-  temperature: 1.0
-  num_generations: 16
-  per_device_batch_size: 16
-  grad_acc_steps: 4
-  scheduler: cosine
-  # scheduler: constant_with_warmup
-  adam_beta1: 0.9
-  adam_beta2: 0.99
-  weight_decay: 0.1
-  warmup_ratio: 0.05
-  max_grad_norm: 0.1
-  beta: 0
-  seed: 1
-  reward_weight_rmsd: 1.0
-  reward_weight_match: 0.3
-  rmsd_const: 1.8
-
-device:
-  device_type: "a100"
-  num_gpus: 2
-
 dataset:
   dataset_path: /nfs/ap/home/_menuab_/cartesianisomeric/grpo/train_data_full.jsonl
   smiles_mapping_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/smiles_mapping.json
-
+device:
+  device_type: a100
+  num_gpus: 4
+generation:
+  do_sample: true
+  max_completion_length: 1000
+  num_return_sequences: 1
+  repetition_penalty: 1.0
+  temperature: 1.0
+grpo:
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  beta: 0
+  grad_acc_steps: 10
+  learning_rate: 6.0e-05
+  max_grad_norm: 0.1
+  max_ground_truths: 16
+  max_steps: 20000
+  num_epochs: 1
+  num_generations: 16
+  output_dir: ./grpo_outputs
+  per_device_batch_size: 24
+  reward_weight_match: 0.3
+  reward_weight_rmsd: 1.0
+  rmsd_const: 1.4
+  scheduler: cosine
+  seed: 1
+  temperature: 1.0
+  warmup_ratio: 0.15
+  weight_decay: 0.1
+model:
+  checkpoint_path: /nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-380M_conformers/b4707c6bf8b54cba8febe9fc/step-8500/
+  conf_tags:
+  - '[CONFORMER]'
+  - '[/CONFORMER]'
+  dtype: bf16
+  mol_tags:
+  - '[SMILES]'
+  - '[/SMILES]'
+  pad_token: <|finetune_right_pad_id|>
+  tokenizer_path: /auto/home/menuab/code/YNNtitan/torchtitan/tokenizers/Llama-3.2-chem-1B-v1
+processing:
+  eos_token_id: 128329
 run:
-  name: 380m_1e_lr1e-4_16bs*16comp*2gpu*4ga_beta0_rewardjoint_1e_alignT_full
+  name: multiple_gn_test
+  log_level: INFO

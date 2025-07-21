@@ -4,6 +4,7 @@ from molgen3D.utils.utils import load_pkl, load_json, get_best_rmsd
 from rdkit import Chem
 import os
 from loguru import logger
+import numpy as np
 
 # Global variables
 _smiles_mapping = None
@@ -44,7 +45,7 @@ def remove_chiral_info(mol):
                 atom.ClearProp("_CIPCode")
     return mol
 
-def load_ground_truths(key_mol_smiles, num_gt=1):
+def load_ground_truths(key_mol_smiles, num_gt: int = 16):
     """Load ground truth conformers for a given canonical SMILES.
     
     Args:
@@ -65,26 +66,40 @@ def load_ground_truths(key_mol_smiles, num_gt=1):
 
     try:
         mol_pickle = load_pkl(os.path.join("/nfs/ap/mnt/sxtn2/chem/GEOM_data/rdkit_folder", "drugs", filename + ".pickle"))
-        mol_confs = mol_pickle["conformers"][:num_gt]
+        conformers: list = mol_pickle["conformers"]
+        if len(conformers) > 1:
+            rng = np.random.default_rng()
+            rng.shuffle(conformers)
+        mol_confs = conformers[:num_gt]
         del mol_pickle
-        mols = [mol_confs[0]['rd_mol']]
-        # print(f"{os.getpid()} loaded gn geom id: {mol_confs[0]['geom_id']} with smiles: {Chem.MolToSmiles(mols[0], canonical=True)}")
-        # mols = [conf['rd_mol'] for conf in mol_confs]
+        mols = [conf['rd_mol'] for conf in mol_confs]
         return mols
     except Exception as e:
         logger.error(f"Error loading ground truth for {key_mol_smiles} {geom_smiles}: {e}")
         return None
 
-def get_rmsd(ground_truth, generated_conformer, align=False):
+def get_rmsd(ground_truths, generated_conformer, align: bool = False) -> float:
     try:
         generated_mol = decode_cartesian_raw(generated_conformer)
-        rmsd = get_best_rmsd(ground_truth, generated_mol, use_alignmol=align)
-        return rmsd
+        rmsds = []
+        for ground_truth in ground_truths:
+            try:
+                rmsd = get_best_rmsd(ground_truth, generated_mol, use_alignmol=align)
+                rmsds.append(rmsd)
+            except Exception as e:
+                logger.error(f"Error getting RMSD: {Chem.MolToSmiles(ground_truth, canonical=True)}\n{generated_conformer}\n{e}")
+                rmsds.append(float('nan'))
+        if not rmsds:
+            return float('nan'), -1
+        if not rmsds or np.all(np.isnan(rmsds)):
+            return float('nan'), -1
+        min_index = int(np.nanargmin(rmsds))
+        return float(rmsds[min_index]), min_index
     except Exception as e:
-        logger.error(f"Error getting RMSD: {Chem.MolToSmiles(ground_truth, canonical=True)}\n{generated_conformer}\n{e}")
-        return float('nan')
+        logger.error(f"Error in get_rmsd: {e}\n{generated_conformer}")
+        return float('nan'), -1
 
-def setup_logging(output_dir: str):
+def setup_logging(output_dir: str, log_level: str = "INFO"):
     """Setup logging for the run."""
     # Remove all existing handlers
     logger.remove()
@@ -94,7 +109,7 @@ def setup_logging(output_dir: str):
     logger.add(log_file, rotation="100 MB", enqueue=True, format="{time:HH:mm} | {level} | {message}")
     
     # Add console handler
-    logger.add(lambda msg: print(msg), level="INFO", enqueue=True)
+    logger.add(lambda msg: print(msg), level=log_level, enqueue=True)  
 
 def create_code_snapshot(project_root: str, snapshot_dir: str):
     """Create a minimal code snapshot containing only necessary files."""
