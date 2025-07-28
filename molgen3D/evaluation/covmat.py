@@ -184,7 +184,7 @@ if __name__ == "__main__":
     with open("/auto/home/menuab/code/3DMolGen/drugs_test_inference.pickle", 'rb') as f:
         true_mols = pickle.load(f)
 
-    evaluator = CovMatEvaluator(num_workers=20)
+    evaluator = CovMatEvaluator(num_workers=16)
     results, rmsd_results, missing_mols = evaluator(ref_data=true_mols, gen_data=model_preds)
     # print(results)
     log.info("Evaluation finished...")
