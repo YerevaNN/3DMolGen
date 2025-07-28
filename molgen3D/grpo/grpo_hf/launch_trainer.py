@@ -57,10 +57,16 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, type=str)
     parser.add_argument("--wandb", action="store_true", help="Enable wandb tracking")
-    parser.add_argument("--device", type=str, choices=["local", "a100", "h100"], default="local", help="Device type")
+    parser.add_argument("--device", type=str, choices=["local", "a100", "h100", "all"], default="local", help="Device type")
     parser.add_argument("--ngpus", type=int, default=1, help="Number of GPUs to use")
     parser.add_argument("--strategy", type=str, choices=["single", "ddp", "fsdp", "ds"], default="single", help="Training strategy")
+    parser.add_argument("--nccl-debug", action="store_true", help="Enable NCCL debug logging")
     args = parser.parse_args()
+
+    if args.nccl_debug:
+        logger.info("Enabling NCCL debug logging")
+        os.environ["NCCL_DEBUG"] = "INFO"
+
     try:
         # Update general config file in-place
         with open(args.config, "r") as f:
@@ -103,7 +109,7 @@ def main():
             gpus_per_node=config.device.num_gpus,
             nodes=1,
             mem_gb=80,
-            cpus_per_task=config.device.num_gpus * 22,
+            cpus_per_task=config.device.num_gpus * 20,
             slurm_additional_parameters={"partition": config.device.device_type,},
         )
         job = executor.submit(submitit.helpers.CommandFunction(cmd, cwd=str(snapshot_dir)))
