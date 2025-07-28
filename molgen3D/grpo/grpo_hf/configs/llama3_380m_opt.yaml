@@ -2,8 +2,8 @@ dataset:
   dataset_path: /nfs/ap/home/_menuab_/cartesianisomeric/grpo/train_data_full.jsonl
   smiles_mapping_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/smiles_mapping.json
 device:
-  device_type: a100
-  num_gpus: 4
+  device_type: h100
+  num_gpus: 6
 generation:
   do_sample: true
   max_completion_length: 1000
@@ -14,18 +14,18 @@ grpo:
   adam_beta1: 0.9
   adam_beta2: 0.95
   beta: 0
-  grad_acc_steps: 10
-  learning_rate: 6.0e-05
-  max_grad_norm: 0.1
-  max_ground_truths: 16
-  max_steps: 20000
+  grad_acc_steps: 4
+  learning_rate: 9.0e-05
+  max_grad_norm: 1.0
+  max_ground_truths: 64
+  max_steps: 100
   num_epochs: 1
   num_generations: 16
   output_dir: ./grpo_outputs
-  per_device_batch_size: 24
+  per_device_batch_size: 32
   reward_weight_match: 0.3
   reward_weight_rmsd: 1.0
-  rmsd_const: 1.4
+  rmsd_const: 1.0
   scheduler: cosine
   seed: 1
   temperature: 1.0
@@ -45,5 +45,5 @@ model:
 processing:
   eos_token_id: 128329
 run:
-  name: multiple_gn_test
   log_level: INFO
+  name: 380m_1e_lr9e-5_32bs*16comp*6gpu*4ga_1e_full
