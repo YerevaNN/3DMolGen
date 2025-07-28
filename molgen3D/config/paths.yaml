@@ -4,6 +4,11 @@ model_paths:
   m380_3e: "/nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-380M_conformers/534162de781f4855bbccb0d6/step-23500/"
   m380_4e: "/nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-380M_conformers/e184d4d867804fbd8a8c45bf/step-30000/"
 
+  m380_1e_1xgrpo: "/auto/home/menuab/code/3DMolGen/grpo_outputs/2025-07-13-16:57_380m_1e_lr1e-4_48bs*16comp*6gpu*6ga_beta0_1e_full/code_snapshot/grpo_outputs/model"
+  m380_1e_1xgrpo_6e-5: "/auto/home/menuab/code/3DMolGen/grpo_outputs/2025-07-22-00:31_380m_1e_lr6e-5_48bs*16comp*8gpu*3ga_beta0_1e_full_wu.15_beta2.95_mGN/code_snapshot/grpo_outputs/model"
+  m380_1e_1xgrpo_50e_100s: "/auto/home/menuab/code/3DMolGen/grpo_outputs/2025-07-22-14:38_380m_1e_lr6e-5_48bs*16comp*8gpu*3ga_beta0_50e_100samp_wu.15_beta2.95_mGN/code_snapshot/grpo_outputs/model"
+  m380_1e_1xgrpo_100e_100s: "/auto/home/menuab/code/3DMolGen/grpo_outputs/2025-07-22-15:25_380m_1e_lr9e-5_48bs*16comp*8gpu*4ga_beta0_100e_100samp_wu.15_beta2.95_mGN/code_snapshot/grpo_outputs/model"
+
   b1_1e: "/nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-1B_conformers/66bfa548d98247cdb01c4c1c/step-11000/"
   b1_2e: "/nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-1B_conformers/ee7e78995cc04aea8089aee1/step-21000/"
   b1_3e: "/nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-1B_conformers/de472e134063446086e66925/step-31000/"
