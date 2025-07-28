@@ -14,7 +14,6 @@ from datasets import Dataset
 from loguru import logger
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import GRPOConfig as TRLGRPOConfig
-from accelerate import InitProcessGroupKwargs
 
 # Local imports
 from molgen3D.grpo.grpo_hf.config import Config
@@ -55,8 +54,8 @@ def main(config: Config, enable_wandb: bool = False):
         report_to="wandb" if enable_wandb else "none",
         run_name=config.run.name,
         logging_steps=1,
-        max_steps=config.grpo.max_steps,
-        # num_train_epochs=config.grpo.num_epochs,
+        # max_steps=config.grpo.max_steps,
+        num_train_epochs=config.grpo.num_epochs,
         use_liger_loss=True,
         ddp_find_unused_parameters=False,
     )
@@ -64,7 +63,12 @@ def main(config: Config, enable_wandb: bool = False):
     model = AutoModelForCausalLM.from_pretrained(
         config.model.checkpoint_path,
         torch_dtype=torch.bfloat16,
-    )
+        attn_implementation="flash_attention_2",
+    )   
+    # Verify Flash Attention is active
+    logger.info(f"Model architecture:\n{model}")
+    logger.info(f"Model attention implementation: {getattr(model.config, '_attn_implementation', 'unknown')}")    
+
     tokenizer = AutoTokenizer.from_pretrained(
         config.model.tokenizer_path,
     )
