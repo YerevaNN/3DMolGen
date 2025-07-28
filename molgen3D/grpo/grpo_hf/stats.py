@@ -85,7 +85,7 @@ class RunStatistics:
         }
         return stats
 
-    def update_stats(self) -> None:
+    def update_stats(self) -> Dict:
         import os
         import time
         import glob
@@ -98,6 +98,7 @@ class RunStatistics:
         with open(own_stats_file, 'w') as f:
             json.dump(own_stats, f, indent=4)
         lock_file = stats_dir / "statistics.lock"
+        aggregate = {}
         with open(lock_file, 'w') as lock:
             acquired = False
             while not acquired:
@@ -147,8 +148,8 @@ class RunStatistics:
                 "matching_smiles": aggregate["failed_matching_smiles"] / aggregate["processed_prompts"] if aggregate["processed_prompts"] > 0 else 0.0,
                 "rmsd": aggregate["failed_rmsd"] / aggregate["processed_prompts"] if aggregate["processed_prompts"] > 0 else 0.0
             }
-            aggregate["rmsd_values"] = aggregate["rmsd_values"]
             stats_file = stats_dir / "statistics.json"
             with open(stats_file, 'w') as f:
                 json.dump(aggregate, f, indent=4)
             fcntl.flock(lock, fcntl.LOCK_UN)
+        return aggregate
