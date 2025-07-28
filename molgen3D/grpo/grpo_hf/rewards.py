@@ -93,14 +93,20 @@ def reward_function(prompts, completions, stats, tokenizer, config):
         #             f"\nRewards-  RMSD reward: {rmsd_reward:.2f}, RMSD value: {rmsd_value}, index: {min_index}" +
         #             f" Match: {match_reward:.4f}, Combined: {combined:.4f}, Length completion: {completion_tokens} tokens\n")
         
+    aggregate_stats = stats.update_stats()
     if wandb.run is not None:
-        wandb.log({
+        log_data = {
             "reward/rmsd": float(np.nanmean(rmsd_rewards)) if rmsd_rewards else 0.0,
             "reward/rmsd_std": float(np.nanstd(rmsd_rewards)) if rmsd_rewards else 0.0,
             "reward/match": float(np.nanmean(match_rewards)) if match_rewards else 0.0,
             "reward/combined": float(np.nanmean(combined_rewards)) if combined_rewards else 0.0,
-        })
+            "stats/success_rate": aggregate_stats.get("success_rate", 0.0),
+            "failure_rate/ground_truth": aggregate_stats.get("failed_ground_truth", 0.0),
+            "failure_rate/conformer_generation": aggregate_stats.get("failed_conformer_generation", 0.0),
+            "failure_rate/matching_smiles": aggregate_stats.get("failed_matching_smiles", 0.0),
+            "failure_rate/rmsd": aggregate_stats.get("failed_rmsd", 0.0),
+        }
+        wandb.log(log_data)
     logger.info(f"[PID {os.getpid()}] {'='*40}\n")
 
-    stats.update_stats()
     return combined_rewards 
