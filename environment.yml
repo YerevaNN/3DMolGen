@@ -15,8 +15,10 @@ dependencies:
     - numpy==2.2.6
     - pandas==2.3.0
     - Pillow==11.3.0
-    - pytorch==2.7.1
     - rdkit==2025.3.3
+    - loguru
+    - loky
+    - submitit
     - scikit-learn==1.7.0
     - scipy==1.15.3
     - tokenizers==0.21.1
