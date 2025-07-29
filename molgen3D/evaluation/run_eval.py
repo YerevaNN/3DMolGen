@@ -1,6 +1,7 @@
 import pickle
 import os
 from covmat import CovMatEvaluator, print_covmat_results
+from posebusters_check import run_all_posebusters
 from loguru import logger as log
 
 with open("/auto/home/menuab/code/3DMolGen/data/geom_drugs_test_set/drugs_test_inference.pickle", 'rb') as f:
@@ -30,6 +31,8 @@ for pickle_path in sorted(pickles):
         model_preds = pickle.load(file)
     evaluator = CovMatEvaluator(num_workers=2)
     results, rmsd_results, missing = evaluator(ref_data=true_mols, gen_data=model_preds)
+    
+    df, summary, fail_smiles, error_smiles = run_all_posebusters(model_preds, config="mol", max_workers=2)
     # print(results)
     log.info("Evaluation finished...")
 
