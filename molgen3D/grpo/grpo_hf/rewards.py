@@ -16,7 +16,7 @@ _smiles_mapping = None
 _geom_data_path = None
 
 def get_rmsd_reward(ground_truths, generated_conformer, config):
-    rmsd_value, min_index = get_rmsd(ground_truths, generated_conformer, align=True)
+    rmsd_value, min_index = get_rmsd(ground_truths, generated_conformer, align=False)
     if rmsd_value is None or np.isnan(rmsd_value):
         logger.info(f"\n None RMSD value for prompt: {ground_truths[min_index]} {generated_conformer}")
         rmsd_reward = 0.0

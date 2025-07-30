@@ -84,7 +84,7 @@ def get_rmsd(ground_truths, generated_conformer, align: bool = False) -> float:
         rmsds = []
         for ground_truth in ground_truths:
             try:
-                rmsd = get_best_rmsd(ground_truth, generated_mol, use_alignmol=align)
+                rmsd = get_best_rmsd(generated_mol, ground_truth, use_alignmol=align)
                 rmsds.append(rmsd)
             except Exception as e:
                 logger.error(f"Error getting RMSD: {Chem.MolToSmiles(ground_truth, canonical=True)}\n{generated_conformer}\n{e}")
