@@ -6,7 +6,7 @@ import cloudpickle
 import random
 import numpy as np
 from collections import OrderedDict
-from molgen3D.evaluation.utils import correct_smiles, clean_confs
+from molgen3D.evaluation.utils import correct_smiles, clean_confs, get_unique_smiles
 
 random.seed(43)
 np.random.seed(43)
@@ -33,6 +33,7 @@ test_mols = [(m[0].strip(), int(m[1]), m[2].strip()) for m in test_mols]
 
 processed_drugs_test = {}
 conf_count, mol_count = 0, 0
+# zero_confs_count, less_confs_count = 0, 0
 for i in range(len(test_mols)):
     geom_smiles = test_mols[i][0]
     try:
@@ -44,6 +45,12 @@ for i in range(len(test_mols)):
         num_confs = len(true_confs)
         if num_confs == 0:
             continue
+        # if num_confs == 0:
+        #     print(i, num_confs, test_mols[i][1], geom_smiles, '---')
+        #     zero_confs_count += 1
+        #     continue
+        # if num_confs != test_mols[i][1]:
+        #     less_confs_count += 1
 
         corrected_smi = correct_smiles(true_confs)
         if corrected_smi != geom_smiles_corrected:
@@ -51,20 +58,23 @@ for i in range(len(test_mols)):
             print(f"corrected smile mismatch: \n{corrected_smi=}\n{geom_smiles=}\n{geom_smiles_corrected=}")
             print('***')
 
+        # smiles_dict = get_unique_smiles(true_confs)
+
         sample_dict = {
             "geom_smiles": geom_smiles,
             "geom_smiles_c": geom_smiles_corrected,
             "confs": true_confs,
             "num_confs": num_confs,
             "pickle_path": drugs_summ[geom_smiles]['pickle_path'],
-            "canonical_smiles": corrected_smi
+            # "canonical_smiles": corrected_smi
+            "canonical_smiles": geom_smiles_corrected
             }
         processed_drugs_test[geom_smiles] = sample_dict
         mol_count += 1
         print(f"num original confs {test_mols[i][1]} num correct confs {num_confs}, {geom_smiles}")
         
     except:
-        print(i , '---')
+        print(i , geom_smiles, '---')
     conf_count += num_confs
 
 print(f"number of processed molecules: {len(processed_drugs_test.keys())}")
