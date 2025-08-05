@@ -10,6 +10,7 @@ from loguru import logger
 from collections import defaultdict, Counter
 import submitit
 import os
+import argparse
 from datetime import datetime
 torch.set_grad_enabled(False)
 
@@ -135,85 +136,71 @@ def run_inference(inference_config: dict):
 
     return generations, stats
 
-        
 
-if __name__ == "__main__":
-    set_seed(42)    
-
+def launch_inference_from_cli(device: str, grid_search: bool) -> None:
     with open("molgen3D/config/paths.yaml", "r") as f:
         paths = yaml.safe_load(f)
-    
-    executor = submitit.AutoExecutor(folder="~/slurm_jobs/conf_gen/job_%j")
-    node = "h100"
-    # executor = submitit.local.local.LocalExecutor(folder="~/slurm_jobs/conf_gen/job_%j")
-    # node = "local"
     n_gpus = 1
     experiment_name = "conf_gen"
-    executor.update_parameters(
-        name=experiment_name,
-        timeout_min=24 * 24 * 60,
-        gpus_per_node=n_gpus,
-        nodes=1,
-        # slurm_gres="shard:80",
-        mem_gb=80,
-        cpus_per_task=n_gpus * 15,
-        slurm_additional_parameters={"partition": node},
-    )
-
-    # inference_config = {
-    #     "model_path": paths["model_paths"]["m380_4e"],
-    #     "tokenizer_path": paths["tokenizer_path"],
-    #     "test_data_path": paths["test_data_path"],
-    #     "torch_dtype": "bfloat16", 
-    #     "batch_size": 1024,
-    #     "num_gens": gen_num_codes["1k_per_conf"], 
-    #     "gen_config": sampling_configs["top_p_sampling1"], 
-    #     "device": "cuda",
-    #     "results_path": paths["results_path"],
-    #     "run_name": "bugfixtest",  # Track run details
-    # }
-
-    # run locally
-    # generations, stats = run_inference(inference_config=inference_config)
-    
-    # # run on slurm
-    # job = executor.submit(run_inference, 
-    #                       inference_config=inference_config)
-
-    # run grid search
-    param_grid = {
-        # "model_path": ["m380_1e", "m380_2e", "m380_3e", "m380_4e", "b1_1e", "b1_2e", "b1_3e", "b1_4e"],
-        "model_path": ["b1_4e"],
-        # "num_gens": list(gen_num_codes.keys()),
-        # "gen_config": ['top_p_sampling1'],
-        # "gen_config": ["top_p_sampling1", "top_p_sampling2", "top_p_sampling3","top_p_sampling4", "top_p_sampling5", "top_p_sampling6",
-        #                 "top_p_sampling7", "top_p_sampling8", "top_p_sampling9", "top_p_sampling10", 
-        #                 "top_p_sampling11", "top_p_sampling12", "top_p_sampling13", "top_p_sampling14", 
-        #                 "top_p_sampling15", "top_p_sampling16"],
-        "gen_config": ["min_p_sampling1", "min_p_sampling2", "min_p_sampling3","min_p_sampling4", "min_p_sampling5", "min_p_sampling6",
-                        "min_p_sampling7", "min_p_sampling8", "min_p_sampling9", "min_p_sampling10", 
-                        "min_p_sampling11", "min_p_sampling12"],
+    node = device if device in {"a100", "h100"} else None
+    executor = None
+    if device in {"a100", "h100"}:
+        executor = submitit.AutoExecutor(folder="~/slurm_jobs/conf_gen/job_%j")
+        executor.update_parameters(
+            name=experiment_name,
+            timeout_min=24 * 24 * 60,
+            gpus_per_node=n_gpus,
+            nodes=1,
+            mem_gb=80,
+            cpus_per_task=n_gpus * 15,
+            slurm_additional_parameters={"partition": node},
+        )
+    inference_config = {
+        "model_path": paths["model_paths"]["m380_1e"],
+        "tokenizer_path": paths["tokenizer_path"],
+        "test_data_path": paths["test_data_path"],
+        "torch_dtype": "bfloat16",
+        "batch_size": 256,
+        "num_gens": gen_num_codes["2k_per_conf"],
+        "gen_config": sampling_configs["top_p_sampling1"],
+        "device": "cuda" if device != "local" else "cpu",
+        "results_path": paths["results_path"],
+        "run_name": "m380_1e_newdataprocess",
     }
+    if grid_search:
+        param_grid = {
+            "model_path": ["m380_1e_1xgrpo", "m380_1e_1xgrpo_6e-5", "m380_1e_1xgrpo_50e_100s", "m380_1e_1xgrpo_100e_100s"],
+            "gen_config": ["top_p_sampling1", "top_p_sampling2"],
+        }
+        jobs = []
+        if executor is not None:
+            with executor.batch():
+                for model_key, gen_config_key in itertools.product(param_grid["model_path"], param_grid["gen_config"]):
+                    grid_config = dict(inference_config)
+                    grid_config["model_path"] = paths["model_paths"][model_key]
+                    grid_config["gen_config"] = sampling_configs[gen_config_key]
+                    grid_config["run_name"] = f"{model_key}_{gen_config_key}"
+                    job = executor.submit(run_inference, inference_config=grid_config)
+                    jobs.append(job)
+        else:
+            for model_key, gen_config_key in itertools.product(param_grid["model_path"], param_grid["gen_config"]):
+                grid_config = dict(inference_config)
+                grid_config["model_path"] = paths["model_paths"][model_key]
+                grid_config["gen_config"] = sampling_configs[gen_config_key]
+                grid_config["run_name"] = f"{model_key}_{gen_config_key}"
+                run_inference(inference_config=grid_config)
+    else:
+        if executor is not None:
+            executor.submit(run_inference, inference_config=inference_config)
+        else:
+            run_inference(inference_config=inference_config)
 
-    jobs = []
-    with executor.batch():
-        for model_key, gen_config_key in itertools.product(*param_grid.values()):
-            # Update inference config dynamically
-            inference_config = {
-                "model_path": paths["model_paths"][model_key],
-                "tokenizer_path": paths["tokenizer_path"],
-                "test_data_path": paths["test_data_path"],
-                "torch_dtype": "bfloat16",
-                "batch_size": 256 if "380" in model_key else 256,
-                "num_gens": gen_num_codes["2k_per_conf"],
-                "gen_config": sampling_configs[gen_config_key], 
-                "device": "cuda",
-                "results_path": paths["results_path"],
-                "run_name": f"{model_key}_{gen_config_key}",  # Track run details
-            }
-
-            # Submit job
-            job = executor.submit(run_inference, inference_config)
-            jobs.append(job)
+if __name__ == "__main__":
+    set_seed(42)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", type=str, choices=["local", "a100", "h100"], required=True)
+    parser.add_argument("--grid_search", action="store_true")
+    args = parser.parse_args()
+    launch_inference_from_cli(device=args.device, grid_search=args.grid_search)
 
     
