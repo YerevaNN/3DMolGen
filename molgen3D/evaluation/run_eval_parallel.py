@@ -235,7 +235,7 @@ def create_slurm_executor(device: str, num_workers: int):
     
     executor.update_parameters(
         name="gen_evals",
-        timeout_min=4 * 60,  # 4 hours timeout
+        timeout_min=40 * 60,  # 40 hours timeout
         cpus_per_task=num_workers,
         mem_gb=80,
         nodes=1,
