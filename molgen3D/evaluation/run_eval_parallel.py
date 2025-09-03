@@ -2,6 +2,7 @@ import pickle
 import os
 import multiprocessing as mp
 from molgen3D.evaluation.improved_covmat import MemoryEfficientCovMatEvaluator, print_covmat_results
+from molgen3D.evaluation.posebusters_check import run_all_posebusters
 import time
 from pathlib import Path
 import argparse
@@ -11,7 +12,7 @@ from datetime import datetime
 
 # Default Configuration
 DEFAULT_GEN_RESULTS_BASE = "/auto/home/menuab/code/3DMolGen/gen_results/"
-DEFAULT_EVAL_RESULTS_BASE = "/auto/home/menuab/code/3DMolGen/eval_results/"
+DEFAULT_EVAL_RESULTS_BASE = "/auto/home/vover/code/3DMolGen/eval_results/"
 DEFAULT_TRUE_MOLS_PATH = "/auto/home/menuab/code/3DMolGen/data/geom_drugs_test_set/drugs_test_inference.pickle"
 
 def get_pickle_files(directory_path: str) -> list[str]:
@@ -72,7 +73,8 @@ def load_molecules(pickle_path: str):
         print(f"Failed to load molecules from {pickle_path}: {e}")
         return None
 
-def process_single_pickle(evaluator, pickle_file: str, gens_path: str, true_mols, results_file):
+def process_single_pickle(evaluator, pickle_file: str, gens_path: str, true_mols, results_file, 
+                         run_posebusters: bool = True, posebusters_config: str = "mol"):
     """Process a single pickle file and write results."""
     print(f"Processing: {pickle_file}")
     start_time = time.time()
@@ -86,20 +88,57 @@ def process_single_pickle(evaluator, pickle_file: str, gens_path: str, true_mols
             print(f"Empty data in {pickle_file}, skipping...")
             return False
         
-        # Run evaluation
+        # Run CovMat evaluation
         results, rmsd_results, missing = evaluator(ref_data=true_mols, gen_data=model_preds)
-        duration = time.time() - start_time
-        print(f"Completed {pickle_file} in {duration:.2f}s")
+        covmat_duration = time.time() - start_time
+        
+        # Run PoseBusters evaluation if enabled
+        posebusters_results = None
+        posebusters_summary = None
+        posebusters_duration = 0
+        
+        if run_posebusters:
+            print(f"Running PoseBusters evaluation for {pickle_file}...")
+            pb_start_time = time.time()
+            try:
+                _, pb_summary, _, _ = run_all_posebusters(
+                    data=model_preds, 
+                    config=posebusters_config,
+                    full_report=False,
+                    max_workers=min(8, mp.cpu_count())  # Limit workers to avoid memory issues
+                )
+                posebusters_summary = pb_summary
+                posebusters_duration = time.time() - pb_start_time
+                print(f"PoseBusters completed for {pickle_file} in {posebusters_duration:.2f}s")
+            except Exception as e:
+                print(f"PoseBusters failed for {pickle_file}: {e}")
+                posebusters_duration = time.time() - pb_start_time
+        
+        total_duration = time.time() - start_time
+        print(f"Completed {pickle_file} in {total_duration:.2f}s")
 
         # Save results
         cov_df, matching_metrics = print_covmat_results(results)
         
         results_file.write(f"Results for {pickle_file}\n")
-        results_file.write(f"Processing time: {duration:.2f}s\n")
+        results_file.write(f"Total processing time: {total_duration:.2f}s\n")
+        results_file.write(f"CovMat processing time: {covmat_duration:.2f}s\n")
+        if run_posebusters:
+            results_file.write(f"PoseBusters processing time: {posebusters_duration:.2f}s\n")
         results_file.write(f"Number of missing mols: {len(missing)}\n")
         results_file.write(f"Missing: {missing}\n")
         results_file.write(f"Matching metrics: {matching_metrics}\n")
         results_file.write(f"Coverage at threshold 0.75: {cov_df.iloc[14]}\n")
+        
+        # Add PoseBusters results
+        if run_posebusters and posebusters_summary is not None:
+            results_file.write(f"\nPoseBusters Results:\n")
+            results_file.write(f"Pass percentage: {posebusters_summary['pass_percentage'].iloc[0]:.2f}%\n")
+            results_file.write(f"Number of molecules: {posebusters_summary['num_smiles'].iloc[0]}\n")
+            results_file.write(f"Number of conformers: {posebusters_summary['num_conformers'].iloc[0]}\n")
+            
+        
+            
         results_file.write("-" * 80 + "\n")
         results_file.flush()
         
@@ -113,7 +152,8 @@ def process_single_pickle(evaluator, pickle_file: str, gens_path: str, true_mols
         return False
 
 def run_evaluation(directory_name: str, gen_base: str, eval_base: str, 
-                  true_mols_path: str, num_workers: int = 24) -> bool:
+                  true_mols_path: str, num_workers: int = 24, 
+                  run_posebusters: bool = True, posebusters_config: str = "mol") -> bool:
     """Run evaluation for a single directory."""
     print(f"Starting evaluation for: {directory_name}")
     
@@ -158,7 +198,8 @@ def run_evaluation(directory_name: str, gen_base: str, eval_base: str,
     
     try:
         for pickle_file in sorted(pickle_files):
-            if process_single_pickle(evaluator, pickle_file, gens_path, true_mols, results_file):
+            if process_single_pickle(evaluator, pickle_file, gens_path, true_mols, results_file,
+                                   run_posebusters, posebusters_config):
                 successful_files += 1
         
         # Write summary
@@ -194,7 +235,7 @@ def create_slurm_executor(device: str, num_workers: int):
     
     executor.update_parameters(
         name="gen_evals",
-        timeout_min=4 * 60,  # 4 hours timeout
+        timeout_min=40 * 60,  # 40 hours timeout
         cpus_per_task=num_workers,
         mem_gb=80,
         nodes=1,
@@ -204,7 +245,8 @@ def create_slurm_executor(device: str, num_workers: int):
     return executor
 
 def submit_evaluation_jobs(directories: list[str], gen_base: str, eval_base: str, 
-                          true_mols_path: str, device: str, num_workers: int) -> list:
+                          true_mols_path: str, device: str, num_workers: int,
+                          run_posebusters: bool = True, posebusters_config: str = "mol") -> list:
     """Submit evaluation jobs to slurm."""
     print(f"Submitting {len(directories)} jobs to slurm on {device}")
     
@@ -218,7 +260,9 @@ def submit_evaluation_jobs(directories: list[str], gen_base: str, eval_base: str
             gen_base=gen_base,
             eval_base=eval_base,
             true_mols_path=true_mols_path,
-            num_workers=num_workers
+            num_workers=num_workers,
+            run_posebusters=run_posebusters,
+            posebusters_config=posebusters_config
         )
         submitted_jobs.append((directory, job))
         print(f"Submitted job {job.job_id} for directory: {directory}")
@@ -245,8 +289,14 @@ def main():
                        help="Path to true molecules pickle file")
     parser.add_argument("--no-slurm", action="store_true",
                        help="Run locally instead of submitting to slurm")
+    parser.add_argument("--no-posebusters", default=False, action="store_true",
+                       help="Skip PoseBusters evaluation")
+    parser.add_argument("--posebusters-config", type=str, default="mol", choices=["mol", "redock"],
+                       help="PoseBusters configuration to use")
     
     args = parser.parse_args()
+    
+    run_posebusters = not args.no_posebusters
     
     if args.specific_dir:
         # Evaluate specific directory
@@ -259,7 +309,9 @@ def main():
                 gen_base=args.gen_results_base,
                 eval_base=args.eval_results_base,
                 true_mols_path=args.true_mols_path,
-                num_workers=args.num_workers
+                num_workers=args.num_workers,
+                run_posebusters=run_posebusters,
+                posebusters_config=args.posebusters_config
             )
             print(f"{'Successfully' if success else 'Failed to'} evaluate {args.specific_dir}")
         else:
@@ -270,7 +322,9 @@ def main():
                 eval_base=args.eval_results_base,
                 true_mols_path=args.true_mols_path,
                 device=args.device,
-                num_workers=args.num_workers
+                num_workers=args.num_workers,
+                run_posebusters=run_posebusters,
+                posebusters_config=args.posebusters_config
             )
             print(f"Submitted slurm job for {args.specific_dir}")
             print(f"Job ID: {jobs[0][1].job_id}")
@@ -302,12 +356,17 @@ def main():
             eval_base=args.eval_results_base,
             true_mols_path=args.true_mols_path,
             device=args.device,
-            num_workers=args.num_workers
+            num_workers=args.num_workers,
+            run_posebusters=run_posebusters,
+            posebusters_config=args.posebusters_config
         )
         
         print(f"\nSlurm submission summary:")
         print(f"Submitted {len(submitted_jobs)} jobs to {args.device}")
         print(f"Workers per job: {args.num_workers}")
+        print(f"PoseBusters enabled: {run_posebusters}")
+        if run_posebusters:
+            print(f"PoseBusters config: {args.posebusters_config}")
         print(f"Results will be saved in: {args.eval_results_base}")
         print(f"\nJob details:")
         for directory, job in submitted_jobs:
