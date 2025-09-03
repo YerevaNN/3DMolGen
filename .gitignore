@@ -1,5 +1,6 @@
 venv
 slurm_jobs/
+molgen3D.egg-info/
 
 # Editor files
 *~
