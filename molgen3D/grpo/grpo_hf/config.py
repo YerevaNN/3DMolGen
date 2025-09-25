@@ -31,7 +31,7 @@ class ProcessingConfig:
 @dataclass
 class GRPOConfig:
     # Required parameters (no defaults)
-    output_dir: str
+    output_base_dir: str
     learning_rate: float
     temperature: float
     num_generations: int
@@ -49,9 +49,13 @@ class GRPOConfig:
     reward_weight_match: float
     rmsd_const: float
     max_ground_truths: int
+    checkpoint_base_dir: str
     # Optional parameters (with defaults)
     max_steps: Optional[int] = None
     num_epochs: Optional[int] = None
+    # Runtime parameters (set during execution)
+    output_dir: Optional[str] = None
+    checkpoint_dir: Optional[str] = None
 
 
 @dataclass
@@ -72,6 +76,37 @@ class DeviceConfig:
 
 
 @dataclass
+class DataLoaderConfig:
+    # DataLoader parameters for memory balancing
+    num_workers: int = 4
+    pin_memory: bool = True
+    persistent_workers: bool = True
+    prefetch_factor: int = 2
+    drop_last: bool = False
+
+@dataclass
+class TrainerConfig:
+    # Checkpointing and saving
+    save_strategy: str = "steps"
+    save_steps: int = 800
+    save_total_limit: int = 8
+    save_on_each_node: bool = False
+    save_safetensors: bool = True
+    
+    # Logging
+    log_on_each_node: bool = False
+    logging_steps: int = 1
+    
+    # Training specific
+    use_liger_loss: bool = True
+    loss_type: str = "grpo"
+    
+    # Model loading
+    torch_dtype: str = "bfloat16"
+    attn_implementation: str = "flash_attention_2"
+
+
+@dataclass
 class Config:
     model: ModelConfig
     generation: GenerationConfig
@@ -80,6 +115,8 @@ class Config:
     dataset: DatasetConfig
     run: RunConfig
     device: DeviceConfig
+    trainer: TrainerConfig
+    dataloader: DataLoaderConfig
 
     @classmethod
     def from_yaml(cls, yaml_path: str) -> 'Config':
@@ -101,5 +138,7 @@ class Config:
             grpo=GRPOConfig(**config_dict['grpo']),
             dataset=DatasetConfig(**config_dict['dataset']),
             run=RunConfig(**config_dict['run']),
-            device=DeviceConfig(**config_dict['device'])
+            device=DeviceConfig(**config_dict['device']),
+            trainer=TrainerConfig(**config_dict.get('trainer', {})),
+            dataloader=DataLoaderConfig(**config_dict.get('dataloader', {}))
         )

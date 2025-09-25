@@ -5,6 +5,7 @@ from rdkit import Chem
 import os
 from loguru import logger
 import numpy as np
+import torch
 
 # Global variables
 _smiles_mapping = None
@@ -139,6 +140,15 @@ def dataclass_to_dict(obj):
         return [dataclass_to_dict(i) for i in obj]
     else:
         return obj
+
+def get_torch_dtype(dtype_str: str):
+    """Convert string dtype to torch dtype."""
+    torch_dtype_map = {
+        "bfloat16": torch.bfloat16,
+        "float16": torch.float16,
+        "float32": torch.float32,
+    }
+    return torch_dtype_map.get(dtype_str, torch.bfloat16)
 
 def save_config(config, output_dir: str):
     """Save configuration to output directory."""
