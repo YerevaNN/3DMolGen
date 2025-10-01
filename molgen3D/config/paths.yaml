@@ -33,6 +33,31 @@ model_paths:
   nm100_3e: "/nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-100M_conformers/fddd657b71204823aae093c4/step-30000"
   nm100_4e: "/nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-100M_conformers/fddd657b71204823aae093c4/step-40000"
 
+  nm380_500grpo_alignFalse: "/nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-27-11:11_n380m_1e_lr5e-5_256bs*16comp*6gpu*1ga_1e_full/checkpoint-500"
+  nm380_1000grpo_alignFalse: "/nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-27-11:11_n380m_1e_lr5e-5_256bs*16comp*6gpu*1ga_1e_full/checkpoint-1000"
+  nm380_1500grpo_alignFalse: "/nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-27-11:11_n380m_1e_lr5e-5_256bs*16comp*6gpu*1ga_1e_full/checkpoint-1500"
+  nm380_2000grpo_alignFalse: "/nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-27-11:11_n380m_1e_lr5e-5_256bs*16comp*6gpu*1ga_1e_full/checkpoint-2000"
+  nm380_2230grpo_alignFalse: "/nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-27-11:11_n380m_1e_lr5e-5_256bs*16comp*6gpu*1ga_1e_full/checkpoint-2231"
+
+  m380_500grpo_alignFalse: "/nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-28-19:05_380m_1e_lr5e-5_256bs*16comp*6gpu*1ga_1e_full/checkpoint-500"
+  m380_1000grpo_alignFalse: "/nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-28-19:05_380m_1e_lr5e-5_256bs*16comp*6gpu*1ga_1e_full/checkpoint-1000"
+  m380_1500grpo_alignFalse: "/nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-28-19:05_380m_1e_lr5e-5_256bs*16comp*6gpu*1ga_1e_full/checkpoint-1500"
+  m380_2000grpo_alignFalse: "/nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-28-19:05_380m_1e_lr5e-5_256bs*16comp*6gpu*1ga_1e_full/checkpoint-2000"
+  m380_2230grpo_alignFalse: "/nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-28-19:05_380m_1e_lr5e-5_256bs*16comp*6gpu*1ga_1e_full/checkpoint-2231"
+
+  m380_500grpo_alignTrue: "/nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-29-18:06_380m_1e_lr5e-5_256bs*16comp*6gpu*1ga_1e_full_alignTrue/checkpoint-500"
+  m380_1000grpo_alignTrue: "/nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-29-18:06_380m_1e_lr5e-5_256bs*16comp*6gpu*1ga_1e_full_alignTrue/checkpoint-1000"
+  m380_1500grpo_alignTrue: "/nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-29-18:06_380m_1e_lr5e-5_256bs*16comp*6gpu*1ga_1e_full_alignTrue/checkpoint-1500"
+  m380_2000grpo_alignTrue: "/nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-29-18:06_380m_1e_lr5e-5_256bs*16comp*6gpu*1ga_1e_full_alignTrue/checkpoint-2000"
+  m380_2230grpo_alignTrue: "/nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-29-18:06_380m_1e_lr5e-5_256bs*16comp*6gpu*1ga_1e_full_alignTrue/checkpoint-2231"
+
+  m380_500grpo_aF_b05: "/nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-30-16:14_380m_1e_lr5e-5_32bs*16comp*6gpu*8ga_1e_full_beta0.05_alignFalse/checkpoint-500"
+  m380_1000grpo_aF_b05: "/nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-30-16:14_380m_1e_lr5e-5_32bs*16comp*6gpu*8ga_1e_full_beta0.05_alignFalse/checkpoint-1000"
+  m380_1500grpo_aF_b05: "/nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-30-16:14_380m_1e_lr5e-5_32bs*16comp*6gpu*8ga_1e_full_beta0.05_alignFalse/checkpoint-1500"
+  m380_2000grpo_aF_b05: "/nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-30-16:14_380m_1e_lr5e-5_32bs*16comp*6gpu*8ga_1e_full_beta0.05_alignFalse/checkpoint-2000"
+  m380_2230grpo_aF_b05: "/nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-30-16:14_380m_1e_lr5e-5_32bs*16comp*6gpu*8ga_1e_full_beta0.05_alignFalse/checkpoint-2231"
+
+
 tokenizer_path: "/auto/home/menuab/code/YNNtitan/torchtitan/tokenizers/Llama-3.2-chem-1B-v1"
 # test_data_path: "/auto/home/menuab/code/3DMolGen/data/geom_drugs_test_set/drugs_test_inference.pickle"
 test_data_path: 
