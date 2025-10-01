@@ -1,7 +1,8 @@
 venv
 slurm_jobs/
 molgen3D.egg-info/
-
+.cursorignore
+.cursorrules
 # Editor files
 *~
 *.swp
