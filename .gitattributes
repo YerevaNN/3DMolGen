@@ -1,4 +1,8 @@
 data/geom_drugs_test_set/drugs_test_inference_.pickle filter=lfs diff=lfs merge=lfs -text
 *.pickle filter=lfs diff=lfs merge=lfs -text
 data/geom_drugs_test_set/drugs_test_inference.pickle filter=lfs diff=lfs merge=lfs -text
+data/geom_drugs_test_set filter=lfs diff=lfs merge=lfs -text
+data/inference_set_clean_smiles filter=lfs diff=lfs merge=lfs -text
+data/inference_set_corrected_smiles filter=lfs diff=lfs merge=lfs -text
+data/inference_set_distinct_smiles filter=lfs diff=lfs merge=lfs -text
 * !text !filter !merge !diff
