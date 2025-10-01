@@ -3,6 +3,8 @@ import os.path as osp
 from statistics import mode, StatisticsError
 import numpy as np
 import pandas as pd
+from collections import Counter
+
 
 def clean_confs(smi, confs):
     good_ids = []
@@ -42,11 +44,6 @@ def extract_between(text, start_marker, end_marker):
     return ""  # Return empty if markers are not found
 
 def get_unique_smiles(confs):
-    smiles_counts: dict[str, int] = {}
-    for conformer in confs:
-        smiles: str = Chem.MolToSmiles(Chem.RemoveHs(conformer), isomericSmiles=False)
-        if smiles not in smiles_counts:
-            smiles_counts[smiles] = 0
-        smiles_counts[smiles] += 1
-    # unique_smiles: set[str] = set(smiles_counts.keys())
-    return smiles_counts
+    smiles = [Chem.MolToSmiles(Chem.RemoveHs(c), isomericSmiles=False) for c in confs]
+    smiles_count = Counter(smiles)
+    return smiles_count
