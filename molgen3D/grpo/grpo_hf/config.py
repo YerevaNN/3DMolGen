@@ -72,6 +72,37 @@ class DeviceConfig:
 
 
 @dataclass
+class DataLoaderConfig:
+    # DataLoader parameters for memory balancing
+    num_workers: int = 4
+    pin_memory: bool = True
+    persistent_workers: bool = True
+    prefetch_factor: int = 2
+    drop_last: bool = False
+
+@dataclass
+class TrainerConfig:
+    # Checkpointing and saving
+    save_strategy: str = "steps"
+    save_steps: int = 800
+    save_total_limit: int = 8
+    save_on_each_node: bool = False
+    save_safetensors: bool = True
+    
+    # Logging
+    log_on_each_node: bool = False
+    logging_steps: int = 1
+    
+    # Training specific
+    use_liger_loss: bool = False
+    loss_type: str = "grpo"
+    
+    # Model loading
+    torch_dtype: str = "bfloat16"
+    attn_implementation: str = "flash_attention_2"
+
+
+@dataclass
 class Config:
     model: ModelConfig
     generation: GenerationConfig
