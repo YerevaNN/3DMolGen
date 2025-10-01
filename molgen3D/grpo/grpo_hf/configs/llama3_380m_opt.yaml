@@ -13,15 +13,16 @@ generation:
 grpo:
   adam_beta1: 0.9
   adam_beta2: 0.95
-  beta: 0
-  grad_acc_steps: 4
-  learning_rate: 9.0e-05
+  beta: 0.05
+  checkpoint_base_dir: /nfs/h100/raid/chem/checkpoints/conf_grpo
+  grad_acc_steps: 8
+  learning_rate: 5.0e-05
   max_grad_norm: 1.0
   max_ground_truths: 64
   max_steps: 100
   num_epochs: 1
   num_generations: 16
-  output_dir: ./grpo_outputs
+  output_base_dir: ./grpo_outputs
   per_device_batch_size: 32
   reward_weight_match: 0.3
   reward_weight_rmsd: 1.0
@@ -46,4 +47,16 @@ processing:
   eos_token_id: 128329
 run:
   log_level: INFO
-  name: 380m_1e_lr9e-5_32bs*16comp*6gpu*4ga_1e_full
+  name: 380m_1e_lr5e-5_32bs*16comp*6gpu*8ga_1e_full_beta0.05_alignFalse
+trainer:
+  attn_implementation: flash_attention_2
+  log_on_each_node: false
+  logging_steps: 1
+  loss_type: grpo
+  save_on_each_node: false
+  save_safetensors: true
+  save_steps: 500
+  save_strategy: steps
+  save_total_limit: 8
+  torch_dtype: bfloat16
+  use_liger_loss: true
