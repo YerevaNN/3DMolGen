@@ -6,7 +6,8 @@ import os
 from loguru import logger
 import numpy as np
 import torch
-import yaml
+import sys
+import types
 
 # Global variables
 _smiles_mapping = None
@@ -151,8 +152,36 @@ def get_torch_dtype(dtype_str: str):
     }
     return torch_dtype_map.get(dtype_str, torch.bfloat16)
 
+
+def ensure_torch_serialization_module():
+    """Provide a shim for ``torch.utils.serialization`` when it is absent.
+
+    Some PyTorch builds (notably those bundled with certain Liger kernels)
+    remove the deprecated ``torch.utils.serialization`` module even though
+    parts of ``torch.save`` still attempt to import it. When that happens,
+    saving checkpoints fails with ``ModuleNotFoundError``. We expose a thin
+    proxy module that forwards attribute lookups to ``torch.serialization``
+    so that torch's legacy import continues to work.
+    """
+
+    module_name = "torch.utils.serialization"
+    if module_name in sys.modules:
+        return
+
+    proxy_module = types.ModuleType(module_name)
+
+    def _getattr(name):
+        return getattr(torch.serialization, name)
+
+    proxy_module.__getattr__ = _getattr  # type: ignore[attr-defined]
+    proxy_module.__all__ = getattr(torch.serialization, "__all__", [])
+
+    sys.modules[module_name] = proxy_module
+    setattr(torch.utils, "serialization", proxy_module)
+
 def save_config(config, output_dir: str):
     """Save configuration to output directory."""
+    import yaml
     
     config_copy_path = os.path.join(output_dir, "config.yaml")
     with open(config_copy_path, "w") as f:

@@ -107,8 +107,13 @@ def run_inference(inference_config: dict):
                                             device=inference_config["device"])
     
     tag_pattern = re.compile(r'<[^>]*>')
-    with open(inference_config["test_data_path"],'rb') as test_data_file:
-        test_data = cloudpickle.load(test_data_file)
+    try:
+        with open(inference_config["test_data_path"],'rb') as test_data_file:
+            test_data = cloudpickle.load(test_data_file)
+    except Exception as e:
+        logger.error(f"Failed to load test data from {inference_config['test_data_path']}: {e}")
+        logger.warning("Test data files appear to be Git LFS pointers. Please run 'git lfs pull' to download actual data.")
+        raise RuntimeError(f"Cannot proceed without test data. Please ensure Git LFS is enabled and run 'git lfs pull' to download the data files.")
 
     mols_list = []
     test_set: str = inference_config.get("test_set", "corrected")
