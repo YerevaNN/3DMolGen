@@ -194,7 +194,7 @@ def launch_inference_from_cli(device: str, grid_search: bool, test_set:str = Non
             # "model_path": ["nm380_1e", "m380_1e"],
             # "model_path": ["nm380_1e", "nm380_2e", "nm380_3e", "nm380_4e", "m380_1e", "m380_2e", "m380_3e", "m380_4e",  "m380_1e_1xgrpo_1e_lr5e-5_algnTrue", "m380_1e_1xgrpo_100e_100s"],
             # "model_path": ["nm380_500grpo_alignFalse", "nm380_1000grpo_alignFalse", "nm380_1500grpo_alignFalse", "nm380_2000grpo_alignFalse", "nm380_2230grpo_alignFalse", "m380_500grpo_alignFalse", "m380_1000grpo_alignFalse", "m380_1500grpo_alignFalse", "m380_2000grpo_alignFalse", "m380_2230grpo_alignFalse"],
-            "model_path": ["m380_500grpo_aF_b05", "m380_1000grpo_aF_b05", "m380_1500grpo_aF_b05"],
+            "model_path": ["m380_4e_1xgrpo_aF_b0"],
             # "model_path": ["nm380_1e", "nm380_4e", "m380_1e", "m380_1e_1xgrpo_1e_lr5e-5_algnTrue"],
             # "model_path": ["nm380_1e", "nm380_4e", "m380_1e", "m380_4e"],
             "test_set": ["clean"],

@@ -3,6 +3,7 @@ import json
 import datamol as dm
 import os
 import cloudpickle
+from collections import Counter
 import random
 import numpy as np
 from collections import OrderedDict
@@ -15,7 +16,7 @@ base_path = "/mnt/sxtn2/chem/GEOM_data"
 
 test_mols_path = os.path.join(base_path, "geom_processed/test_smiles_corrected.csv")
 drugs_file_path = os.path.join(base_path, "rdkit_folder/summary_drugs.json")
-destination_path = "./drugs_test_inference_.pickle"
+destination_path = "/auto/home/menuab/code/3DMolGen/data/inference_set_clean_smiles/drugs_test_dict.pickle"
 
 def load_pkl(file_path: str):
     if not os.path.exists(file_path):
@@ -53,12 +54,13 @@ for i in range(len(test_mols)):
         #     less_confs_count += 1
 
         corrected_smi = correct_smiles(true_confs)
-        if corrected_smi != geom_smiles_corrected:
-            print(num_confs)
-            print(f"corrected smile mismatch: \n{corrected_smi=}\n{geom_smiles=}\n{geom_smiles_corrected=}")
-            print('***')
+        # if corrected_smi != geom_smiles_corrected:
+        #     print(num_confs)
+        #     print(f"corrected smile mismatch: \n{corrected_smi=}\n{geom_smiles=}\n{geom_smiles_corrected=}")
+        #     print('***')
 
         # smiles_dict = get_unique_smiles(true_confs)
+        gn_count = Counter([Chem.MolToSmiles(Chem.RemoveHs(c)) for c in true_confs])
 
         sample_dict = {
             "geom_smiles": geom_smiles,
@@ -66,8 +68,8 @@ for i in range(len(test_mols)):
             "confs": true_confs,
             "num_confs": num_confs,
             "pickle_path": drugs_summ[geom_smiles]['pickle_path'],
-            # "canonical_smiles": corrected_smi
-            "canonical_smiles": geom_smiles_corrected
+            "sub_smiles_counts": gn_count,
+            "corrected_smi": corrected_smi,
             }
         processed_drugs_test[geom_smiles] = sample_dict
         mol_count += 1
@@ -82,7 +84,7 @@ print(f"number of processed conformers: {conf_count}")
 print(f"number of processed molecules: {mol_count}")
 
 sorted_data = OrderedDict(
-    sorted(processed_drugs_test.items(), key=lambda item: len(item[1]['canonical_smiles']))
+    sorted(processed_drugs_test.items(), key=lambda item: len(item[1]['geom_smiles']))
 )
 with open(destination_path,'wb') as f:
     cloudpickle.dump(sorted_data, f, protocol=4)
