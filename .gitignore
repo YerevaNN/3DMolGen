@@ -24,6 +24,7 @@ gen_results/
 notebooks/
 wandb/
 grpo_outputs/
+tests/
 # Log files
 *.log
 *.csv
