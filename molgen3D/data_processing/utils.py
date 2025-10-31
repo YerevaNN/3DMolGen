@@ -1,5 +1,10 @@
+import os
+import os.path as osp
 import re
 import ast
+import numpy as np
+import cloudpickle
+from typing import Dict, Iterable, List, Optional
 from rdkit import Chem
 from rdkit.Geometry import Point3D
 
@@ -109,4 +114,101 @@ def decode_cartesian_raw(embedded_smiles):
     
     return mol
 
+
+def smiles_to_filename(smiles: str) -> str:
+    return f"{smiles.replace('/', '_')}.pickle"
+
+
+def get_geom_smiles(mol_object: Dict[str, object]) -> Optional[str]:
+    for key in ("geom_smiles", "smiles", "canonical_smiles"):
+        value = mol_object.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def save_processed_pickle(split_dir: str, geom_smiles: str, mols: Iterable[Chem.Mol]) -> Optional[str]:
+    if not geom_smiles:
+        return None
+
+    os.makedirs(split_dir, exist_ok=True)
+    filename = smiles_to_filename(geom_smiles)
+    output_path = osp.join(split_dir, filename)
+
+    mol_list = list(mols)
+
+    with open(output_path, "wb") as fh:
+        cloudpickle.dump(mol_list, fh)
+
+    return output_path
+
+
+class JsonlSplitWriter:
+    def __init__(self, base_dir: str, split_name: str, chunk_size: int = 1_000_000):
+        self.split_name = split_name
+        self.base_dir = base_dir
+        self.chunk_size = chunk_size
+        self.buffer: List[str] = []
+        self.chunk_idx = 0
+        self.total_samples = 0
+        os.makedirs(base_dir, exist_ok=True)
+
+    def write(self, samples: Iterable[str]) -> None:
+        for sample in samples:
+            self.buffer.append(sample)
+            self.total_samples += 1
+            if len(self.buffer) >= self.chunk_size:
+                self._flush()
+
+    def close(self) -> None:
+        if self.buffer:
+            self._flush()
+
+    def _flush(self) -> None:
+        file_path = osp.join(self.base_dir, f"{self.split_name}_data_{self.chunk_idx}.jsonl")
+        with open(file_path, "a") as fh:
+            fh.writelines(self.buffer)
+        self.buffer.clear()
+        self.chunk_idx += 1
+
+
+def filter_mols(
+    mol_dict: Dict[str, object],
+    failures: Optional[Dict[str, List[str]]] = None,
+    max_confs: Optional[int] = None,
+) -> List[Chem.Mol]:
+    confs = mol_dict["conformers"]
+    smiles = mol_dict["smiles"]
+
+    num_confs = len(confs)
+    if max_confs is not None:
+        num_confs = max_confs
+
+    mol_from_smiles = Chem.MolFromSmiles(smiles)
+    if mol_from_smiles is None:
+        if failures is not None:
+            failures["mol_from_smiles_failed"].append(smiles)
+        return []
+
+    if "." in smiles:
+        if failures is not None:
+            failures["dot_in_smile"].append(smiles)
+        return []
+
+    selected: List[Chem.Mol] = []
+    k = 0
+    for conf in confs:
+        mol = conf["rd_mol"]
+        num_neighbors = [len(a.GetNeighbors()) for a in mol.GetAtoms()]
+        if np.max(num_neighbors) > 4:
+            if failures is not None:
+                failures["large_degree"].append(smiles)
+            continue
+
+        selected.append(mol)
+        k += 1
+        if k == num_confs:
+            break
+
+    return selected
 
