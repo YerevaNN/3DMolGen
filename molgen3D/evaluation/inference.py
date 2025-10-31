@@ -50,7 +50,7 @@ def save_results(results_path, generations, stats):
     with open(os.path.join(results_path, "generation_results.txt"), 'w') as results_file_txt:
         results_file_txt.write(f"{stats=}")
 
-def process_batch(model, tokenizer, batch: list[list], gen_config, tag_pattern):
+def process_batch(model, tokenizer, batch: list[list], gen_config, tag_pattern, eos_token_id):
     generations = defaultdict(list)
     stats = {"smiles_mismatch":0, "mol_parse_fail" :0, "no_eos":0}
     
@@ -64,8 +64,8 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, tag_pattern):
         outputs = model.generate(
             input_ids=tokenized_prompts["input_ids"], 
             attention_mask=tokenized_prompts["attention_mask"],
-            max_new_tokens=1000,
-            eos_token_id=128329, 
+            max_new_tokens=2000,
+            eos_token_id=eos_token_id, 
             generation_config=gen_config,
             use_cache=True,
             return_dict_in_generate=False,
@@ -107,6 +107,7 @@ def run_inference(inference_config: dict):
                                             device=inference_config["device"])
     
     tag_pattern = re.compile(r'<[^>]*>')
+    eos_token_id = tokenizer.encode("[/CONFORMER]")[0]
     try:
         with open(inference_config["test_data_path"],'rb') as test_data_file:
             test_data = cloudpickle.load(test_data_file)
@@ -139,12 +140,12 @@ def run_inference(inference_config: dict):
             for sub_batch in (batch[:mid], batch[mid:]):
                 if not sub_batch:
                     continue
-                outputs, stats_ = process_batch(model, tokenizer, sub_batch, inference_config["gen_config"], tag_pattern)
+                outputs, stats_ = process_batch(model, tokenizer, sub_batch, inference_config["gen_config"], tag_pattern, eos_token_id)
                 stats.update(stats_)
                 for k, v in outputs.items():
                     generations_all[k].extend(v)
         else:
-            outputs, stats_ = process_batch(model, tokenizer, batch, inference_config["gen_config"], tag_pattern)
+            outputs, stats_ = process_batch(model, tokenizer, batch, inference_config["gen_config"], tag_pattern, eos_token_id)
             stats.update(stats_)
             for k, v in outputs.items():
                 generations_all[k].extend(v)
@@ -171,14 +172,14 @@ def launch_inference_from_cli(device: str, grid_search: bool, test_set:str = Non
         gpus_per_node=n_gpus,
         nodes=1,
         mem_gb=80,
-        cpus_per_task=n_gpus * 12,
+        cpus_per_task=n_gpus * 4,
         slurm_additional_parameters={"partition": node},
     )
     test_set_key_map = {"clean": "clean_smi", "distinct": "distinct_smi", "corrected": "corrected_smi"}
     selected_test_data_path = paths["test_data_path"][test_set_key_map[test_set]]
     inference_config = {
         "model_path": paths["model_paths"]["m380_1e"],
-        "tokenizer_path": paths["tokenizer_path"],
+        "tokenizer_path": paths["qw600_tokenizer_path"],
         "test_data_path": selected_test_data_path,
         "torch_dtype": "bfloat16",
         "batch_size": 400,
@@ -186,7 +187,7 @@ def launch_inference_from_cli(device: str, grid_search: bool, test_set:str = Non
         "gen_config": sampling_configs["top_p_sampling1"],
         "device": "cuda",
         "results_path": paths["results_path"],
-        "run_name": "m380_1e_corrected_smi_noFA2_noCache",
+        "run_name": "qw600_1e_corrected_smi_noFA2_noCache",
         "test_set": test_set,
     }
     if grid_search:
@@ -194,7 +195,9 @@ def launch_inference_from_cli(device: str, grid_search: bool, test_set:str = Non
             # "model_path": ["nm380_1e", "m380_1e"],
             # "model_path": ["nm380_1e", "nm380_2e", "nm380_3e", "nm380_4e", "m380_1e", "m380_2e", "m380_3e", "m380_4e",  "m380_1e_1xgrpo_1e_lr5e-5_algnTrue", "m380_1e_1xgrpo_100e_100s"],
             # "model_path": ["nm380_500grpo_alignFalse", "nm380_1000grpo_alignFalse", "nm380_1500grpo_alignFalse", "nm380_2000grpo_alignFalse", "nm380_2230grpo_alignFalse", "m380_500grpo_alignFalse", "m380_1000grpo_alignFalse", "m380_1500grpo_alignFalse", "m380_2000grpo_alignFalse", "m380_2230grpo_alignFalse"],
-            "model_path": ["m380_4e_1xgrpo_aF_b0"],
+            # "model_path": ["m380_4e_1xgrpo_aF_b05_const05"],
+            # "model_path": ["qw600_1e", "qw600_2e", "qw600_3e", "qw600_4e"],
+            "model_path": ["qw600_pre_1e", "qw600_pre_2e", "qw600_pre_3e", "qw600_pre_4e", "qw600_src_1e"],
             # "model_path": ["nm380_1e", "nm380_4e", "m380_1e", "m380_1e_1xgrpo_1e_lr5e-5_algnTrue"],
             # "model_path": ["nm380_1e", "nm380_4e", "m380_1e", "m380_4e"],
             "test_set": ["clean"],
