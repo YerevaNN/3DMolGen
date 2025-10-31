@@ -127,15 +127,36 @@ def get_geom_smiles(mol_object: Dict[str, object]) -> Optional[str]:
     return None
 
 
-def save_processed_pickle(split_dir: str, geom_smiles: str, mols: Iterable[Chem.Mol]) -> Optional[str]:
+def save_processed_pickle(
+    split_dir: str,
+    geom_smiles: str,
+    mols: Iterable[Chem.Mol],
+    *,
+    source_path: Optional[str] = None,
+    raw_root: Optional[str] = None,
+) -> Optional[str]:
     if not geom_smiles:
         return None
 
-    os.makedirs(split_dir, exist_ok=True)
-    filename = smiles_to_filename(geom_smiles)
-    output_path = osp.join(split_dir, filename)
-
     mol_list = list(mols)
+    if not mol_list:
+        return None
+
+    filename = smiles_to_filename(geom_smiles)
+
+    rel_dir = ""
+    if source_path and raw_root:
+        try:
+            rel_dir = osp.relpath(osp.dirname(source_path), raw_root)
+        except ValueError:
+            rel_dir = ""
+        else:
+            if rel_dir == "." or rel_dir.startswith(".."):
+                rel_dir = ""
+
+    output_dir = osp.join(split_dir, rel_dir) if rel_dir else split_dir
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = osp.join(output_dir, filename)
 
     with open(output_path, "wb") as fh:
         cloudpickle.dump(mol_list, fh)
@@ -179,6 +200,12 @@ def filter_mols(
 ) -> List[Chem.Mol]:
     confs = mol_dict["conformers"]
     smiles = mol_dict["smiles"]
+    geom_smiles = get_geom_smiles(mol_dict)
+
+    if geom_smiles and "." in geom_smiles:
+        if failures is not None:
+            failures["dot_in_geom_smiles"].append(geom_smiles)
+        return []
 
     num_confs = len(confs)
     if max_confs is not None:
@@ -188,11 +215,6 @@ def filter_mols(
     if mol_from_smiles is None:
         if failures is not None:
             failures["mol_from_smiles_failed"].append(smiles)
-        return []
-
-    if "." in smiles:
-        if failures is not None:
-            failures["dot_in_smile"].append(smiles)
         return []
 
     selected: List[Chem.Mol] = []
@@ -211,4 +233,3 @@ def filter_mols(
             break
 
     return selected
-

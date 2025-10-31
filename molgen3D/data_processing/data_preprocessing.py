@@ -24,14 +24,19 @@ from molgen3D.utils.utils import load_pkl
 
 random.seed(42)
 RDLogger.DisableLog("rdApp.*")
-def read_mol(args: Tuple[str, int, int, Any, Optional[str]]) -> Optional[Tuple[List[str], Dict[str, Any]]]:
-    mol_path, max_confs, precision, embedding_func, pickle_dir = args
+def read_mol(
+    args: Tuple[str, int, int, Any, str, str]
+) -> Optional[Tuple[List[str], Dict[str, Any]]]:
+    mol_path, max_confs, precision, embedding_func, pickle_dir, geom_root = args
     mol_object = load_pkl(mol_path)
 
     local_failures: Dict[str, List[str]] = defaultdict(list)
     mols = filter_mols(mol_object, failures=local_failures, max_confs=max_confs)
     if len(mols) == 0:
-        log.warning("No mols after filtering | path={}", mol_path)
+        if local_failures.get("dot_in_geom_smiles"):
+            log.info("Skipping molecule with dotted geom_smiles | path={}", mol_path)
+        else:
+            log.warning("No mols after filtering | path={}", mol_path)
         return None
 
     geom_smiles = get_geom_smiles(mol_object)
@@ -93,7 +98,15 @@ def read_mol(args: Tuple[str, int, int, Any, Optional[str]]) -> Optional[Tuple[L
     pickle_written = False
     if geom_smiles and filtered_mols and pickle_dir:
         try:
-            processed_pickle_path = save_processed_pickle(pickle_dir, geom_smiles, filtered_mols)
+            processed_pickle_path = None
+            if pickle_dir:
+                processed_pickle_path = save_processed_pickle(
+                    split_dir=pickle_dir,
+                    geom_smiles=geom_smiles,
+                    mols=filtered_mols,
+                    source_path=mol_path,
+                    raw_root=geom_root,
+                )
             pickle_written = bool(processed_pickle_path)
             # log.debug("Saved processed pickle | path={} | output={}", mol_path, processed_pickle_path)
         except Exception as exc:
@@ -189,6 +202,7 @@ def preprocess(
         overall_total_input_mols += split_total_input
 
         split_total_confs = 0
+        processed_mols_count = 0
         split_total_mols = 0
         split_total_confs_before = 0
         split_smiles_map: Dict[str, set] = defaultdict(set)
@@ -211,6 +225,7 @@ def preprocess(
                             precision,
                             embedding_func,
                             split_pickle_dirs[split_name],
+                            geom_raw_path,
                         )
                         for path in mol_paths
                     ),
@@ -221,6 +236,7 @@ def preprocess(
 
                     samples, stats = result
 
+                    processed_mols_count += 1
                     confs_before = stats["confs_count_pre_filter"]
                     conf_count = stats["confs_count_post_filter"]
                     noniso_count = stats["nonisomeric_smiles_post_filter"]
@@ -255,15 +271,15 @@ def preprocess(
                     if (processed & 63) == 0:
                         pbar.refresh()
 
-        split_success_rate = float(split_total_mols) / max(1, split_total_input)
+        split_success_rate = processed_mols_count / split_total_input
 
         split_report = {
             "split": split_name,
             "num_input_molecules": split_total_input,
-            "num_processed_molecules": split_total_mols,
+            "num_processed_molecules": processed_mols_count,
             "total_conformers_before": split_total_confs_before,
             "total_conformers_after": split_total_confs,
-            "avg_conformers_per_molecule_after": float(split_total_confs) / max(1, split_total_mols),
+            "avg_conformers_per_molecule_after": float(split_total_confs) / processed_mols_count,
             "success_rate": split_success_rate,
             "failure_counts": dict(failure_counts),
             "molecules_with_multiple_distinct_graphs": split_num_mol_with_multi_distinct_graphs,
