@@ -21,8 +21,7 @@ from molgen3D.grpo.grpo_hf.utils import (
     save_config,
     get_torch_dtype
 )
-# from molgen3D.grpo.grpo_hf.rewards import reward_function
-from molgen3D.grpo.grpo_hf.reward_new import reward_function
+from molgen3D.grpo.grpo_hf.rewards import reward_function
 
 
 def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
