@@ -21,7 +21,8 @@ from molgen3D.grpo.grpo_hf.utils import (
     save_config,
     get_torch_dtype
 )
-from molgen3D.grpo.grpo_hf.rewards import reward_function
+# from molgen3D.grpo.grpo_hf.rewards import reward_function
+from molgen3D.grpo.grpo_hf.reward_new import reward_function
 
 
 def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
@@ -66,10 +67,11 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         report_to="wandb" if enable_wandb else "none",
         run_name=config.run.name,
         logging_steps=config.trainer.logging_steps,
-        # max_steps=config.grpo.max_steps,
-        num_train_epochs=config.grpo.num_epochs,
+        max_steps=config.grpo.max_steps,
+        # num_train_epochs=config.grpo.num_epochs,
         use_liger_loss=config.trainer.use_liger_loss,
         loss_type=config.trainer.loss_type,
+        num_iterations=config.grpo.num_iterations,
     )
 
     # Convert string dtype to torch dtype

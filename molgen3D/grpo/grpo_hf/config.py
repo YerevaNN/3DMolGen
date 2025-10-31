@@ -51,6 +51,7 @@ class GRPOConfig:
     max_ground_truths: int
     checkpoint_base_dir: str
     # Optional parameters (with defaults)
+    num_iterations: int = 1
     max_steps: Optional[int] = None
     num_epochs: Optional[int] = None
     # Runtime parameters (set during execution)
