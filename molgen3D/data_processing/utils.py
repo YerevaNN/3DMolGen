@@ -2,8 +2,10 @@ import os
 import os.path as osp
 import re
 import ast
+import random
 import numpy as np
 import cloudpickle
+from collections import defaultdict
 from typing import Dict, Iterable, List, Optional
 from rdkit import Chem
 from rdkit.Geometry import Point3D
@@ -114,55 +116,19 @@ def decode_cartesian_raw(embedded_smiles):
     
     return mol
 
-
-def smiles_to_filename(smiles: str) -> str:
-    return f"{smiles.replace('/', '_')}.pickle"
-
-
-def get_geom_smiles(mol_object: Dict[str, object]) -> Optional[str]:
-    for key in ("geom_smiles", "smiles", "canonical_smiles"):
-        value = mol_object.get(key)
-        if isinstance(value, str) and value:
-            return value
-    return None
-
-
 def save_processed_pickle(
     split_dir: str,
     geom_smiles: str,
-    mols: Iterable[Chem.Mol],
-    *,
-    source_path: Optional[str] = None,
-    raw_root: Optional[str] = None,
-) -> Optional[str]:
-    if not geom_smiles:
-        return None
+    mols,
+) -> str:
 
-    mol_list = list(mols)
-    if not mol_list:
-        return None
-
-    filename = smiles_to_filename(geom_smiles)
-
-    rel_dir = ""
-    if source_path and raw_root:
-        try:
-            rel_dir = osp.relpath(osp.dirname(source_path), raw_root)
-        except ValueError:
-            rel_dir = ""
-        else:
-            if rel_dir == "." or rel_dir.startswith(".."):
-                rel_dir = ""
-
-    output_dir = osp.join(split_dir, rel_dir) if rel_dir else split_dir
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = osp.join(output_dir, filename)
+    filename = f"{geom_smiles.replace('/', '_')}"[:250] + ".pickle"
+    output_path = osp.join(split_dir, filename)
 
     with open(output_path, "wb") as fh:
-        cloudpickle.dump(mol_list, fh)
+        cloudpickle.dump(mols, fh)
 
     return output_path
-
 
 class JsonlSplitWriter:
     def __init__(self, base_dir: str, split_name: str, chunk_size: int = 1_000_000):
@@ -186,6 +152,7 @@ class JsonlSplitWriter:
             self._flush()
 
     def _flush(self) -> None:
+        random.shuffle(self.buffer)
         file_path = osp.join(self.base_dir, f"{self.split_name}_data_{self.chunk_idx}.jsonl")
         with open(file_path, "a") as fh:
             fh.writelines(self.buffer)
@@ -195,16 +162,14 @@ class JsonlSplitWriter:
 
 def filter_mols(
     mol_dict: Dict[str, object],
-    failures: Optional[Dict[str, List[str]]] = None,
-    max_confs: Optional[int] = None,
+    failures: Dict[str, int] = defaultdict(int),
+    max_confs: int = 30,
 ) -> List[Chem.Mol]:
     confs = mol_dict["conformers"]
     smiles = mol_dict["smiles"]
-    geom_smiles = get_geom_smiles(mol_dict)
 
-    if geom_smiles and "." in geom_smiles:
-        if failures is not None:
-            failures["dot_in_geom_smiles"].append(geom_smiles)
+    if smiles and "." in smiles:
+        failures["dot_in_smiles"] += 1
         return []
 
     num_confs = len(confs)
@@ -213,8 +178,7 @@ def filter_mols(
 
     mol_from_smiles = Chem.MolFromSmiles(smiles)
     if mol_from_smiles is None:
-        if failures is not None:
-            failures["mol_from_smiles_failed"].append(smiles)
+        failures["mol_from_smiles_failed"] += 1
         return []
 
     selected: List[Chem.Mol] = []
@@ -223,8 +187,7 @@ def filter_mols(
         mol = conf["rd_mol"]
         num_neighbors = [len(a.GetNeighbors()) for a in mol.GetAtoms()]
         if np.max(num_neighbors) > 4:
-            if failures is not None:
-                failures["large_degree"].append(smiles)
+            failures["large_degree"] += 1
             continue
 
         selected.append(mol)
