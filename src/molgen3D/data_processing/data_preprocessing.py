@@ -6,7 +6,7 @@ import os.path as osp
 import random
 from collections import defaultdict
 from multiprocessing import Pool
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Set, Tuple, List
 import numpy as np
 from loguru import logger as log
 from rdkit import Chem, RDLogger
@@ -46,21 +46,28 @@ def read_mol(
             pass
 
         try:
-            embedded_smile, iso_smile = embedding_func(mol, precision)
+            #embedded_smile, iso_smile = embedding_func(mol, precision)
+            iso_smile = Chem.MolToSmiles(
+                Chem.RemoveHs(mol, sanitize=False),
+                canonical=True,
+                isomericSmiles=True,
+            )
         except Exception as exc:
-            log.error("Error encoding conformer | path={} | failure={}", mol_path, exc)
-            local_failures["encoding_error"] += 1
+            # log.error("Error encoding conformer | path={} | failure={}", mol_path, exc)
+            # local_failures["encoding_error"] += 1
+            log.error("Error generating isomeric smiles | path={} | failure={}", mol_path, exc)
+            local_failures["isomeric_smiles_error"] += 1
             continue
 
-        samples.append(
-            json.dumps(
-                {
-                    "canonical_smiles": iso_smile,
-                    "embedded_smiles": embedded_smile,
-                }
-            )
-            + "\n"
-        )
+        # samples.append(
+        #     json.dumps(
+        #         {
+        #             "canonical_smiles": iso_smile,
+        #             "embedded_smiles": embedded_smile,
+        #         }
+        #     )
+        #     + "\n"
+        # )
         isomeric_smiles.add(iso_smile)
         filtered_mols.append(mol)
 
@@ -78,17 +85,17 @@ def read_mol(
         for dotted in dotted_smiles:
             log.info("dot_in_conformer_smiles | path={} | smile={}", mol_path, dotted)
 
-    processed_pickle_path = None
-    if filtered_mols:
-        try:
-            processed_pickle_path = save_processed_pickle(
-                split_dir=pickle_dir,
-                geom_smiles=geom_smiles,
-                mols=filtered_mols,
-            )
-            # log.debug("Saved processed pickle | path={} | output={}", mol_path, processed_pickle_path)
-        except Exception as exc:
-            log.error("Failed to write processed pickle | path={} | failure={}", mol_path, exc)
+    # processed_pickle_path = None
+    # if filtered_mols:
+    #     try:
+    #         processed_pickle_path = save_processed_pickle(
+    #             split_dir=pickle_dir,
+    #             geom_smiles=geom_smiles,
+    #             mols=filtered_mols,
+    #         )
+    #         # log.debug("Saved processed pickle | path={} | output={}", mol_path, processed_pickle_path)
+    #     except Exception as exc:
+    #         log.error("Failed to write processed pickle | path={} | failure={}", mol_path, exc)
 
     stats = {
         "path": mol_path,
@@ -100,10 +107,10 @@ def read_mol(
         "num_distinct_smiles_with_dot": len(dotted_smiles),
         "has_dotted_smiles": bool(dotted_smiles),
         "failures": local_failures,
-        "processed_pickle_path": processed_pickle_path,
+        # "processed_pickle_path": processed_pickle_path,
     }
 
-    return samples, stats
+    return stats
 
 
 def preprocess(
@@ -126,18 +133,15 @@ def preprocess(
     overall_multi_distinct_graphs = overall_mol_with_dotted_smiles = overall_total_dotted_smiles = 0
     overall_failure_counts: Dict[str, int] = defaultdict(int)
 
-    strings_root = osp.join(dest_path, "processed_strings")
-    pickles_root = osp.join(dest_path, "processed_pickles")
-    split_writers = {
-        split: JsonlSplitWriter(osp.join(strings_root, split), split)
-        for split in ("train", "valid", "test")
-    }
-    split_pickle_dirs = {
-        split: osp.join(pickles_root, split)
-        for split in ("train", "valid", "test")
-    }
-    for split_dir in split_pickle_dirs.values():
-        os.makedirs(split_dir, exist_ok=True)
+    # strings_root = osp.join(dest_path, "processed_strings")
+    # pickles_root = osp.join(dest_path, "processed_pickles")
+    # split_writers = {
+    #     split: JsonlSplitWriter(osp.join(strings_root, split), split)
+    #     for split in ("train", "valid", "test")
+    # }
+    split_pickle_dirs = {split: None for split in ("train", "valid", "test")}
+    # for split_dir in split_pickle_dirs.values():
+    #     os.makedirs(split_dir, exist_ok=True)
 
     split_name_to_index = {"train": 0, "valid": 1, "test": 2}
     requested_splits = [splits] if splits else list(split_name_to_index.keys())
@@ -173,7 +177,8 @@ def preprocess(
 
         conf_count_post = conf_count_pre = mol_count_post = 0
         split_num_mol_with_multi_distinct_graphs = split_num_mol_with_dotted_smiles = total_dotted_smiles = 0
-        split_smiles_map: Dict[str, set] = defaultdict(set)
+        # split_smiles_map: Dict[str, set] = defaultdict(set)
+        split_geom_to_iso_map: Dict[str, Set[str]] = defaultdict(set)
         failure_counts: Dict[str, int] = defaultdict(int)
 
         with tqdm(total=len(mol_paths), dynamic_ncols=True, mininterval=0.2) as pbar:
@@ -199,7 +204,7 @@ def preprocess(
                     if result is None:
                         continue
 
-                    samples, stats = result
+                    stats = result
 
                     conf_count_pre += stats["confs_count_pre_filter"]
                     conf_count_post += stats["confs_count_post_filter"]
@@ -218,33 +223,31 @@ def preprocess(
                         mol_count_post += 1
                         overall_total_mols += 1
 
-                    pickle_path = stats.get("processed_pickle_path")
-                    if pickle_path:
+                    geom_smiles = stats.get("geom_smiles")
+                    if geom_smiles:
                         for iso in stats.get("isomeric_smiles_post_filter", ()):
-                            split_smiles_map[iso].add(pickle_path)
-
-                    split_writers[split_name].write(samples)
+                            split_geom_to_iso_map[geom_smiles].add(iso)
 
                     processed += 1
                     pbar.update()
                     if (processed & 63) == 0:
                         pbar.refresh()
 
-        split_report = {
-            "split": split_name,
-            "num_input_molecules": split_total_input,
-            "num_output_molecules": mol_count_post,
-            "num_input_conformers": conf_count_pre,
-            "total_conformers_after": conf_count_post,
-            "avg_conformers_per_molecule_after": float(conf_count_post) / mol_count_post,
-            "success_rate": mol_count_post / split_total_input,
-            "failure_counts": dict(failure_counts),
-            "molecules_with_multiple_distinct_graphs": split_num_mol_with_multi_distinct_graphs,
-            "molecules_with_dotted_smiles": split_num_mol_with_dotted_smiles,
-            "num_distinct_isomeric_smiles": len(split_smiles_map),
-            "total_dotted_smiles": total_dotted_smiles,
-        }
-        log.info(json.dumps({"split_summary": split_report}, ensure_ascii=False, separators=(",", ":")))
+        # split_report = {
+        #     "split": split_name,
+        #     "num_input_molecules": split_total_input,
+        #     "num_output_molecules": mol_count_post,
+        #     "num_input_conformers": conf_count_pre,
+        #     "total_conformers_after": conf_count_post,
+        #     "avg_conformers_per_molecule_after": float(conf_count_post) / mol_count_post,
+        #     "success_rate": mol_count_post / split_total_input,
+        #     "failure_counts": dict(failure_counts),
+        #     "molecules_with_multiple_distinct_graphs": split_num_mol_with_multi_distinct_graphs,
+        #     "molecules_with_dotted_smiles": split_num_mol_with_dotted_smiles,
+        #     "num_distinct_isomeric_smiles": len(split_smiles_map),
+        #     "total_dotted_smiles": total_dotted_smiles,
+        # }
+        # log.info(json.dumps({"split_summary": split_report}, ensure_ascii=False, separators=(",", ":")))
 
         overall_multi_distinct_graphs += split_num_mol_with_multi_distinct_graphs
         overall_mol_with_dotted_smiles += split_num_mol_with_dotted_smiles
@@ -252,36 +255,41 @@ def preprocess(
         for reason, count in failure_counts.items():
             overall_failure_counts[reason] += count
 
-        with open(osp.join(dest_path, f"{split_name}_isomeric_smiles_map.jsonl"), "w") as fh:
-            for iso_smiles, paths in split_smiles_map.items():
-                fh.write(
-                    json.dumps({"isomeric_smiles": iso_smiles, "paths": sorted(paths)}, separators=(",", ":"))
-                    + "\n"
-                )
+        mapping_path = osp.join(dest_path, f"{split_name}_geom_to_isomeric_smiles.jsonl")
+        with open(mapping_path, "w") as fh:
+            for geom_smiles in sorted(split_geom_to_iso_map.keys()):
+                iso_smiles_set = split_geom_to_iso_map[geom_smiles]
+                for iso_smiles in sorted(iso_smiles_set):
+                    fh.write(
+                        json.dumps(
+                            {
+                                "geom_smiles": geom_smiles,
+                                "isomeric_smiles": iso_smiles,
+                            },
+                            separators=(",", ":"),
+                        )
+                        + "\n"
+                    )
 
-        with open(osp.join(dest_path, f"{split_name}_distinct_isomeric_smiles.jsonl"), "w") as fh:
-            for iso_smiles in sorted(split_smiles_map.keys()):
-                fh.write(json.dumps(iso_smiles) + "\n")
+    # for writer in split_writers.values():
+    #     writer.close()
 
-    for writer in split_writers.values():
-        writer.close()
+    # grand_total = sum(writer.total_samples for writer in split_writers.values())
+    # overall_success_rate = float(overall_total_mols) / max(1, overall_total_input_mols)
 
-    grand_total = sum(writer.total_samples for writer in split_writers.values())
-    overall_success_rate = float(overall_total_mols) / max(1, overall_total_input_mols)
-
-    run_summary = {
-        "grand_total_samples_written": grand_total,
-        "total_input_molecules": overall_total_input_mols,
-        "molecules_after_filter": overall_total_mols,
-        "conformers_after_filter": overall_total_confs,
-        "avg_confs_per_mol_after": float(overall_total_confs) / max(1, overall_total_mols),
-        "overall_success_rate": overall_success_rate,
-        "molecules_with_multiple_distinct_graphs": overall_multi_distinct_graphs,
-        "molecules_with_dotted_smiles": overall_mol_with_dotted_smiles,
-        "total_dotted_smiles": overall_total_dotted_smiles,
-        "overall_failure_counts": dict(overall_failure_counts),
-    }
-    log.info(json.dumps({"run_summary": run_summary}, ensure_ascii=False, separators=(",", ":")))
+    # run_summary = {
+    #     "grand_total_samples_written": grand_total,
+    #     "total_input_molecules": overall_total_input_mols,
+    #     "molecules_after_filter": overall_total_mols,
+    #     "conformers_after_filter": overall_total_confs,
+    #     "avg_confs_per_mol_after": float(overall_total_confs) / max(1, overall_total_mols),
+    #     "overall_success_rate": overall_success_rate,
+    #     "molecules_with_multiple_distinct_graphs": overall_multi_distinct_graphs,
+    #     "molecules_with_dotted_smiles": overall_mol_with_dotted_smiles,
+    #     "total_dotted_smiles": overall_total_dotted_smiles,
+    #     "overall_failure_counts": dict(overall_failure_counts),
+    # }
+    # log.info(json.dumps({"run_summary": run_summary}, ensure_ascii=False, separators=(",", ":")))
 
 
 if __name__ == "__main__":
