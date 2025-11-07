@@ -1,6 +1,5 @@
-from typing import List, Dict, Any
+from typing import List, Optional
 from dataclasses import dataclass, field
-from typing import Optional
 import yaml
 
 
@@ -50,6 +49,8 @@ class GRPOConfig:
     rmsd_const: float
     max_ground_truths: int
     checkpoint_base_dir: str
+    reward_strategy: str = "legacy"
+    advanced_reward: "AdvancedRewardConfig" = field(default_factory=lambda: AdvancedRewardConfig())
     # Optional parameters (with defaults)
     num_iterations: int = 1
     max_steps: Optional[int] = None
@@ -108,6 +109,30 @@ class TrainerConfig:
 
 
 @dataclass
+class AdvancedRewardWeights:
+    precision: float = 0.4
+    coverage: float = 0.3
+    match: float = 0.2
+    validity: float = 0.1
+    diversity: float = 0.05
+
+
+@dataclass
+class AdvancedRewardConfig:
+    delta: float = 0.75
+    precision_scale: float = 0.5
+    coverage_scale: float = 0.5
+    diversity_scale: float = 1.0
+    normalization_epsilon: float = 1e-6
+    enable_diversity: bool = True
+    enable_posebusters: bool = True
+    posebusters_config: str = "mol"
+    match_partial_credit: bool = False
+    max_reference_conformers: Optional[int] = None
+    weights: AdvancedRewardWeights = field(default_factory=AdvancedRewardWeights)
+
+
+@dataclass
 class Config:
     model: ModelConfig
     generation: GenerationConfig
@@ -131,12 +156,33 @@ class Config:
         """
         with open(yaml_path, 'r') as f:
             config_dict = yaml.safe_load(f)
+
+        grpo_dict_raw = dict(config_dict['grpo'])
+        reward_strategy = grpo_dict_raw.get('reward_strategy', 'legacy')
+        grpo_dict_raw['reward_strategy'] = reward_strategy
+
+        advanced_reward_dict = grpo_dict_raw.get('advanced_reward', {})
+        if advanced_reward_dict is None:
+            advanced_reward = AdvancedRewardConfig()
+        else:
+            weights_dict = advanced_reward_dict.get('weights', {})
+            weights = (
+                AdvancedRewardWeights(**weights_dict)
+                if weights_dict else AdvancedRewardWeights()
+            )
+            advanced_kwargs = {
+                key: value
+                for key, value in advanced_reward_dict.items()
+                if key != 'weights'
+            }
+            advanced_reward = AdvancedRewardConfig(weights=weights, **advanced_kwargs)
+        grpo_dict_raw['advanced_reward'] = advanced_reward
         
         return cls(
             model=ModelConfig(**config_dict['model']),
             generation=GenerationConfig(**config_dict['generation']),
             processing=ProcessingConfig(**config_dict['processing']),
-            grpo=GRPOConfig(**config_dict['grpo']),
+            grpo=GRPOConfig(**grpo_dict_raw),
             dataset=DatasetConfig(**config_dict['dataset']),
             run=RunConfig(**config_dict['run']),
             device=DeviceConfig(**config_dict['device']),

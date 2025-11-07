@@ -22,6 +22,7 @@ from molgen3D.grpo.grpo_hf.utils import (
     get_torch_dtype
 )
 from molgen3D.grpo.grpo_hf.rewards import reward_function
+from molgen3D.grpo.grpo_hf.multi_component_reward import MultiComponentRewardCalculator
 
 
 def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
@@ -97,8 +98,16 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     model.config.pad_token_id = tokenizer.pad_token_id
     logger.info(f"Set model pad_token_id to {model.config.pad_token_id}")
 
-    def reward_func(prompts, completions, **kwargs):
-        return reward_function(prompts, completions, stats, tokenizer, config)
+    reward_strategy = config.grpo.reward_strategy.lower()
+    if reward_strategy == "multi_component":
+        mc_calculator = MultiComponentRewardCalculator(config=config, stats=stats, tokenizer=tokenizer)
+
+        def reward_func(prompts, completions, **kwargs):
+            return mc_calculator(prompts, completions, **kwargs)
+
+    else:
+        def reward_func(prompts, completions, **kwargs):
+            return reward_function(prompts, completions, stats, tokenizer, config)
 
     # Set DataLoader parameters from YAML config
     training_args.dataloader_num_workers = config.dataloader.num_workers
