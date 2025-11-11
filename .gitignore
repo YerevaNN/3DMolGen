@@ -20,6 +20,7 @@ outputs/
 notebooks/
 wandb/
 tests/
+*.egg-info/
 # Log files
 *.log
 *.csv

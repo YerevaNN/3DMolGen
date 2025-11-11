@@ -1,30 +1,12 @@
 [project]
 name = "molgen3D"
 version = "0.1.0"
-description = "3D molecular generative models (pretrain + GRPO + eval)"
 requires-python = ">=3.10"
-
-# Core, project-level dependencies (runtime + training)
-dependencies = [
-  "torch>=2.5,<2.6",          # you have 2.5.1 in env
-  "transformers>=4.57.0",
-  "wandb>=0.21.0",
-  "numpy>=2.2",
-  "pyyaml>=6.0",
-  "tqdm>=4.66",
-  "einops>=0.8.0",
-  "safetensors>=0.5.3",
-  "submitit>=1.5.3",
-  "accelerate>=1.10.0",
-  "trl>=0.23.0",
-  "rdkit>=2025.3.3",
-  "posebusters>=0.4.4",
-]
 
 [build-system]
 requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-package-dir = {"" = "src"}
-packages = ["molgen3D"]
+package-dir = { "" = "src" }
+packages = { find = { where = ["src"] } }
