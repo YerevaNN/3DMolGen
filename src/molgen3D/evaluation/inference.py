@@ -15,9 +15,11 @@ from datetime import datetime
 torch.set_grad_enabled(False)
 
 # from utils import parse_molecule_with_coordinates
-from molgen3D.config.sampling_config import sampling_configs, gen_num_codes
 from molgen3D.data_processing.utils import decode_cartesian_raw
+from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2, strip_smiles
 from molgen3D.evaluation.utils import extract_between
+from molgen3D.config.paths import get_ckpt, get_tokenizer_path, get_data_path, get_base_path
+from molgen3D.config.sampling_config import sampling_configs, gen_num_codes
 
 torch.backends.cudnn.benchmark = True
 
@@ -77,13 +79,15 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, tag_pattern, 
         geom_smiles = geom_smiles_list[i]
         
         if generated_conformer:
-            generated_smiles = tag_pattern.sub('', generated_conformer)         
+            # generated_smiles = tag_pattern.sub('', generated_conformer)     
+            generated_smiles = strip_smiles(generated_conformer)
             if generated_smiles != canonical_smiles:
                 logger.info(f"smiles mismatch: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
                 stats["smiles_mismatch"] += 1
             else:
                 try:
-                    mol_obj = decode_cartesian_raw(generated_conformer)
+                    mol_obj = decode_cartesian_v2(generated_conformer)
+                    logger.info(f"smiles match: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
                     generations[geom_smiles].append(mol_obj)
                 except:
                     logger.info(f"smiles fails parsing: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
@@ -106,15 +110,9 @@ def run_inference(inference_config: dict):
                                             torch_dtype=inference_config["torch_dtype"],
                                             device=inference_config["device"])
     
-    tag_pattern = re.compile(r'<[^>]*>')
     eos_token_id = tokenizer.encode("[/CONFORMER]")[0]
-    try:
-        with open(inference_config["test_data_path"],'rb') as test_data_file:
-            test_data = cloudpickle.load(test_data_file)
-    except Exception as e:
-        logger.error(f"Failed to load test data from {inference_config['test_data_path']}: {e}")
-        logger.warning("Test data files appear to be Git LFS pointers. Please run 'git lfs pull' to download actual data.")
-        raise RuntimeError(f"Cannot proceed without test data. Please ensure Git LFS is enabled and run 'git lfs pull' to download the data files.")
+    with open(inference_config["test_data_path"],'rb') as test_data_file:
+        test_data = cloudpickle.load(test_data_file)
 
     mols_list = []
     test_set: str = inference_config.get("test_set", "corrected")
@@ -156,10 +154,7 @@ def run_inference(inference_config: dict):
 
 
 def launch_inference_from_cli(device: str, grid_search: bool, test_set:str = None) -> None:
-    with open("molgen3D/config/paths.yaml", "r") as f:
-        paths = yaml.safe_load(f)
     n_gpus = 1
-    experiment_name = "conf_gen"
     node = device if device in ["a100", "h100"] else "local"
     executor = None
     if device in ["a100", "h100"]:
@@ -167,7 +162,7 @@ def launch_inference_from_cli(device: str, grid_search: bool, test_set:str = Non
     elif device == "local":
         executor = submitit.LocalExecutor(folder="~/slurm_jobs/conf_gen/job_%j")
     executor.update_parameters(
-        name=experiment_name,
+        name="conf_gen",
         timeout_min=24 * 24 * 60,
         gpus_per_node=n_gpus,
         nodes=1,
@@ -175,19 +170,17 @@ def launch_inference_from_cli(device: str, grid_search: bool, test_set:str = Non
         cpus_per_task=n_gpus * 4,
         slurm_additional_parameters={"partition": node},
     )
-    test_set_key_map = {"clean": "clean_smi", "distinct": "distinct_smi", "corrected": "corrected_smi"}
-    selected_test_data_path = paths["test_data_path"][test_set_key_map[test_set]]
     inference_config = {
-        "model_path": paths["model_paths"]["m380_1e"],
-        "tokenizer_path": paths["qw600_tokenizer_path"],
-        "test_data_path": selected_test_data_path,
+        "model_path": get_ckpt("m380_conf_v2","2e"),
+        "tokenizer_path": get_tokenizer_path("llama3_chem_v1"),
+        "test_data_path": get_data_path(f"{test_set}_smi"),
         "torch_dtype": "bfloat16",
         "batch_size": 400,
         "num_gens": gen_num_codes["2k_per_conf"],
         "gen_config": sampling_configs["top_p_sampling1"],
         "device": "cuda",
-        "results_path": paths["results_path"],
-        "run_name": "qw600_1e_corrected_smi_noFA2_noCache",
+        "results_path": get_base_path("gen_results_root"),
+        "run_name": "new_conf_test",
         "test_set": test_set,
     }
     if grid_search:
@@ -212,22 +205,22 @@ def launch_inference_from_cli(device: str, grid_search: bool, test_set:str = Non
             with executor.batch():
                 for model_key, gen_config_key, test_set_value in itertools.product(param_grid["model_path"], param_grid["gen_config"], param_grid["test_set"]):
                     grid_config = dict(inference_config)
-                    grid_config["model_path"] = paths["model_paths"][model_key]
+                    grid_config["model_path"] = get_ckpt(model_key)
                     grid_config["gen_config"] = sampling_configs[gen_config_key]
                     grid_config["batch_size"] = 256 if "1b" in model_key else 256  
                     grid_config["test_set"] = test_set_value
-                    grid_config["test_data_path"] = paths["test_data_path"][test_set_key_map[test_set_value]]
+                    grid_config["test_data_path"] = get_data_path(f"{test_set_value}_smi")
                     grid_config["run_name"] = f"{model_key}_{gen_config_key}_{test_set_value}"
                     job = executor.submit(run_inference, inference_config=grid_config)
                     jobs.append(job)
         else:
             for model_key, gen_config_key, test_set_value in itertools.product(param_grid["model_path"], param_grid["gen_config"], param_grid["test_set"]):
                 grid_config = dict(inference_config)
-                grid_config["model_path"] = paths["model_paths"][model_key]
+                grid_config["model_path"] = get_ckpt(model_key)
                 grid_config["gen_config"] = sampling_configs[gen_config_key]
                 grid_config["batch_size"] = 256 if "1b" in model_key else 256
                 grid_config["test_set"] = test_set_value
-                grid_config["test_data_path"] = paths["test_data_path"][test_set_key_map[test_set_value]]
+                grid_config["test_data_path"] = get_data_path(f"{test_set_value}_smi")
                 grid_config["run_name"] = f"{model_key}_{gen_config_key}_{test_set_value}"
                 run_inference(inference_config=grid_config)
     else:
