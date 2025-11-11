@@ -15,7 +15,7 @@ venv
 *.pyd
 __pycache__/
 
-#data/
+data/
 outputs/
 notebooks/
 wandb/
