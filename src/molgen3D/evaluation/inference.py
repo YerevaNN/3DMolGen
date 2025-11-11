@@ -138,12 +138,12 @@ def run_inference(inference_config: dict):
             for sub_batch in (batch[:mid], batch[mid:]):
                 if not sub_batch:
                     continue
-                outputs, stats_ = process_batch(model, tokenizer, sub_batch, inference_config["gen_config"], tag_pattern, eos_token_id)
+                outputs, stats_ = process_batch(model, tokenizer, sub_batch, inference_config["gen_config"], eos_token_id)
                 stats.update(stats_)
                 for k, v in outputs.items():
                     generations_all[k].extend(v)
         else:
-            outputs, stats_ = process_batch(model, tokenizer, batch, inference_config["gen_config"], tag_pattern, eos_token_id)
+            outputs, stats_ = process_batch(model, tokenizer, batch, inference_config["gen_config"], eos_token_id)
             stats.update(stats_)
             for k, v in outputs.items():
                 generations_all[k].extend(v)
