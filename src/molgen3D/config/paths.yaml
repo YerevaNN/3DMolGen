@@ -1,0 +1,168 @@
+base_paths:
+  project_root: "."
+  data_root: "data"
+  ckpts_root: "/nfs/h100/raid/chem/checkpoints"
+  hf_yerevann_root: "/nfs/h100/raid/chem/checkpoints/hf/yerevann"
+  qwen_yerevann_root: "/nfs/h100/raid/chem/checkpoints/yerevann"
+  grpo_root: "/nfs/h100/raid/chem/checkpoints/conf_grpo"
+  grpo_outputs_root: "grpo_outputs"
+  gen_results_root: "outputs/gen_results"
+
+data:
+    # corrected_smi: "corrected_smi.pickle"
+    clean_smi: "clean_smi.pickle"
+    distinct_smi: "distinct_smi.pickle"
+
+tokenizers:
+  llama3_chem_v1: "src/molgen3D/training/tokenizers/Llama-3.2-chem-1B-v1"
+  qwen3_0.6b_conf_v1: "/nfs/np/home/_vover_/models/saved_models/qwen3-0.6b-tokenizer-smiles-conformer"
+
+models:
+  # ---------- BASE MODELS ----------
+
+  m380_conf:
+    root: "hf/yerevann/Llama-3.2-380M_conformers"
+    steps:
+      "1e": "b4707c6bf8b54cba8febe9fc/step-8500"
+      "2e": "4291f8157d2f41a3bb9605e8/step-16000"
+      "3e": "534162de781f4855bbccb0d6/step-23500"
+      "4e": "e184d4d867804fbd8a8c45bf/step-30000"
+
+  m380_conf_v2:
+    root: "hf/yerevann/Llama-3.2-380M_conformers/26948ebd853e4fd9baddd36b"
+    steps:
+      "1e": "step-7800"
+      "2e": "step-15600"
+      
+  b1_conf:
+    root: "hf/yerevann/Llama-3.2-1B_conformers"
+    steps:
+      "1e": "66bfa548d98247cdb01c4c1c/step-11000"
+      "2e": "ee7e78995cc04aea8089aee1/step-21000"
+      "3e": "de472e134063446086e66925/step-31000"
+      "4e": "37cf49f293254a6986b12948/step-40000"
+
+  nb1_conf:
+    root: "hf/yerevann/Llama-3.2-1B_conformers/d151bae44e0d4c868475efa9"
+    steps:
+      "1e": "step-10000"
+      "2e": "step-20000"
+      "3e": "step-30000"
+      "4e": "step-40000"
+
+  nm380_conf:
+    root: "hf/yerevann/Llama-3.2-380M_conformers/3f3a5585a48c4e13bea8ddb9"
+    steps:
+      "1e": "step-10000"
+      "2e": "step-20000"
+      "3e": "step-30000"
+      "4e": "step-40000"
+
+  nm170_conf:
+    root: "hf/yerevann/Llama-3.2-170M_conformers/b83c55dc0ab94c22b6eabcb7"
+    steps:
+      "1e": "step-10000"
+      "2e": "step-20000"
+      "3e": "step-30000"
+      "4e": "step-40000"
+
+  nm100_conf:
+    root: "hf/yerevann/Llama-3.2-100M_conformers/fddd657b71204823aae093c4"
+    steps:
+      "1e": "step-10000"
+      "2e": "step-20000"
+      "3e": "step-30000"
+      "4e": "step-40000"
+
+  qw600_conf:
+    root: "yerevann/Qwen3-0.6B_hf/05274930efdd48f0a5289a2a"
+    steps:
+      "1e": "step-14000"
+      "2e": "step-28000"
+      "3e": "step-42000"
+      "4e": "step-56000"
+
+  qw600_pre:
+    root: "yerevann/Qwen3-0.6B/643558083ac449d9b3328bc9"
+    steps:
+      "1e": "step-13000"
+      "2e": "step-26000"
+      "3e": "step-39000"
+      "4e": "step-52000"
+
+  qw600_src:
+    root: "yerevann/Qwen3-0.6B/823a61f69f184d1d888785e4"
+    steps:
+      "1e": "step-13000"
+
+  # ---------- GRPO / FINETUNED MODELS (same structure) ----------
+
+  m380_1e_1xgrpo_100e_100s:
+    root: "2025-07-30-15:23_380m_1e_lr5e-5_32bs*16comp*6gpu*4ga_100e_1000/code_snapshot/grpo_outputs"
+    steps:
+      final: "model"
+    run_id: "grpo-20250730-1523-m380-1e-100e100s"
+
+  m380_1e_1xgrpo_1e_lr5e-5_algnFalse:
+    root: "2025-07-30-23:21_380m_1e_lr5e-5_32bs*16comp*6gpu*4ga_1e_full_algnFalse/code_snapshot/grpo_outputs"
+    steps:
+      final: "model"
+    run_id: "grpo-20250730-2321-m380-1e-af"
+
+  m380_1e_1xgrpo_1e_lr5e-5_algnTrue:
+    root: "2025-07-29-10:23_380m_1e_lr5e-5_32bs*16comp*6gpu*4ga_1e_full/code_snapshot/grpo_outputs"
+    steps:
+      final: "model"
+    run_id: "grpo-20250729-1023-m380-1e-at"
+
+  nm380_conf_grpo_alignFalse_v1:
+    root: "2025-09-27-11:11_n380m_1e_lr5e-5_256bs*16comp*6gpu*1ga_1e_full"
+    steps:
+      "500": "checkpoint-500"
+      "1000": "checkpoint-1000"
+      "1500": "checkpoint-1500"
+      "2000": "checkpoint-2000"
+      "2231": "checkpoint-2231"
+    run_id: "grpo-20250927-1111-nm380-af-v1"
+
+  m380_conf_grpo_alignFalse_v1:
+    root: "2025-09-28-19:05_380m_1e_lr5e-5_256bs*16comp*6gpu*1ga_1e_full"
+    steps:
+      "500": "checkpoint-500"
+      "1000": "checkpoint-1000"
+      "1500": "checkpoint-1500"
+      "2000": "checkpoint-2000"
+      "2231": "checkpoint-2231"
+    run_id: "grpo-20250928-1905-m380-af-v1"
+
+  m380_conf_grpo_alignTrue_v1:
+    root: "2025-09-29-18:06_380m_1e_lr5e-5_256bs*16comp*6gpu*1ga_1e_full_alignTrue"
+    steps:
+      "500": "checkpoint-500"
+      "1000": "checkpoint-1000"
+      "1500": "checkpoint-1500"
+      "2000": "checkpoint-2000"
+      "2231": "checkpoint-2231"
+    run_id: "grpo-20250929-1806-m380-at-v1"
+
+  m380_conf_grpo_alignFalse_beta005_v1:
+    root: "2025-09-30-16:14_380m_1e_lr5e-5_32bs*16comp*6gpu*8ga_1e_full_beta0.05_alignFalse"
+    steps:
+      "500": "checkpoint-500"
+      "1000": "checkpoint-1000"
+      "1500": "checkpoint-1500"
+      "2000": "checkpoint-2000"
+      "2231": "checkpoint-2231"
+    run_id: "grpo-20250930-1614-m380-af-b005-v1"
+
+  m380_4e_conf_grpo_alignFalse_beta005_v1:
+    root: "2025-10-02-16:21_380m_4e_lr5e-5_32bs*16comp*6gpu*8ga_1e_full_beta0.05_alignFalse"
+    steps:
+      final: "model"
+    run_id: "grpo-20251002-1621-m380-4e-af-b005-v1"
+
+  m380_4e_conf_grpo_alignFalse_beta005_const05_v1:
+    root: "2025-10-06-10:38_380m_4e_lr5e-5_32bs*16comp*6gpu*8ga_1e_full_beta0.05_alignFalse_const0.5"
+    steps:
+      final: "model"
+    run_id: "grpo-20251006-1038-m380-4e-af-b005c05-v1"
