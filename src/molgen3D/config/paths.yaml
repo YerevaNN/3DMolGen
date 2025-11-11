@@ -1,6 +1,7 @@
 base_paths:
   project_root: "."
   data_root: "data"
+  geom_data_root: "/nfs/ap/mnt/sxtn2/chem/GEOM_data"
   ckpts_root: "/nfs/h100/raid/chem/checkpoints"
   hf_yerevann_root: "/nfs/h100/raid/chem/checkpoints/hf/yerevann"
   qwen_yerevann_root: "/nfs/h100/raid/chem/checkpoints/yerevann"
@@ -9,9 +10,16 @@ base_paths:
   gen_results_root: "outputs/gen_results"
 
 data:
-    # corrected_smi: "corrected_smi.pickle"
-    clean_smi: "clean_smi.pickle"
-    distinct_smi: "distinct_smi.pickle"
+  clean_smi: "clean_smi.pickle"
+  distinct_smi: "distinct_smi.pickle"
+
+  rdkit_folder: "rdkit_folder"
+  test_mols: "geom_processed/test_smiles_corrected.csv"
+  drugs_summary: "rdkit_folder/summary_drugs.json"
+
+  conformers_train: "geom_processed/geom_cartesian_v2/processed_strings/train"
+  conformers_valid: "geom_processed/geom_cartesian_v2/processed_strings/valid"
+  conformers_test: "geom_processed/geom_cartesian_v2/processed_strings/test"
 
 tokenizers:
   llama3_chem_v1: "src/molgen3D/training/tokenizers/Llama-3.2-chem-1B-v1"

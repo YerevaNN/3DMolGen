@@ -64,23 +64,27 @@ def get_tokenizer_path(name: str) -> Path:
 
 
 def get_data_path(key: str) -> Path:
-    """
-    data[key] is interpreted as relative to base_paths.data_root,
-    unless it's absolute.
-    """
     cfg = _cfg()
     data_cfg = cfg.get("data", {})
     if key not in data_cfg:
-        raise KeyError(f"Unknown data key '{key}', available: {sorted(data_cfg.keys())}")
+        raise KeyError(...)
+    rel = Path(data_cfg[key])
+    if rel.is_absolute():
+        return rel
 
-    path = Path(data_cfg[key])
-    if path.is_absolute():
-        return path
-
-    data_root = cfg.get("base_paths", {}).get("data_root", ".")
-    return _abs(data_root) / path
-
-def get_base_path(key: str) -> Path:
-    cfg = _cfg()
     base_paths = cfg.get("base_paths", {})
-    return _abs(base_paths[key])
+    geom_keys = {
+        "rdkit_folder",
+        "test_mols",
+        "drugs_summary",
+        "conformers_train",
+        "conformers_valid",
+        "conformers_test",
+    }
+
+    if key in geom_keys or str(rel).startswith(("geom_processed", "rdkit_folder")):
+        base = base_paths.get("geom_data_root", base_paths.get("data_root", "."))
+    else:
+        base = base_paths.get("data_root", ".")
+
+    return _abs(base) / rel
