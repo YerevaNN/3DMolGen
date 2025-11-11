@@ -2,6 +2,8 @@ import os
 import os.path as osp
 import re
 import ast
+import json
+import pickle
 import random
 import numpy as np
 import cloudpickle
@@ -196,3 +198,25 @@ def filter_mols(
             break
 
     return selected
+
+def load_pkl(file_path: str):
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File {file_path} does not exist.")
+    with open(file_path, "rb") as f:
+        try:
+            return pickle.load(f)
+        except Exception:
+            f.seek(0)
+            return cloudpickle.load(f)
+
+def load_file(file_path: str, mode: str = "r"):
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File {file_path} does not exist.")
+    with open(file_path, mode) as f:
+        return f.read()
+
+def load_json(file_path: str):
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File {file_path} does not exist.")
+    with open(file_path, "r") as f:
+        return json.load(f)

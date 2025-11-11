@@ -55,6 +55,42 @@ _TWO_LETTER_SYMBOLS = {sym for sym in _ELEMENT_SYMBOLS if len(sym) == 2}
 _THREE_LETTER_SYMBOLS = {sym for sym in _ELEMENT_SYMBOLS if len(sym) == 3}
 _AROMATIC_SYMBOLS = set("cnopsb")
 
+def strip_smiles(s: str) -> str:
+    """
+    Normalize either:
+      - an enriched string: [C]<...>[NH2+]<...>[C]<...>..., or
+      - a plain SMILES: C[NH2+]Cc1sccc1C
+
+    into a 'canonical-ish' comparison string by:
+      - removing all <...> coordinate blocks
+      - collapsing decorative carbon H-counts: [CH3],[CH2],[CH],[cH] -> C/c
+      - dropping brackets around simple atoms: [C]->C, [c]->c, [N]->N, ...
+      - keeping chemically meaningful brackets: [NH2+], [nH], [H], [Pt+2], etc.
+    """
+
+    # 1) drop all coordinate triplets if present
+    s = re.sub(r'<[^>]*>', '', s)
+
+    # 2) normalize bracket atoms
+    def repl(m: re.Match) -> str:
+        inner = m.group(1)  # e.g. 'CH3', 'cH', 'N', 'NH2+', 'nH', 'H'
+
+        # Carbon with decorative H-counts: [CH3], [CH2], [CH], [CH0], [cH], [cH1], ...
+        if re.fullmatch(r'([Cc])H\d*', inner):
+            return inner[0]  # 'C' or 'c'
+
+        # Simple element or aromatic, no modifiers, and not H
+        # e.g. [C], [N], [O], [Cl], [Br], [c], [n], [o], ...
+        if inner != 'H' and (
+            re.fullmatch(r'[A-Z][a-z]?', inner) or   # C, N, O, S, Cl, Br, ...
+            re.fullmatch(r'[cnopsb]', inner)         # c, n, o, p, s, b
+        ):
+            return inner  # drop brackets
+
+        # Everything else: keep bracketed, e.g. [NH2+], [nH], [O-], [H], [Pt+2], [13C]
+        return f'[{inner}]'
+
+    return re.sub(r'\[([^\]]+)\]', repl, s)
 
 def _expected_plain_token(atom) -> str:
     if atom.GetIsAromatic():
