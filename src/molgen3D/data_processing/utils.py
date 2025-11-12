@@ -11,7 +11,7 @@ from collections import defaultdict
 from typing import Dict, Iterable, List, Optional
 from rdkit import Chem
 from rdkit.Geometry import Point3D
-
+from pathlib import Path
 from rdkit.Chem.rdchem import HybridizationType
 from rdkit.Chem.rdchem import BondType as BT
 from rdkit.Chem.rdchem import ChiralType
@@ -199,7 +199,7 @@ def filter_mols(
 
     return selected
 
-def load_pkl(file_path: str):
+def load_pkl(file_path: Path) -> object:
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File {file_path} does not exist.")
     with open(file_path, "rb") as f:
