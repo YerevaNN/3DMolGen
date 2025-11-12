@@ -99,7 +99,7 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, tag_pattern, 
 
 def run_inference(inference_config: dict):
     results_path = os.path.join(*[inference_config["results_path"], 
-                                  datetime.now().strftime('%Y-%m-%d-%H:%M') + 
+                                  datetime.now().strftime('%Y%m%d_%H%M%S') + 
                                   '_' + inference_config["run_name"]])
     os.makedirs(results_path, exist_ok=True)
     logger.add(os.path.join(results_path, "logs.txt"), rotation="50 MB")
