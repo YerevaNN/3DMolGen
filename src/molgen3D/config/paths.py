@@ -63,11 +63,19 @@ def get_tokenizer_path(name: str) -> Path:
     return _abs(toks[name])
 
 
+def get_base_path(key: str) -> Path:
+    cfg = _cfg()
+    base_paths = cfg.get("base_paths", {})
+    if key not in base_paths:
+        raise KeyError(f"Unknown base path '{key}', available: {sorted(base_paths.keys())}")
+    return _abs(base_paths[key])
+
+
 def get_data_path(key: str) -> Path:
     cfg = _cfg()
     data_cfg = cfg.get("data", {})
     if key not in data_cfg:
-        raise KeyError(...)
+        raise KeyError(f"Unknown data path '{key}', available: {sorted(data_cfg.keys())}")
     rel = Path(data_cfg[key])
     if rel.is_absolute():
         return rel
