@@ -115,224 +115,261 @@ def count_lines_in_jsonl_files(directory):
     return total_lines, len(jsonl_files)
 
 
-def sample_random_n_lines(directory: str, tokenizer, num_lines: int = 1000) -> Optional[Dict[str, Any]]:
-    """Randomly sample N lines from JSONL files and process them using our molgen3D pipeline."""
-    if not directory or not os.path.exists(directory):
-        return None
+def sample_items_and_create_samples(dataset_path: str, tokenizer_path: str, seq_len: int, num_items: int = 10000) -> Optional[Dict[str, Any]]:
+    """Load items from dataset and pack them into samples (2048-token sequences) using actual dataloader logic."""
+    try:
+        # Load tokenizer for processing
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, use_fast=True)
 
-    jsonl_files = sorted(glob.glob(os.path.join(directory, "*.jsonl")))
-    if not jsonl_files:
-        return None
+        # First, get total items and build file list
+        if not os.path.exists(dataset_path):
+            return None
 
-    import numpy as np
-    rng = np.random.default_rng(42)
+        jsonl_files = sorted(glob.glob(os.path.join(dataset_path, "*.jsonl")))
+        if not jsonl_files:
+            return None
 
-    # First, build a map of cumulative line counts per file
-    file_line_counts = []
-    total_lines = 0
+        # Build cumulative item counts per file
+        import random
+        random.seed(random.randint(0, 2**31 - 1))  # Random seed for this run
 
-    for file_path in jsonl_files:
-        with open(file_path, 'r') as f:
-            count = sum(1 for _ in f)
-            file_line_counts.append((file_path, count))
-            total_lines += count
+        file_item_counts = []
+        total_items = 0
 
-    if total_lines == 0:
-        return None
+        for file_path in jsonl_files:
+            with open(file_path, 'r') as f:
+                count = sum(1 for _ in f)
+                file_item_counts.append((file_path, count))
+                total_items += count
 
-    # Randomly select line indices from the entire dataset
-    if num_lines >= total_lines:
-        # If we want more lines than available, take all lines
-        selected_indices = list(range(total_lines))
-    else:
-        selected_indices = rng.choice(total_lines, size=num_lines, replace=False)
-        selected_indices.sort()  # Sort for efficient file reading
+        if total_items == 0:
+            return None
 
-    print(f"  Randomly sampling {len(selected_indices)} lines from {total_lines:,} total lines across {len(jsonl_files)} files...")
+        # Sample random item indices
+        if num_items >= total_items:
+            selected_indices = list(range(total_items))
+        else:
+            selected_indices = sorted(random.sample(range(total_items), num_items))
 
-    lines_processed = 0
-    total_chars = 0
-    total_tokens = 0
-    samples = []  # Store up to 3 samples with tokens and decoded text
+        print(f"  Loading {len(selected_indices)} items from {total_items:,} total items...")
 
-    # Convert global indices to file-specific indices
-    global_idx = 0
-    selected_idx = 0
+        # Convert global indices to file-specific indices and collect all tokenized items
+        all_tokenized_items = []
+        items_processed = 0
 
-    for file_path, file_line_count in file_line_counts:
-        if selected_idx >= len(selected_indices):
-            break
+        global_idx = 0
+        selected_idx = 0
 
-        file_start_idx = global_idx
-        file_end_idx = global_idx + file_line_count
+        for file_path, file_item_count in file_item_counts:
+            if selected_idx >= len(selected_indices):
+                break
 
-        # Find indices that belong to this file
-        file_indices = []
-        while selected_idx < len(selected_indices) and selected_indices[selected_idx] < file_end_idx:
-            file_indices.append(selected_indices[selected_idx] - file_start_idx)
-            selected_idx += 1
+            file_start_idx = global_idx
+            file_end_idx = global_idx + file_item_count
 
-        if not file_indices:
-            global_idx = file_end_idx
-            continue
+            # Find indices that belong to this file
+            file_indices = []
+            while selected_idx < len(selected_indices) and selected_indices[selected_idx] < file_end_idx:
+                file_indices.append(selected_indices[selected_idx] - file_start_idx)
+                selected_idx += 1
 
-        # Read the specific lines from this file
-        with open(file_path, 'r') as f:
-            lines = f.readlines()
+            if not file_indices:
+                global_idx = file_end_idx
+                continue
 
-        for local_idx in file_indices:
-            if local_idx < len(lines):
-                line = lines[local_idx].strip()
-                if not line:
-                    continue
+            # Read the specific lines from this file
+            with open(file_path, 'r') as f:
+                lines = f.readlines()
 
-                try:
-                    # Parse JSON line for our conformer format
-                    data = json.loads(line)
-                    if not isinstance(data, dict) or 'canonical_smiles' not in data or 'embedded_smiles' not in data:
+            for local_idx in file_indices:
+                if local_idx < len(lines):
+                    line = lines[local_idx].strip()
+                    if not line:
                         continue
 
-                    canonical = data['canonical_smiles']
-                    embedded = data['embedded_smiles']
+                    try:
+                        # Parse JSON line for item
+                        data = json.loads(line)
+                        if not isinstance(data, dict) or 'canonical_smiles' not in data or 'embedded_smiles' not in data:
+                            continue
 
-                    # Validate and build unit using our processing
-                    if not is_valid_unit(canonical, embedded):
-                        continue
+                        canonical = data['canonical_smiles']
+                        embedded = data['embedded_smiles']
 
-                    processed_text = build_unit(canonical, embedded)
-                    # Add EOS token at the beginning (our dataloader does this)
-                    tokens = [tokenizer.eos_token_id] + tokenizer.encode(processed_text, add_special_tokens=False)
+                        # Validate and build unit (item)
+                        if not is_valid_unit(canonical, embedded):
+                            continue
 
-                    # Store sample information (up to 3 samples for detailed analysis)
-                    if len(samples) < 3:
-                        decoded_text = tokenizer.decode(tokens)
-                        samples.append({
+                        processed_text = build_unit(canonical, embedded)
+
+                        # Use actual dataloader tokenization logic: EOS at end of each item
+                        tokens = tokenizer.encode(processed_text, add_special_tokens=False) + [tokenizer.eos_token_id]
+
+                        all_tokenized_items.append({
                             'tokens': tokens,
-                            'decoded_text': decoded_text,
-                            'processed_text': processed_text,
                             'canonical': canonical,
-                            'embedded': embedded
+                            'embedded': embedded,
+                            'processed_text': processed_text,
                         })
 
-                    total_chars += len(processed_text)
-                    total_tokens += len(tokens)
-                    lines_processed += 1
+                        items_processed += 1
 
-                except (json.JSONDecodeError, KeyError, Exception) as e:
-                    # Skip malformed lines
-                    continue
+                    except (json.JSONDecodeError, KeyError, Exception):
+                        continue
 
-        global_idx = file_end_idx
+            global_idx = file_end_idx
 
-    return {
-        'lines_processed': lines_processed,
-        'total_chars': total_chars,
-        'total_tokens': total_tokens,
-        'samples': samples,  # List of up to 3 samples with detailed info
-    }
+        if items_processed == 0:
+            return None
+
+        # Now pack all items into samples (2048-token sequences) using ChunkPacker
+        from molgen3D.training.pretraining.dataprocessing.text_processing import ChunkPacker
+
+        packer = ChunkPacker(seq_len=seq_len, bos_id=tokenizer.bos_token_id, eos_id=tokenizer.eos_token_id)
+        samples_created = []
+
+        # Feed all tokenized items to the packer and collect samples as they become available
+        print(f"  Packing {len(all_tokenized_items)} items with ChunkPacker...")
+        for i, item in enumerate(all_tokenized_items):
+            packer.try_add_unit(item['tokens'])
+
+            # Collect any completed samples after adding this item
+            for inp, lab in packer.yield_blocks():
+                sample_tokens = inp.tolist()
+                decoded_text = tokenizer.decode(sample_tokens)
+                samples_created.append({
+                    'tokens': sample_tokens,
+                    'decoded_text': decoded_text,
+                    'token_count': len(sample_tokens),  # Should be seq_len
+                })
+
+            if (i + 1) % 500 == 0:
+                print(f"    Added {i+1} items, created {len(samples_created)} samples so far")
+
+        print(f"  Total samples created: {len(samples_created)}")
+
+        # Handle any remaining content in the buffer (partial sample)
+        # In real dataloader, this would be carried to next batch, but for estimation we'll treat it as a partial sample
+        if len(packer.buf) > 0:
+            print(f"  Remaining buffer length: {len(packer.buf)}")
+            # For estimation, we'll consider the remaining buffer as a partial sample
+            # but only if it contains actual content (not just padding)
+            remaining_tokens = packer.buf[:]
+            if len(remaining_tokens) > 0:
+                # Don't pad this one since it's partial - just include as-is for counting purposes
+                decoded_text = tokenizer.decode(remaining_tokens)
+                samples_created.append({
+                    'tokens': remaining_tokens,
+                    'decoded_text': decoded_text,
+                    'token_count': len(remaining_tokens),
+                })
+                print(f"  Created 1 partial sample from remaining buffer ({len(remaining_tokens)} tokens)")
+
+        # Calculate stats
+        total_tokens_in_samples = len(samples_created) * seq_len
+        avg_items_per_sample = items_processed / len(samples_created) if samples_created else 0
+
+        return {
+            'items_processed': items_processed,
+            'samples_created': len(samples_created),
+            'total_tokens_in_samples': total_tokens_in_samples,
+            'avg_items_per_sample': avg_items_per_sample,
+            'samples': samples_created[:2],  # Only keep first 2 samples for display
+            'first_item': all_tokenized_items[0] if all_tokenized_items else None,  # For detailed token breakdown
+        }
+
+    except Exception as e:
+        print(f"ERROR: Failed to process items: {e}")
+        return None
 
 
-def estimate_dataset(dataset_name, dataset_path, tokenizer, sample_lines, seq_len, is_validation=False):
-    """Estimate tokens and samples by randomly sampling N lines and extrapolating."""
+def estimate_dataset(dataset_name, dataset_path, tokenizer_path, tokenizer, num_items, seq_len, is_validation=False):
+    """Estimate tokens and samples by loading items and creating samples using dataloader logic."""
     dataset_type = "VALIDATION" if is_validation else "TRAIN"
     print(f"\n{'='*70}")
     print(f"{dataset_type} DATASET: {dataset_name}")
     print(f"{'='*70}")
 
-    # Count total lines in dataset
+    # Count total items in dataset
     if not dataset_path:
         print("ERROR: No dataset path provided")
         return None
 
-    total_lines, num_files = count_lines_in_jsonl_files(dataset_path)
+    total_items, num_files = count_lines_in_jsonl_files(dataset_path)
     print(f"Dataset path: {dataset_path}")
     print(f"Total .jsonl files: {num_files}")
-    print(f"Total lines in dataset: {total_lines:,}")
+    print(f"Total items in dataset: {total_items:,}")
 
-    if total_lines == 0:
-        print("ERROR: No lines found in dataset")
+    if total_items == 0:
+        print("ERROR: No items found in dataset")
         return None
 
-    # Sample N random lines
-    sample_result = sample_random_n_lines(
+    # Load items and create samples using dataloader logic
+    sample_result = sample_items_and_create_samples(
         dataset_path,
-        tokenizer,
-        sample_lines
+        tokenizer_path,
+        seq_len,
+        num_items
     )
 
     if sample_result is None:
-        print("ERROR: Failed to sample lines")
+        print("ERROR: Failed to process items")
         return None
 
-    lines_sampled = sample_result['lines_processed']
-    chars_sampled = sample_result['total_chars']
-    tokens_sampled = sample_result['total_tokens']
-    samples = sample_result['samples']
+    items_processed = sample_result['items_processed']
+    samples_created = sample_result['samples_created']
+    total_tokens_in_samples = sample_result['total_tokens_in_samples']
+    avg_items_per_sample = sample_result['avg_items_per_sample']
+    samples = sample_result['samples']  # First 2 samples
+    first_item = sample_result['first_item']
 
-    print(f"\nFROM RANDOM SAMPLE OF {lines_sampled} LINES:")
-    print(f"  Characters in sampled lines: {chars_sampled:,}")
-    print(f"  Tokens produced: {tokens_sampled:,}")
-    print(f"  Samples this represents: {tokens_sampled // seq_len:,}")
+    print(f"\nFROM SAMPLE OF {items_processed} ITEMS:")
+    print(f"  Samples created: {samples_created}")
+    print(f"  Total tokens in samples: {total_tokens_in_samples:,}")
+    print(f"  Avg items per sample: {avg_items_per_sample:.2f}")
 
-    if lines_sampled == 0:
-        print("ERROR: No lines were successfully processed.")
+    if items_processed == 0:
+        print("ERROR: No items were successfully processed.")
         return None
-
-    print(f"  Avg chars per line: {chars_sampled / lines_sampled:.1f}")
-    print(f"  Avg tokens per line: {tokens_sampled / lines_sampled:.1f}")
-
-    # Calculate lines per sample
-    lines_per_sample = lines_sampled / (tokens_sampled / seq_len)
-    print(f"  Lines per sample: {lines_per_sample:.2f}")
 
     # Extrapolate to full dataset
-    lines_ratio = total_lines / lines_sampled
-    estimated_total_chars = chars_sampled * lines_ratio
-    estimated_total_tokens = tokens_sampled * lines_ratio
-    estimated_total_samples = int(estimated_total_tokens / seq_len)
+    items_ratio = total_items / items_processed
+    estimated_total_samples = int(samples_created * items_ratio)
+    estimated_total_tokens = estimated_total_samples * seq_len
 
     print(f"\nEXTRAPOLATED TO FULL DATASET:")
-    print(f"  Estimated total characters: {int(estimated_total_chars):,}")
-    print(f"  Estimated total tokens: {int(estimated_total_tokens):,}")
     print(f"  Estimated total samples (seq_len={seq_len}): {estimated_total_samples:,}")
+    print(f"  Estimated total tokens: {estimated_total_tokens:,}")
 
-    # Print sample analysis
+    # Print decoded version of first 2 samples
     if samples:
         print(f"\nSAMPLE ANALYSIS:")
         for i, sample in enumerate(samples, 1):
             print(f"\n--- Sample {i} ---")
-            print(f"SMILES: {sample['canonical']}")
-            print(f"Conformer length: {len(sample['embedded'])} chars")
+            print(f"Tokens: {sample['token_count']}")
+            print(f"Decoded: {sample['decoded_text']!r}")
 
-            tokens = sample['tokens']
-            print(f"Tokens: {len(tokens)} (showing first 50): {tokens[:50]}{'...' if len(tokens) > 50 else ''}")
+    # Print full token-to-decoded breakdown of 1 item only
+    if first_item:
+        print(f"\nFIRST ITEM TOKEN BREAKDOWN:")
+        print(f"SMILES: {first_item['canonical']}")
+        print(f"Tokens: {len(first_item['tokens'])}")
+        print(f"Decoded: {tokenizer.decode(first_item['tokens'])!r}")
 
-            decoded_text = sample['decoded_text']
-            print(f"Decoded (first 200 chars): {decoded_text[:200]}{'...' if len(decoded_text) > 200 else ''}")
-
-            # Verify EOS token placement
-            eos_positions = [j for j, t in enumerate(tokens) if t == tokenizer.eos_token_id]
-            print(f"EOS positions: {eos_positions}")
-
-            # Show detailed token breakdown for first sample only
-            if i == 1:  # Only for the first sample
-                print(f"\nDETAILED TOKEN BREAKDOWN (first 100 tokens):")
-                for j, token_id in enumerate(tokens[:100]):
-                    try:
-                        token_text = tokenizer.decode([token_id])
-                        print(f"Token {j:3d}: {token_id:6d} -> {repr(token_text)}")
-                    except Exception as e:
-                        print(f"Token {j:3d}: {token_id:6d} -> <error: {e}>")
+        print(f"\nDetailed token breakdown:")
+        for j, token_id in enumerate(first_item['tokens'][:50]):  # Show first 50 tokens
+            token_text = tokenizer.decode([token_id])
+            print(f"Token {j:3d}: {token_id:6d} -> {repr(token_text)}")
+        if len(first_item['tokens']) > 50:
+            print(f"... and {len(first_item['tokens']) - 50} more tokens")
 
     return {
-        'total_lines': total_lines,
-        'lines_sampled': lines_sampled,
-        'chars_sampled': chars_sampled,
-        'tokens_sampled': tokens_sampled,
-        'lines_per_sample': lines_per_sample,
-        'estimated_total_chars': int(estimated_total_chars),
-        'estimated_total_tokens': int(estimated_total_tokens),
+        'total_items': total_items,
+        'items_processed': items_processed,
+        'samples_created': samples_created,
+        'avg_items_per_sample': avg_items_per_sample,
         'estimated_total_samples': estimated_total_samples,
+        'estimated_total_tokens': estimated_total_tokens,
     }
 
 
@@ -375,10 +412,10 @@ Examples:
         help="Sequence length for tokenization",
     )
     parser.add_argument(
-        "--sample-lines",
+        "--num-items",
         type=int,
-        default=1000,
-        help="Number of lines to randomly sample for estimation",
+        default=10000,
+        help="Number of items to load from dataset for estimation",
     )
     parser.add_argument(
         "--skip-validation",
@@ -395,8 +432,8 @@ Examples:
     print("="*70)
     print("MOLGEN3D DATASET TOKEN COUNTING TOOL")
     print("="*70)
-    print(f"Randomly sampling {args.sample_lines} lines to estimate full datasets")
-    print(f"Sequence length: {args.seq_len}")
+    print(f"Loading {args.num_items} items from datasets to estimate sample/token counts")
+    print(f"Sequence length: {args.seq_len} (samples = 2048-token sequences)")
     print("="*70)
 
     # Load tokenizer
@@ -411,8 +448,9 @@ Examples:
     train_stats = estimate_dataset(
         args.train_dataset_name,
         train_path,
+        tokenizer_path,
         tokenizer,
-        args.sample_lines,
+        args.num_items,
         args.seq_len,
         is_validation=False
     )
@@ -423,8 +461,9 @@ Examples:
         valid_stats = estimate_dataset(
             args.valid_dataset_name,
             valid_path,
+            tokenizer_path,
             tokenizer,
-            args.sample_lines,
+            args.num_items,
             args.seq_len,
             is_validation=True
         )
@@ -438,8 +477,8 @@ Examples:
 
     if train_stats:
         print(f"\nTRAIN DATASET ({args.train_dataset_name}):")
-        print(f"  Total lines: {train_stats['total_lines']:,}")
-        print(f"  Lines per sample: {train_stats['lines_per_sample']:.2f}")
+        print(f"  Total items: {train_stats['total_items']:,}")
+        print(f"  Avg items per sample: {train_stats['avg_items_per_sample']:.2f}")
         print(f"  Estimated total tokens: {train_stats['estimated_total_tokens']:,}")
         print(f"  Estimated total samples: {train_stats['estimated_total_samples']:,}")
         print(f"  Estimated data size: ~{train_stats['estimated_total_tokens'] * 2 / (1024**3):.1f} GB (2 bytes/token)")
@@ -448,8 +487,8 @@ Examples:
 
     if valid_stats:
         print(f"\nVALIDATION DATASET ({args.valid_dataset_name}):")
-        print(f"  Total lines: {valid_stats['total_lines']:,}")
-        print(f"  Lines per sample: {valid_stats['lines_per_sample']:.2f}")
+        print(f"  Total items: {valid_stats['total_items']:,}")
+        print(f"  Avg items per sample: {valid_stats['avg_items_per_sample']:.2f}")
         print(f"  Estimated total tokens: {valid_stats['estimated_total_tokens']:,}")
         print(f"  Estimated total samples: {valid_stats['estimated_total_samples']:,}")
         print(f"  Estimated data size: ~{valid_stats['estimated_total_tokens'] * 2 / (1024**3):.1f} GB (2 bytes/token)")
