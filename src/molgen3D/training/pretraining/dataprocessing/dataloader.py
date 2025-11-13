@@ -155,13 +155,16 @@ def build_dataloader(
     num_workers: int = 4,
     pin_memory: bool = True,
     shuffle_lines: bool = True,
+    infinite: bool = True,
+    seed: Optional[int] = None,
 ):
     ds = JsonlTaggedPackedDataset(
         train_path=train_path,
         tokenizer_path=tokenizer_path,
         seq_len=seq_len,
         shuffle_lines=shuffle_lines,
-        infinite=True,
+        infinite=infinite,
+        seed=seed if seed is not None else 1234,
     )
     return StatefulDataLoader(
         ds,

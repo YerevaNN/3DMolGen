@@ -176,22 +176,24 @@ def count_validation_samples(tokenizer_path: str) -> int:
 
     print(f"Validation path: {val_path}")
 
-    # Create dataset in finite mode (no infinite looping)
-    dataset = JsonlTaggedPackedDataset(
+    # Create finite dataloader (no infinite looping, no shuffling)
+    dataloader = build_dataloader(
         train_path=val_path,
         tokenizer_path=tokenizer_path,
         seq_len=2048,  # Standard sequence length
+        batch_size=1,   # Process one sample at a time for accurate counting
+        num_workers=0,  # No multiprocessing for counting
         shuffle_lines=False,  # Deterministic for counting
-        infinite=False  # Finite mode - process each sample exactly once
+        infinite=False,  # Finite mode - process each sample exactly once
     )
 
-    print("Iterating through validation set (finite mode)...")
+    print("Iterating through validation set (finite mode, no shuffling)...")
 
     sample_count = 0
     batch_count = 0
 
     try:
-        for inputs, targets in dataset:
+        for inputs, targets in dataloader:
             batch_size = inputs.shape[0]
             sample_count += batch_size
             batch_count += 1
