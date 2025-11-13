@@ -13,9 +13,9 @@ import numpy as np
 from tqdm import tqdm
 
 try:
-    from molgen3D.evaluation.posebusters_check import run_all_posebusters
+    from molgen3D.evaluation.posebusters_check import bust_full_gens
 except Exception:
-    run_all_posebusters = None
+    bust_full_gens = None
 
 try:
     import submitit
@@ -225,8 +225,8 @@ def find_threshold_index(thresholds: np.ndarray, target: float) -> int:
     return idx
 
 
-def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers: int) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
-    if run_all_posebusters is None:
+def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers: int) -> Tuple[Optional[pd.DataFrame], Optional[float]]:
+    if bust_full_gens is None:
         print("PoseBusters not available (import failed)")
         return None, None
     
@@ -256,11 +256,14 @@ def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers:
         return None, None
     
     try:
-        df, summary, fail_smiles, error_smiles = run_all_posebusters(data=gen_data, config=config, full_report=False, max_workers=max_workers)
-        print(f"PoseBusters completed successfully")
-        if error_smiles:
-            print(f"Warning: {len(error_smiles)} molecules had errors")
-        return df, summary
+        pass_summary, overall_pass = bust_full_gens(
+            smiles_to_confs=gen_data,
+            num_workers=max_workers,
+            config=config,
+            full_report=False,
+        )
+        print("PoseBusters completed successfully")
+        return pass_summary, overall_pass
     except Exception as e:
         print(f"PoseBusters failed with error: {e}")
         import traceback
@@ -270,6 +273,8 @@ def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers:
 
 def save_covmat_results(out_dir: str, cov_df: pd.DataFrame, matching: Dict[str, float], 
                        cov_row_075: pd.Series, posebusters_summary: Optional[pd.DataFrame], 
+                       posebusters_pass_summary: Optional[pd.DataFrame],
+                       posebusters_overall_pass: Optional[float],
                        durations: Dict[str, float], missing_mols: List[str], all_nan_keys: List[str],
                        gen_txt_content: Optional[str], pickle_file: str, num_gt_molecules: int) -> None:
     """Save covmat_results.txt with organized, readable format."""
@@ -522,26 +527,30 @@ def process_single_pickle(pickle_file: str, gens_path: str, gt_dict: Dict,
         rmsd_075_df.to_csv(rmsd_075_csv_path, index=False)
         print(f"Saved RMSD matrix at 0.75 threshold to: {rmsd_075_csv_path}")
         posebusters_duration = 0.0
-        posebusters_summary = None
-        posebusters_full_results = None
+        posebusters_pass_summary: Optional[pd.DataFrame] = None
+        posebusters_overall_pass: Optional[float] = None
         if run_posebusters:
             print("\n" + "="*80)
             print("STARTING POSEBUSTERS EVALUATION")
             print("="*80)
             pb_start = time.time()
-            posebusters_full_results, posebusters_summary = run_posebusters_wrapper(gen_proc, posebusters_config, cfg.num_workers)
+            posebusters_pass_summary, posebusters_overall_pass = run_posebusters_wrapper(
+                gen_proc, posebusters_config, cfg.num_workers
+            )
             print("\n" + "="*80)
-            print(f"Pass percentage: {posebusters_summary['pass_percentage'].iloc[0]:.2f}%\n")
+            if posebusters_overall_pass is not None:
+                print(f"PoseBusters overall pass rate: {posebusters_overall_pass * 100.0:.2f}%\n")
+            else:
+                print("PoseBusters overall pass rate unavailable.\n")
             print("POSEBUSTERS EVALUATION COMPLETED")
             print("="*80)
             posebusters_duration = time.time() - pb_start
             
-            # Save full posebusters results as pickle
-            if posebusters_full_results is not None:
-                posebusters_pickle_path = os.path.join(os.path.dirname(results_file.name), "posebusters.pickle")
-                with open(posebusters_pickle_path, "wb") as f:
-                    pickle.dump(posebusters_full_results, f)
-                print(f"Saved full PoseBusters results to: {posebusters_pickle_path}")
+            # Save PoseBusters pass summary as CSV
+            if posebusters_pass_summary is not None and not posebusters_pass_summary.empty:
+                posebusters_csv_path = os.path.join(os.path.dirname(results_file.name), "posebusters_pass_summary.csv")
+                posebusters_pass_summary.to_csv(posebusters_csv_path, index=False)
+                print(f"Saved PoseBusters pass summary to: {posebusters_csv_path}")
         total = time.time() - t0
         covmat_duration = t_rmsd - t_prep
         
@@ -559,7 +568,9 @@ def process_single_pickle(pickle_file: str, gens_path: str, gt_dict: Dict,
             cov_df=cov_df,
             matching=matching,
             cov_row_075=cov_row_075,
-            posebusters_summary=posebusters_summary,
+            posebusters_summary=None,
+            posebusters_pass_summary=posebusters_pass_summary,
+            posebusters_overall_pass=posebusters_overall_pass * 100.0 if posebusters_overall_pass is not None else None,
             durations=durations,
             missing_mols=missing,
             all_nan_keys=all_nan_keys,
