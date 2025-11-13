@@ -1,0 +1,40 @@
+dataset:
+  dataset_path: /auto/home/menuab/cartesianisomeric/grpo/train_data_1.jsonl
+  smiles_mapping_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/smiles_mapping.json
+generation:
+  do_sample: true
+  max_completion_length: 2000
+  num_return_sequences: 1
+  repetition_penalty: 1.0
+  temperature: 1.0
+grpo:
+  adam_beta1: 0.9
+  adam_beta2: 0.99
+  batch_size: 8
+  beta: 0.005
+  grad_acc_steps: 1
+  learning_rate: 0.0001
+  max_grad_norm: 0.1
+  num_epochs: 1
+  num_generations: 8
+  output_dir: outputs
+  scheduler: cosine
+  seed: 1
+  temperature: 1.0
+  warmup_ratio: 0.1
+  weight_decay: 0.1
+model:
+  checkpoint_path: /nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-1B_conformers/37cf49f293254a6986b12948/step-40000/
+  conf_tags:
+  - '[CONFORMER]'
+  - '[/CONFORMER]'
+  dtype: bf16
+  mol_tags:
+  - '[SMILES]'
+  - '[/SMILES]'
+  pad_token: <|finetune_right_pad_id|>
+  tokenizer_path: /auto/home/menuab/code/YNNtitan/torchtitan/tokenizers/Llama-3.2-chem-1B-v1
+processing:
+  eos_token_id: 128329
+run:
+  name: 1b_1e_lr1e-4_8bs*8comp*2gpu*1ga_beta5e-3_rmsd1.0_match0.2_warmup0.1

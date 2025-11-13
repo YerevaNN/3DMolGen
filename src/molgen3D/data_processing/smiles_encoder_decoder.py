@@ -1,0 +1,473 @@
+import ast
+import math
+import re
+from rdkit import Chem
+from rdkit.Chem import AllChem
+from rdkit.Chem.rdchem import ChiralType
+from rdkit.Geometry import Point3D
+
+
+def truncate(x, precision=4):
+    """Format a float with at most ``precision`` decimal places (truncation, not rounding)."""
+    if precision < 0:
+        raise ValueError("precision must be non-negative")
+
+    value = float(x)
+    if precision == 0:
+        return str(int(math.trunc(value)))
+
+    factor = 10 ** precision
+    truncated = math.trunc(value * factor) / factor
+    if abs(truncated) < 10 ** (-precision):
+        truncated = 0.0  # avoid "-0"
+
+    text = f"{truncated:.{precision}f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
+_NUMERIC_TOKEN_RE = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
+
+
+def _parse_float_token(token: str) -> float:
+    matches = list(_NUMERIC_TOKEN_RE.finditer(token))
+    if not matches:
+        raise ValueError(f"Bad float token: {token}")
+    return float(matches[-1].group(0))
+
+
+# SMILES tokenizer ---------------------------------------------------------
+# Groups:
+# 1: bracket atom        (\[[^\]]+\])
+# 2: %dd... ring closure (%\d{2,})
+# 3: bare atom           ([A-Z][a-z]?)
+# 4: aromatic atom       ([cnopsb])
+# 5: bond symbols        (=|#|:|\/|\\|-)
+# 6: '('                 (\()
+# 7: ')'                 (\))
+# 8: ring digit          (\d)
+# 9: dot                 (\.)
+_PERIODIC_TABLE = Chem.GetPeriodicTable()
+_ELEMENT_SYMBOLS = {
+    _PERIODIC_TABLE.GetElementSymbol(atomic_num)
+    for atomic_num in range(1, 119)
+}
+_TWO_LETTER_SYMBOLS = {sym for sym in _ELEMENT_SYMBOLS if len(sym) == 2}
+_THREE_LETTER_SYMBOLS = {sym for sym in _ELEMENT_SYMBOLS if len(sym) == 3}
+_AROMATIC_SYMBOLS = set("cnopsb")
+
+def strip_smiles(s: str) -> str:
+    """
+    Normalize either:
+      - an enriched string: [C]<...>[NH2+]<...>[C]<...>..., or
+      - a plain SMILES: C[NH2+]Cc1sccc1C
+
+    into a 'canonical-ish' comparison string by:
+      - removing all <...> coordinate blocks
+      - collapsing decorative carbon H-counts: [CH3],[CH2],[CH],[cH] -> C/c
+      - dropping brackets around simple atoms: [C]->C, [c]->c, [N]->N, ...
+      - keeping chemically meaningful brackets: [NH2+], [nH], [H], [Pt+2], etc.
+    """
+
+    # 1) drop all coordinate triplets if present
+    s = re.sub(r'<[^>]*>', '', s)
+
+    # 2) normalize bracket atoms
+    def repl(m: re.Match) -> str:
+        inner = m.group(1)  # e.g. 'CH3', 'cH', 'N', 'NH2+', 'nH', 'H'
+
+        # Carbon with decorative H-counts: [CH3], [CH2], [CH], [CH0], [cH], [cH1], ...
+        if re.fullmatch(r'([Cc])H\d*', inner):
+            return inner[0]  # 'C' or 'c'
+
+        # Simple element or aromatic, no modifiers, and not H
+        # e.g. [C], [N], [O], [Cl], [Br], [c], [n], [o], ...
+        if inner != 'H' and (
+            re.fullmatch(r'[A-Z][a-z]?', inner) or   # C, N, O, S, Cl, Br, ...
+            re.fullmatch(r'[cnopsb]', inner)         # c, n, o, p, s, b
+        ):
+            return inner  # drop brackets
+
+        # Everything else: keep bracketed, e.g. [NH2+], [nH], [O-], [H], [Pt+2], [13C]
+        return f'[{inner}]'
+
+    return re.sub(r'\[([^\]]+)\]', repl, s)
+
+def _expected_plain_token(atom) -> str:
+    if atom.GetIsAromatic():
+        symbol = atom.GetSymbol()
+        if symbol == "C":
+            return "c"
+        if symbol == "N":
+            return "n"
+        if symbol == "O":
+            return "o"
+        if symbol == "S":
+            return "s"
+        if symbol == "P":
+            return "p"
+        if symbol == "B":
+            return "b"
+        return symbol.lower()
+    return atom.GetSymbol()
+
+
+def tokenize_smiles(smiles_str, expected_atom_tokens=None):
+    """Tokenize a canonical SMILES string into atom/non-atom tokens."""
+    tokens = []
+    i = 0
+    n = len(smiles_str)
+    expected_idx = 0
+    multi_letter_atoms = {sym for sym in _ELEMENT_SYMBOLS if len(sym) > 1}
+
+    while i < n:
+        ch = smiles_str[i]
+
+        if ch == "[":
+            end = smiles_str.find("]", i + 1)
+            if end == -1:
+                raise ValueError(f"Unmatched '[' in SMILES: {smiles_str}")
+            tokens.append({"type": "atom", "text": smiles_str[i : end + 1]})
+            i = end + 1
+            if expected_atom_tokens is not None:
+                expected_idx += 1
+            continue
+
+        if ch == "%":
+            j = i + 1
+            while j < n and smiles_str[j].isdigit():
+                j += 1
+            if j - i <= 2:  # need at least two digits after '%'
+                raise ValueError(f"Invalid ring closure token near position {i} in {smiles_str}")
+            tokens.append({"type": "nonatom", "text": smiles_str[i:j]})
+            i = j
+            continue
+
+        if ch in "=#:/\\-":
+            tokens.append({"type": "nonatom", "text": ch})
+            i += 1
+            continue
+
+        if ch in "()":
+            tokens.append({"type": "nonatom", "text": ch})
+            i += 1
+            continue
+
+        if ch == ".":
+            tokens.append({"type": "nonatom", "text": ch})
+            i += 1
+            continue
+
+        if ch.isdigit():
+            tokens.append({"type": "nonatom", "text": ch})
+            i += 1
+            continue
+
+        if ch.isalpha():
+            if ch.isupper():
+                expected_token = (
+                    expected_atom_tokens[expected_idx]
+                    if expected_atom_tokens is not None and expected_idx < len(expected_atom_tokens)
+                    else None
+                )
+                symbol = ch
+                # Try three-letter, then two-letter element symbols
+                for length, symbol_set in ((3, _THREE_LETTER_SYMBOLS), (2, _TWO_LETTER_SYMBOLS)):
+                    candidate = smiles_str[i : i + length]
+                    tail = candidate[1:]
+                    if (
+                        len(candidate) == length
+                        and tail.isalpha()
+                        and tail.islower()
+                        and candidate in symbol_set
+                        and candidate in multi_letter_atoms
+                    ):
+                        if expected_token is not None and candidate != expected_token:
+                            continue
+                        symbol = candidate
+                        i += length
+                        tokens.append({"type": "atom", "text": symbol})
+                        if expected_atom_tokens is not None:
+                            expected_idx += 1
+                        break
+                else:
+                    tokens.append({"type": "atom", "text": symbol})
+                    i += 1
+                    if expected_atom_tokens is not None:
+                        expected_idx += 1
+                    continue
+
+                continue
+
+            if ch in _AROMATIC_SYMBOLS:
+                tokens.append({"type": "atom", "text": ch})
+                i += 1
+                if expected_atom_tokens is not None:
+                    expected_idx += 1
+                continue
+
+        raise ValueError(f"Unrecognized SMILES character '{ch}' at position {i} in {smiles_str}")
+
+    return tokens
+
+
+def _format_atom_descriptor(atom):
+    """Return a bracketed atom descriptor that preserves valence information."""
+    symbol = atom.GetSymbol()
+    aromatic = atom.GetIsAromatic()
+    if aromatic and len(symbol) == 1:
+        symbol_text = symbol.lower()
+    else:
+        symbol_text = symbol
+
+    descriptor = symbol_text
+
+    chiral = atom.GetChiralTag()
+    if chiral == ChiralType.CHI_TETRAHEDRAL_CW:
+        descriptor += "@"
+    elif chiral == ChiralType.CHI_TETRAHEDRAL_CCW:
+        descriptor += "@@"
+
+    hcount = atom.GetTotalNumHs()
+    if hcount > 0:
+        descriptor += "H" if hcount == 1 else f"H{hcount}"
+
+    charge = atom.GetFormalCharge()
+    if charge != 0:
+        sign = "+" if charge > 0 else "-"
+        magnitude = abs(charge)
+        descriptor += sign if magnitude == 1 else f"{sign}{magnitude}"
+
+    return f"[{descriptor}]"
+
+_CARBON_DESCRIPTOR_RE = re.compile(r"^\[(?P<iso>\d+)?(?P<elem>[Cc])(?P<tail>.*)\]$")
+_CARBON_DECORATIVE_TAIL_RE = re.compile(r"^H\d*$")
+
+
+def _normalize_atom_descriptor(descriptor: str) -> str:
+    """
+    Collapse decorative hydrogen counts on neutral carbon descriptors.
+    """
+    match = _CARBON_DESCRIPTOR_RE.match(descriptor)
+    if not match or match.group("iso"):
+        return descriptor
+
+    tail = match.group("tail")
+    if not tail:
+        return descriptor
+
+    if any(ch in tail for ch in "@+-.:/\\"):
+        return descriptor
+
+    if _CARBON_DECORATIVE_TAIL_RE.fullmatch(tail):
+        return f"[{match.group('elem')}]"
+
+    return descriptor
+
+
+def encode_cartesian_v2(mol, precision=4):
+    """Serialize a 3D RDKit Mol into the enriched text representation."""
+    mol_no_h = Chem.RemoveHs(mol)
+    if mol_no_h.GetNumConformers() == 0:
+        raise ValueError("Molecule has no conformer / 3D coordinates.")
+
+    smiles = Chem.MolToSmiles(
+        mol_no_h,
+        canonical=True,
+        isomericSmiles=True,
+        allHsExplicit=False,
+        allBondsExplicit=False,
+    )
+
+    if not mol_no_h.HasProp("_smilesAtomOutputOrder"):
+        raise ValueError("Mol is missing _smilesAtomOutputOrder after MolToSmiles.")
+
+    atom_order_raw = mol_no_h.GetProp("_smilesAtomOutputOrder")
+    atom_order = list(map(int, ast.literal_eval(atom_order_raw)))
+
+    expected_atom_tokens = [
+        _expected_plain_token(mol_no_h.GetAtomWithIdx(idx)) for idx in atom_order
+    ]
+
+    tokens = tokenize_smiles(smiles, expected_atom_tokens=expected_atom_tokens)
+    out_parts = []
+    atom_idx_in_smiles = 0
+    conformer = mol_no_h.GetConformer()
+
+    for token in tokens:
+        if token["type"] == "atom":
+            if atom_idx_in_smiles >= len(atom_order):
+                raise ValueError("SMILES atom tokens exceed atom order mapping.")
+
+            atom_descriptor = token["text"]
+            if atom_descriptor[0] != "[":
+                rd_idx = atom_order[atom_idx_in_smiles]
+                atom_descriptor = _format_atom_descriptor(mol_no_h.GetAtomWithIdx(rd_idx))
+            else:
+                rd_idx = atom_order[atom_idx_in_smiles]
+
+            atom_descriptor = _normalize_atom_descriptor(atom_descriptor)
+
+            pos = conformer.GetAtomPosition(rd_idx)
+            coords = (truncate(pos.x, precision), truncate(pos.y, precision), truncate(pos.z, precision))
+
+            out_parts.append(f"{atom_descriptor}<{','.join(coords)}>")
+            atom_idx_in_smiles += 1
+        else:
+            out_parts.append(token["text"])
+
+    if atom_idx_in_smiles != len(atom_order):
+        raise ValueError(
+            f"Atom count mismatch: mapped {atom_idx_in_smiles} atoms but expected {len(atom_order)}."
+        )
+
+    enriched_string = "".join(out_parts)
+    return enriched_string, smiles
+
+
+# Enriched-string tokenizer ------------------------------------------------
+_ENRICHED_TOKEN_PATTERN = re.compile(
+    r"(\[[^\]]+\])<([^>]+)>|(%\d{2,})|(=|#|:|\/|\\|-)|(\()|(\))|(\d)|(\.)"
+)
+
+_SIMPLE_LETTER_BRACKET = re.compile(r"^\[[A-Za-z]{1,3}\]$")
+
+
+def tokenize_enriched(enriched):
+    """Tokenize the enriched representation back into atoms (with coords) and other tokens."""
+    tokens = []
+    pos = 0
+    for match in _ENRICHED_TOKEN_PATTERN.finditer(enriched):
+        if match.start() != pos:
+            raise ValueError(
+                f"Unrecognized enriched fragment: {enriched[pos:match.start()]} in {enriched}"
+            )
+
+        if match.group(1):
+            coord_str = match.group(2)
+            parts = [p.strip() for p in coord_str.split(",")]
+            if len(parts) != 3:
+                raise ValueError(f"Bad coord triplet: {coord_str}")
+            coords = tuple(_parse_float_token(p) for p in parts)
+            tokens.append(
+                {
+                    "type": "atom_with_coords",
+                    "atom_desc": match.group(1),
+                    "coords": coords,
+                }
+            )
+        elif match.group(3):
+            tokens.append({"type": "nonatom", "text": match.group(3)})
+        elif match.group(4):
+            tokens.append({"type": "nonatom", "text": match.group(4)})
+        elif match.group(5):
+            tokens.append({"type": "nonatom", "text": match.group(5)})
+        elif match.group(6):
+            tokens.append({"type": "nonatom", "text": match.group(6)})
+        elif match.group(7):
+            tokens.append({"type": "nonatom", "text": match.group(7)})
+        elif match.group(8):
+            tokens.append({"type": "nonatom", "text": match.group(8)})
+
+        pos = match.end()
+
+    if pos != len(enriched):
+        raise ValueError(f"Unparsed trailing enriched fragment: {enriched[pos:]} in {enriched}")
+
+    return tokens
+
+
+def decode_cartesian_v2(enriched_string):
+    """Reconstruct an RDKit Mol (with conformer) from the enriched string produced by the encoder."""
+    tokens = tokenize_enriched(enriched_string)
+
+    smiles_parts = []
+    coords = []
+    for token in tokens:
+        if token["type"] == "atom_with_coords":
+            smiles_parts.append(token["atom_desc"])
+            coords.append(token["coords"])
+        else:
+            smiles_parts.append(token["text"])
+
+    smiles = "".join(smiles_parts)
+    mol = Chem.MolFromSmiles(smiles, sanitize=False)
+    if mol is None:
+        raise ValueError(f"Failed to parse rebuilt SMILES: {smiles}")
+    if mol.GetNumAtoms() != len(coords):
+        raise ValueError(
+            f"Atom count mismatch: mol has {mol.GetNumAtoms()} atoms, coords list has {len(coords)} entries."
+        )
+
+    for idx, token in enumerate(t for t in tokens if t["type"] == "atom_with_coords"):
+        atom = mol.GetAtomWithIdx(idx)
+        desc = token["atom_desc"]
+        if atom.GetSymbol() != "H" and _SIMPLE_LETTER_BRACKET.match(desc):
+            atom.SetNoImplicit(False)
+
+    Chem.SanitizeMol(mol)
+
+    conformer = Chem.Conformer(mol.GetNumAtoms())
+    for idx, (x, y, z) in enumerate(coords):
+        conformer.SetAtomPosition(idx, Point3D(x, y, z))
+    mol.AddConformer(conformer, assignId=True)
+    return mol
+
+
+def embed_3d_conformer_from_smiles(smiles, seed=0):
+    """Generate a 3D conformer for a SMILES, drop implicit hydrogens, and return the resulting Mol."""
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        raise ValueError(f"Could not parse SMILES: {smiles}")
+
+    mol_h = Chem.AddHs(mol)
+    status = AllChem.EmbedMolecule(mol_h, randomSeed=seed)
+    if status != 0:
+        raise RuntimeError(f"RDKit embedding failed for {smiles} (status {status})")
+
+    try:
+        mmff_status = AllChem.MMFFOptimizeMolecule(mol_h)
+        if mmff_status != 0:
+            raise ValueError("MMFF optimization did not converge")
+    except Exception:
+        uff_status = AllChem.UFFOptimizeMolecule(mol_h)
+        if uff_status != 0:
+            raise RuntimeError(f"UFF optimization failed for {smiles}")
+
+    mol_no_h = Chem.RemoveHs(mol_h)
+    if mol_no_h.GetNumConformers() == 0:
+        raise RuntimeError("No conformer present after RemoveHs.")
+
+    Chem.MolToSmiles(
+        mol_no_h,
+        canonical=True,
+        isomericSmiles=True,
+        allHsExplicit=False,
+        allBondsExplicit=False,
+    )
+    if mol_no_h.HasProp("_smilesAtomOutputOrder"):
+        order = list(map(int, ast.literal_eval(mol_no_h.GetProp("_smilesAtomOutputOrder"))))
+        mol_no_h = Chem.RenumberAtoms(mol_no_h, order)
+
+    return mol_no_h
+
+
+def coords_rmsd(mol_a, mol_b):
+    """Compute RMSD between conformer-0 coordinates assuming identical atom order."""
+    if mol_a.GetNumAtoms() != mol_b.GetNumAtoms():
+        raise ValueError("Cannot compare coordinates for molecules with different atom counts.")
+
+    conf_a = mol_a.GetConformer()
+    conf_b = mol_b.GetConformer()
+    n = mol_a.GetNumAtoms()
+    if n == 0:
+        return 0.0
+
+    sse = 0.0
+    for idx in range(n):
+        pa = conf_a.GetAtomPosition(idx)
+        pb = conf_b.GetAtomPosition(idx)
+        dx = pa.x - pb.x
+        dy = pa.y - pb.y
+        dz = pa.z - pb.z
+        sse += dx * dx + dy * dy + dz * dz
+    return math.sqrt(sse / n)

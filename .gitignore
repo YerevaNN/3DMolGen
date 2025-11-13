@@ -1,6 +1,4 @@
 venv
-slurm_jobs/
-molgen3D.egg-info/
 .cursorignore
 .cursorrules   
 .cursor/ 
@@ -17,14 +15,12 @@ molgen3D.egg-info/
 *.pyd
 __pycache__/
 
-#data/
-results/
-eval_results/
-gen_results/
+data/
+outputs/
 notebooks/
 wandb/
-grpo_outputs/
 tests/
+*.egg-info/
 # Log files
 *.log
 *.csv

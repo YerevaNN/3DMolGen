@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+# Standard library imports
+import argparse
+import os
+import sys
+from pathlib import Path
+
+# Third-party imports
+from datasets import Dataset
+from loguru import logger
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from trl import GRPOConfig as TRLGRPOConfig
+
+# Local imports
+from molgen3D.grpo.grpo_hf.config import Config
+from molgen3D.grpo.grpo_hf.grpo_trainer import GRPOTrainer
+from molgen3D.grpo.grpo_hf.stats import RunStatistics
+from molgen3D.grpo.grpo_hf.utils import (
+    load_smiles_mapping,
+    setup_logging,
+    save_config,
+    get_torch_dtype
+)
+from molgen3D.grpo.grpo_hf.rewards import reward_function
+from molgen3D.grpo.grpo_hf.multi_component_reward import MultiComponentRewardCalculator
+
+
+def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
+    # Use the runtime output_dir if available, otherwise use the base directory
+    actual_output_dir = output_dir or config.grpo.output_dir
+    if actual_output_dir is None:
+        raise ValueError("Output directory not specified in config or as parameter")
+    
+    setup_logging(actual_output_dir, config.run.log_level)
+    
+    logger.info(f"Running GRPO")
+
+    # Load SMILES mapping and set GEOM data path
+    load_smiles_mapping(config.dataset.smiles_mapping_path)
+    logger.info("Initialized data paths")
+
+    # Initialize statistics object
+    stats = RunStatistics(output_dir=actual_output_dir)
+    
+
+    training_args = TRLGRPOConfig(
+        output_dir=config.grpo.checkpoint_dir,
+        save_strategy=config.trainer.save_strategy,
+        save_steps=config.trainer.save_steps,
+        save_total_limit=config.trainer.save_total_limit,
+        save_on_each_node=config.trainer.save_on_each_node,
+        save_safetensors=config.trainer.save_safetensors,
+        max_completion_length=config.generation.max_completion_length,
+        learning_rate=config.grpo.learning_rate,
+        lr_scheduler_type=config.grpo.scheduler,
+        adam_beta1=config.grpo.adam_beta1,
+        adam_beta2=config.grpo.adam_beta2,
+        weight_decay=config.grpo.weight_decay,
+        warmup_ratio=config.grpo.warmup_ratio,
+        max_grad_norm=config.grpo.max_grad_norm,
+        temperature=config.grpo.temperature,
+        num_generations=config.grpo.num_generations,
+        beta=config.grpo.beta,
+        per_device_train_batch_size=config.grpo.per_device_batch_size,
+        gradient_accumulation_steps=config.grpo.grad_acc_steps,
+        log_on_each_node=config.trainer.log_on_each_node,
+        report_to="wandb" if enable_wandb else "none",
+        run_name=config.run.name,
+        logging_steps=config.trainer.logging_steps,
+        max_steps=config.grpo.max_steps,
+        # num_train_epochs=config.grpo.num_epochs,
+        use_liger_loss=config.trainer.use_liger_loss,
+        loss_type=config.trainer.loss_type,
+        num_iterations=config.grpo.num_iterations,
+    )
+
+    # Convert string dtype to torch dtype
+    torch_dtype = get_torch_dtype(config.trainer.torch_dtype)
+    
+    model = AutoModelForCausalLM.from_pretrained(
+        config.model.checkpoint_path,
+        dtype=torch_dtype,
+        attn_implementation=config.trainer.attn_implementation,
+    )   
+    # Verify Flash Attention is active
+    logger.info(f"Model architecture:\n{model}")
+    logger.info(f"Model attention implementation: {getattr(model.config, '_attn_implementation', 'unknown')}")    
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        config.model.tokenizer_path,
+    )
+    dataset = Dataset.from_csv(config.dataset.dataset_path)
+
+    tokenizer.pad_token_id = tokenizer.convert_tokens_to_ids(config.model.pad_token)
+    mol_end_token_id = tokenizer.convert_tokens_to_ids(config.model.mol_tags[1])
+    
+    # Explicitly set pad_token_id in model config to prevent warnings
+    model.config.pad_token_id = tokenizer.pad_token_id
+    logger.info(f"Set model pad_token_id to {model.config.pad_token_id}")
+
+    reward_strategy = config.grpo.reward_strategy.lower()
+    if reward_strategy == "multi_component":
+        mc_calculator = MultiComponentRewardCalculator(config=config, stats=stats, tokenizer=tokenizer)
+
+        def reward_func(prompts, completions, **kwargs):
+            return mc_calculator(prompts, completions, **kwargs)
+
+    else:
+        def reward_func(prompts, completions, **kwargs):
+            return reward_function(prompts, completions, stats, tokenizer, config)
+
+    # Set DataLoader parameters from YAML config
+    training_args.dataloader_num_workers = config.dataloader.num_workers
+    training_args.dataloader_pin_memory = config.dataloader.pin_memory
+    training_args.dataloader_persistent_workers = config.dataloader.persistent_workers
+    training_args.dataloader_prefetch_factor = config.dataloader.prefetch_factor
+    training_args.dataloader_drop_last = config.dataloader.drop_last
+    
+    trainer = GRPOTrainer(
+        model=model,
+        processing_class=tokenizer,
+        reward_funcs=reward_func,
+        args=training_args,
+        train_dataset=dataset,
+    )
+    
+    trainer.train()
+    stats.update_stats()
+
+    model_dir = Path(config.grpo.checkpoint_dir) / "model"
+    model_dir.mkdir(exist_ok=True)
+    trainer.model.save_pretrained(model_dir)
+    logger.info(f"Saved model to {model_dir}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", required=True, type=str)
+    parser.add_argument("--wandb", action="store_true", help="Enable wandb tracking")
+    
+    args = parser.parse_args()
+
+    config = Config.from_yaml(args.config)
+
+    main(config, args.wandb)
+    

@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=preproc
-#SBATCH --cpus-per-task=100
-#SBATCH --partition=a100
+#SBATCH --cpus-per-task=60
+#SBATCH --partition=h100
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --mem=64G
@@ -26,9 +26,9 @@ srun python3 molgen3D/data_processing/data_preprocessing.py \
   --num_workers ${SLURM_CPUS_PER_TASK} \
   --precision 4 \
   --dataset_type drugs \
+  --run_name geom_mapped \
+  --max_confs 30 \
   --splits test \
-  --run_name geom_cartesian_v2 \
-  --max_confs 30
 
 
 

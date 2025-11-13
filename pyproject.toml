@@ -1,58 +1,12 @@
-[build-system]
-requires = ["setuptools<81.0", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "molgen3D"
 version = "0.1.0"
-description = "3D molecular generation using language models"
-readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
-authors = [
-    {name = "Your Name", email = "your.email@example.com"}
-]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.10",
-    "Topic :: Scientific/Engineering :: Chemistry",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence"
-]
-keywords = ["molecular-generation", "deep-learning", "chemistry", "3D-molecules"]
-dependencies = [
-    "torch>=2.0.0",
-    "transformers>=4.30.0",
-    "datasets>=2.0.0",
-    "trl>=0.4.0",
-    "loguru>=0.7.0",
-    "pyyaml>=6.0",
-    "submitit>=1.5.0",
-    "rdkit>=2023.0.0",
-    "numpy>=1.20.0",
-    "wandb>=0.15.0",
-    "accelerate>=0.20.0",
-    "flash-attn>=2.0.0",
-    "posebusters>=0.4.0",
-    "datamol>=0.12.0"
-]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0.0",
-    "black>=23.0.0",
-    "flake8>=6.0.0",
-    "mypy>=1.0.0",
-    "jupyter>=1.0.0",
-    "ipython>=8.0.0"
-]
-
-[project.urls]
-Homepage = "https://github.com/yourusername/molgen3D"
-Documentation = "https://github.com/yourusername/molgen3D#readme"
-Repository = "https://github.com/yourusername/molgen3D.git"
-Issues = "https://github.com/yourusername/molgen3D/issues"
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["molgen3D"] 
+package-dir = { "" = "src" }
+packages = { find = { where = ["src"] } }
