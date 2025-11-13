@@ -35,13 +35,13 @@ def validate_tokenizer(tokenizer_path):
 def analyze_sample(sample_tokens: List[int], eos_id: int, tokenizer) -> Dict[str, Any]:
     """Analyze a single sample and return statistics."""
     if not sample_tokens:
-        return {"units": 0, "complete": False, "eos_count": 0, "token_count": 0, "text_length": 0, "tokens": [], "text": ""}
+        return {"items": 0, "complete": False, "eos_count": 0, "token_count": 0, "text_length": 0, "tokens": [], "text": ""}
 
     eos_count = sum(1 for token in sample_tokens if token == eos_id)
     ends_with_eos = sample_tokens[-1] == eos_id
 
-    # Each EOS represents a unit start, so EOS count = number of units
-    units_in_sample = eos_count
+    # Each EOS represents an item (molecular conformer), so EOS count = number of items
+    items_in_sample = eos_count
 
     try:
         full_text = tokenizer.decode(sample_tokens)
@@ -49,7 +49,7 @@ def analyze_sample(sample_tokens: List[int], eos_id: int, tokenizer) -> Dict[str
         full_text = "<decode_error>"
 
     return {
-        "units": units_in_sample,
+        "items": items_in_sample,
         "complete": ends_with_eos,
         "eos_count": eos_count,
         "token_count": len(sample_tokens),
@@ -63,10 +63,10 @@ def display_sample_analysis(sample_idx: int, stats: Dict[str, Any]) -> None:
     status = "COMPLETE" if stats["complete"] else "CUT-OFF"
 
     print(f"\n--- Sample {sample_idx} ({status}) ---")
-    print(f"Units: {stats['units']} | Tokens: {stats['token_count']}")
+    print(f"Items: {stats['items']} | Tokens: {stats['token_count']}")
 
     if not stats["complete"]:
-        print("WARNING: Contains cut-off unit (continues in next sample)")
+        print("WARNING: Contains cut-off item (continues in next sample)")
 
     # Only show the first sample in full
     if sample_idx == 0:
@@ -93,6 +93,8 @@ def run_smoke_test(args, tokenizer, bos_id, eos_id):
     print("\n" + "="*60)
     print("MOLECULAR CONFORMER DATALOADER SMOKE TEST")
     print("="*60)
+    print("Definitions: Item = dataset line (SMILES+conformer), Sample = 2048-token sequence, Batch = sample collection")
+    print("="*60)
     print(f"Train paths: {args.train_path}")
     print(f"Tokenizer: {args.tokenizer_path}")
     print(f"Special tokens: BOS={bos_id}, EOS={eos_id}")
@@ -107,7 +109,7 @@ def run_smoke_test(args, tokenizer, bos_id, eos_id):
         "batches_processed": 0,
         "samples_inspected": 0,
         "complete_samples": 0,
-        "units_per_sample": [],
+        "items_per_sample": [],
         "tokens_per_sample": [],
         "seq_len": args.seq_len
     }
@@ -124,7 +126,7 @@ def run_smoke_test(args, tokenizer, bos_id, eos_id):
         print(f"\n--- Batch {batch_num}/{args.max_batches} ({batch_size} samples) ---")
 
         # Analyze samples from this batch
-        batch_units = []
+        batch_items = []
         batch_tokens = []
         batch_complete = 0
         samples_to_show = min(batch_size, 4)
@@ -133,9 +135,9 @@ def run_smoke_test(args, tokenizer, bos_id, eos_id):
             sample_tokens = inputs[sample_idx].tolist()
             sample_stats = analyze_sample(sample_tokens, eos_id, tokenizer)
 
-            batch_units.append(sample_stats["units"])
+            batch_items.append(sample_stats["items"])
             batch_tokens.append(sample_stats["token_count"])
-            stats["units_per_sample"].append(sample_stats["units"])
+            stats["items_per_sample"].append(sample_stats["items"])
             stats["tokens_per_sample"].append(sample_stats["token_count"])
 
             if sample_stats["complete"]:
@@ -235,11 +237,11 @@ def display_comprehensive_stats(stats: Dict[str, Any], start_time: float, val_co
     if val_count is not None:
         print(f"Validation samples: {val_count}")
 
-    # Unit statistics (simplified)
-    units_data = stats["units_per_sample"]
-    if units_data:
-        avg_units = sum(units_data) / len(units_data)
-        print(f"Avg units per sample: {avg_units:.1f}")
+    # Item statistics (simplified)
+    items_data = stats["items_per_sample"]
+    if items_data:
+        avg_items = sum(items_data) / len(items_data)
+        print(f"Avg items per sample: {avg_items:.1f}")
 
     # Token efficiency (simplified)
     tokens_data = stats["tokens_per_sample"]
