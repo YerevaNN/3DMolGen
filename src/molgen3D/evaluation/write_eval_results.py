@@ -150,7 +150,7 @@ def read_gen_results_txt(gens_path: str) -> Optional[str]:
         return None
 
 def save_evaluation_results(cov_df: pd.DataFrame, matching: Dict[str, float], aggregated_metrics: Dict[str, np.ndarray],
-                            posebusters_summary: Optional[pd.DataFrame], posebusters_full_results: Optional[pd.DataFrame], 
+                            posebusters_full_results: Optional[pd.DataFrame], pass_rate: Optional[float], fail_smiles: Optional[List[str]], error_smiles: Optional[List[str]],
                             durations: Dict[str, float], rmsd_results: Dict[str, Dict[str, object]], missing: List[str], 
                             all_nan_keys: List[str], results_path: str, gen_stats: Dict[str, int], gt_stats: Dict[str, int],
                             args) -> None:
@@ -221,7 +221,8 @@ def save_evaluation_results(cov_df: pd.DataFrame, matching: Dict[str, float], ag
             pickle.dump(posebusters_full_results, f)
         print(f"Saved full PoseBusters results to: {posebusters_pickle_path}")
 
-def save_covmat_results_txt(cov_df: pd.DataFrame, matching: Dict[str, float], posebusters_summary: Optional[pd.DataFrame],
+def save_covmat_results_txt(cov_df: pd.DataFrame, matching: Dict[str, float], posebusters_summary: Optional[pd.DataFrame], 
+                            posebusters_full_results: Optional[pd.DataFrame], pass_rate: Optional[float], fail_smiles: Optional[List[str]], error_smiles: Optional[List[str]],
                             durations: Dict[str, float], missing: List[str], all_nan_keys: List[str], results_path: str,
                             gen_stats: Dict[str, int], gt_stats: Dict[str, int]) -> None:
     """Save comprehensive evaluation results to text file."""
