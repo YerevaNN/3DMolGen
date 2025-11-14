@@ -52,7 +52,7 @@ def save_results(results_path, generations, stats):
     with open(os.path.join(results_path, "generation_results.txt"), 'w') as results_file_txt:
         results_file_txt.write(f"{stats=}")
 
-def process_batch(model, tokenizer, batch: list[list], gen_config, tag_pattern, eos_token_id):
+def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id):
     generations = defaultdict(list)
     stats = {"smiles_mismatch":0, "mol_parse_fail" :0, "no_eos":0}
     
@@ -87,7 +87,7 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, tag_pattern, 
             else:
                 try:
                     mol_obj = decode_cartesian_v2(generated_conformer)
-                    logger.info(f"smiles match: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
+                    # logger.info(f"smiles match: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
                     generations[geom_smiles].append(mol_obj)
                 except:
                     logger.info(f"smiles fails parsing: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
@@ -190,12 +190,12 @@ def launch_inference_from_cli(device: str, grid_search: bool, test_set:str = Non
             # "model_path": ["nm380_500grpo_alignFalse", "nm380_1000grpo_alignFalse", "nm380_1500grpo_alignFalse", "nm380_2000grpo_alignFalse", "nm380_2230grpo_alignFalse", "m380_500grpo_alignFalse", "m380_1000grpo_alignFalse", "m380_1500grpo_alignFalse", "m380_2000grpo_alignFalse", "m380_2230grpo_alignFalse"],
             # "model_path": ["m380_4e_1xgrpo_aF_b05_const05"],
             # "model_path": ["qw600_1e", "qw600_2e", "qw600_3e", "qw600_4e"],
-            "model_path": ["qw600_pre_1e", "qw600_pre_2e", "qw600_pre_3e", "qw600_pre_4e", "qw600_src_1e"],
+            "model_path": [("m380_conf_v2", "1e"), ("m380_conf_v2", "2e"), ("m380_conf_v2", "3e"), ("m380_conf_v2", "4e")],
             # "model_path": ["nm380_1e", "nm380_4e", "m380_1e", "m380_1e_1xgrpo_1e_lr5e-5_algnTrue"],
             # "model_path": ["nm380_1e", "nm380_4e", "m380_1e", "m380_4e"],
             "test_set": ["clean"],
-            # "model_path": ["nm380_1e", "nm380_2e", "nm380_3e", "nm380_4e", "nm100_1e", 
-            # "nm100_2e", "nm100_3e", "nm100_4e", "nm170_1e", "nm170_2e", "nm170_3e", 
+            # "model_path": ["nm380_1e", "nm380_2e", "nm380_3e", "nm380_4e", "nm100_1e",
+            # "nm100_2e", "nm100_3e", "nm100_4e", "nm170_1e", "nm170_2e", "nm170_3e",
             # "nm170_4e", "m380_1e", "m380_1e_1xgrpo_1e_lr5e-5_algnTrue", "m380_1e_1xgrpo_100e_100s"],
             # "model_path": ["nb1_1e", "nb1_2e", "nb1_3e", "nb1_4e"],
             "gen_config": ["top_p_sampling1"],
@@ -205,23 +205,33 @@ def launch_inference_from_cli(device: str, grid_search: bool, test_set:str = Non
             with executor.batch():
                 for model_key, gen_config_key, test_set_value in itertools.product(param_grid["model_path"], param_grid["gen_config"], param_grid["test_set"]):
                     grid_config = dict(inference_config)
-                    grid_config["model_path"] = get_ckpt(model_key)
+                    if isinstance(model_key, tuple):
+                        grid_config["model_path"] = get_ckpt(model_key[0], model_key[1])
+                        model_key_str = f"{model_key[0]}_{model_key[1]}"
+                    else:
+                        grid_config["model_path"] = get_ckpt(model_key)
+                        model_key_str = model_key
                     grid_config["gen_config"] = sampling_configs[gen_config_key]
-                    grid_config["batch_size"] = 256 if "1b" in model_key else 256  
+                    grid_config["batch_size"] = 256 if "1b" in model_key_str else 256
                     grid_config["test_set"] = test_set_value
                     grid_config["test_data_path"] = get_data_path(f"{test_set_value}_smi")
-                    grid_config["run_name"] = f"{model_key}_{gen_config_key}_{test_set_value}"
+                    grid_config["run_name"] = f"{model_key_str}_{gen_config_key}_{test_set_value}"
                     job = executor.submit(run_inference, inference_config=grid_config)
                     jobs.append(job)
         else:
             for model_key, gen_config_key, test_set_value in itertools.product(param_grid["model_path"], param_grid["gen_config"], param_grid["test_set"]):
                 grid_config = dict(inference_config)
-                grid_config["model_path"] = get_ckpt(model_key)
+                if isinstance(model_key, tuple):
+                    grid_config["model_path"] = get_ckpt(model_key[0], model_key[1])
+                    model_key_str = f"{model_key[0]}_{model_key[1]}"
+                else:
+                    grid_config["model_path"] = get_ckpt(model_key)
+                    model_key_str = model_key
                 grid_config["gen_config"] = sampling_configs[gen_config_key]
-                grid_config["batch_size"] = 256 if "1b" in model_key else 256
+                grid_config["batch_size"] = 256 if "1b" in model_key_str else 256
                 grid_config["test_set"] = test_set_value
                 grid_config["test_data_path"] = get_data_path(f"{test_set_value}_smi")
-                grid_config["run_name"] = f"{model_key}_{gen_config_key}_{test_set_value}"
+                grid_config["run_name"] = f"{model_key_str}_{gen_config_key}_{test_set_value}"
                 run_inference(inference_config=grid_config)
     else:
         if executor is not None:
