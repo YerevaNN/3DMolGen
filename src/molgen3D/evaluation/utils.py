@@ -58,7 +58,7 @@ def create_slurm_executor(
 def find_generation_pickles_path(directory_path: str) -> str:
     for r, _, fs in os.walk(directory_path):
         for f in fs:
-            if f.endswith(".pickle") or f.endswith(".pkl"):
+            if f.endswith((".pickle", ".pkl")):
                 return os.path.join(r, f)
     return None  # No pickle files found
 

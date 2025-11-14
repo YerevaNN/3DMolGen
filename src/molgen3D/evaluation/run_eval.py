@@ -18,6 +18,7 @@ from molgen3D.config.paths import get_data_path, get_base_path
 from molgen3D.evaluation.utils import create_slurm_executor, find_generation_pickles_path, format_float, covmat_metrics, DEFAULT_THRESHOLDS
 from molgen3D.data_processing.utils import load_pkl
 from molgen3D.evaluation.write_eval_results import save_evaluation_results
+from molgen3D.evaluation.posebusters_check import run_all_posebusters
 
 def _compute_key_matrix(key: str, true_confs: List, gen_mols: List, use_alignmol: bool) -> Tuple[str, Dict[str, object], bool]:
     n_true = len(true_confs)
