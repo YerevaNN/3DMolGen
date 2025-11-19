@@ -10,6 +10,9 @@ import math
 import os
 import numpy as np
 
+from rdkit import Chem
+from rdkit.Chem import rdMolHash
+
 DEFAULT_THRESHOLDS = np.arange(0.05, 3.05, 0.05)
 
 
@@ -62,7 +65,16 @@ def find_generation_pickles_path(directory_path: str) -> str:
                 return os.path.join(r, f)
     return None  # No pickle files found
 
-
+def same_molecular_graph(gt: str, gen: str) -> bool:
+    m1 = Chem.MolFromSmiles(gt)
+    m2 = Chem.MolFromSmiles(gen)
+    if m2 is None:
+        return False
+    else:
+        # isomericSmiles=False => ignore stereochemistry in the canonical string
+        c1 = Chem.MolToSmiles(m1, canonical=True, isomericSmiles=False)
+        c2 = Chem.MolToSmiles(m2, canonical=True, isomericSmiles=False)
+        return c1 == c2
 
 def format_float(value: Optional[float], decimals: int = 4) -> str:
     """Format float to specified decimal places (truncated, not rounded)."""

@@ -2,6 +2,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 import cloudpickle
 import random
+from transformers.generation.utils import GenerateDecoderOnlyOutput
 import yaml
 import itertools
 import re
@@ -17,7 +18,7 @@ torch.set_grad_enabled(False)
 # from utils import parse_molecule_with_coordinates
 from molgen3D.data_processing.utils import decode_cartesian_raw
 from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2, strip_smiles
-from molgen3D.evaluation.utils import extract_between
+from molgen3D.evaluation.utils import extract_between, same_molecular_graph
 from molgen3D.config.paths import get_ckpt, get_tokenizer_path, get_data_path, get_base_path
 from molgen3D.config.sampling_config import sampling_configs, gen_num_codes
 
@@ -33,10 +34,10 @@ def set_seed(seed=42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def load_model_tokenizer(model_path, tokenizer_path, torch_dtype, attention_imp="flash_attention_2", device="auto"):
+def load_model_tokenizer(model_path, tokenizer_path, torch_dtype="bfloat16", attention_imp="flash_attention_2", device="auto"):
     tokenizer  = AutoTokenizer.from_pretrained(tokenizer_path, padding_side='left')
     model = AutoModelForCausalLM.from_pretrained(model_path, 
-                                                 torch_dtype=getattr(torch, torch_dtype),
+                                                 dtype=getattr(torch, torch_dtype),
                                                  attn_implementation=attention_imp,
                                                  device_map=device).eval()
     tokenizer.pad_token = tokenizer.eos_token
@@ -81,7 +82,7 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id)
         if generated_conformer:
             # generated_smiles = tag_pattern.sub('', generated_conformer)     
             generated_smiles = strip_smiles(generated_conformer)
-            if generated_smiles != canonical_smiles:
+            if not same_molecular_graph(canonical_smiles, generated_smiles):
                 logger.info(f"smiles mismatch: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
                 stats["smiles_mismatch"] += 1
             else:
@@ -97,6 +98,17 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id)
             logger.info(f"no eos: \n{out[:1000]=}")
     return generations, stats
 
+def split_batch_on_geom_size(batch: list[list], max_geom_len: int = 80) -> list[list]:
+    if not batch:
+        return []
+    if len(batch) == 1:
+        return [batch]
+    if any(len(geom_smiles) > max_geom_len for geom_smiles, _ in batch):
+        mid = len(batch) // 2
+        if mid:
+            return [batch[:mid], batch[mid:]]
+    return [batch]
+
 def run_inference(inference_config: dict):
     results_path = os.path.join(*[inference_config["results_path"], 
                                   datetime.now().strftime('%Y%m%d_%H%M%S') + 
@@ -109,21 +121,22 @@ def run_inference(inference_config: dict):
                                             tokenizer_path=inference_config["tokenizer_path"],
                                             torch_dtype=inference_config["torch_dtype"],
                                             device=inference_config["device"])
+    logger.info(f"model loaded: {model.dtype=}, {model.device=}")
     
     eos_token_id = tokenizer.encode("[/CONFORMER]")[0]
     with open(inference_config["test_data_path"],'rb') as test_data_file:
         test_data = cloudpickle.load(test_data_file)
 
     mols_list = []
-    test_set: str = inference_config.get("test_set", "corrected")
-    if test_set in ("corrected", "clean"):
+    test_set: str = inference_config.get("test_set", "distinct")
+    if test_set in ("clean"):
         for geom_smiles, data in test_data.items():
             mols_list.extend([(geom_smiles, f"[SMILES]{data['corrected_smi']}[/SMILES]")] * data["num_confs"] * 2)
     elif test_set == "distinct":
         for geom_smiles, data in test_data.items():
             for sub_smiles, count in data["sub_smiles_counts"].items():
                 mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * count * 2)
-    print(mols_list[:1000])
+    logger.info(f"mols_list length: {len(mols_list)}, mols_list_distinct: {len(set(mols_list))}, mols_list: {mols_list[:10]}")
 
     mols_list.sort(key=lambda x: len(x[0]))
     
@@ -133,17 +146,8 @@ def run_inference(inference_config: dict):
 
     for start in tqdm(range(0, len(mols_list), batch_size), desc="generating"):
         batch = mols_list[start:start + batch_size]
-        if any(len(x) > 80 for x in batch):
-            mid = len(batch) // 2
-            for sub_batch in (batch[:mid], batch[mid:]):
-                if not sub_batch:
-                    continue
-                outputs, stats_ = process_batch(model, tokenizer, sub_batch, inference_config["gen_config"], eos_token_id)
-                stats.update(stats_)
-                for k, v in outputs.items():
-                    generations_all[k].extend(v)
-        else:
-            outputs, stats_ = process_batch(model, tokenizer, batch, inference_config["gen_config"], eos_token_id)
+        for sub_batch in split_batch_on_geom_size(batch, max_geom_len=80):
+            outputs, stats_ = process_batch(model, tokenizer, sub_batch, inference_config["gen_config"], eos_token_id)
             stats.update(stats_)
             for k, v in outputs.items():
                 generations_all[k].extend(v)
@@ -153,7 +157,7 @@ def run_inference(inference_config: dict):
     return generations_all, stats
 
 
-def launch_inference_from_cli(device: str, grid_search: bool, test_set:str = None) -> None:
+def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:str = None) -> None:
     n_gpus = 1
     node = device if device in ["a100", "h100"] else "local"
     executor = None
@@ -180,30 +184,18 @@ def launch_inference_from_cli(device: str, grid_search: bool, test_set:str = Non
         "gen_config": sampling_configs["top_p_sampling1"],
         "device": "cuda",
         "results_path": get_base_path("gen_results_root"),
-        "run_name": "new_conf_test",
+        "run_name": "new_data_p1",
         "test_set": test_set,
     }
-    if grid_search:
+    if grid_run_inference:
         param_grid = {
-            # "model_path": ["nm380_1e", "m380_1e"],
-            # "model_path": ["nm380_1e", "nm380_2e", "nm380_3e", "nm380_4e", "m380_1e", "m380_2e", "m380_3e", "m380_4e",  "m380_1e_1xgrpo_1e_lr5e-5_algnTrue", "m380_1e_1xgrpo_100e_100s"],
-            # "model_path": ["nm380_500grpo_alignFalse", "nm380_1000grpo_alignFalse", "nm380_1500grpo_alignFalse", "nm380_2000grpo_alignFalse", "nm380_2230grpo_alignFalse", "m380_500grpo_alignFalse", "m380_1000grpo_alignFalse", "m380_1500grpo_alignFalse", "m380_2000grpo_alignFalse", "m380_2230grpo_alignFalse"],
-            # "model_path": ["m380_4e_1xgrpo_aF_b05_const05"],
-            # "model_path": ["qw600_1e", "qw600_2e", "qw600_3e", "qw600_4e"],
             "model_path": [("m380_conf_v2", "1e"), ("m380_conf_v2", "2e"), ("m380_conf_v2", "3e"), ("m380_conf_v2", "4e")],
-            # "model_path": ["nm380_1e", "nm380_4e", "m380_1e", "m380_1e_1xgrpo_1e_lr5e-5_algnTrue"],
-            # "model_path": ["nm380_1e", "nm380_4e", "m380_1e", "m380_4e"],
-            "test_set": ["clean"],
-            # "model_path": ["nm380_1e", "nm380_2e", "nm380_3e", "nm380_4e", "nm100_1e",
-            # "nm100_2e", "nm100_3e", "nm100_4e", "nm170_1e", "nm170_2e", "nm170_3e",
-            # "nm170_4e", "m380_1e", "m380_1e_1xgrpo_1e_lr5e-5_algnTrue", "m380_1e_1xgrpo_100e_100s"],
-            # "model_path": ["nb1_1e", "nb1_2e", "nb1_3e", "nb1_4e"],
-            "gen_config": ["top_p_sampling1"],
+            # "model_path": [("m380_conf_v2", "1e")],
         }
         jobs = []
         if executor is not None:
             with executor.batch():
-                for model_key, gen_config_key, test_set_value in itertools.product(param_grid["model_path"], param_grid["gen_config"], param_grid["test_set"]):
+                for model_key in param_grid["model_path"]:
                     grid_config = dict(inference_config)
                     if isinstance(model_key, tuple):
                         grid_config["model_path"] = get_ckpt(model_key[0], model_key[1])
@@ -211,28 +203,13 @@ def launch_inference_from_cli(device: str, grid_search: bool, test_set:str = Non
                     else:
                         grid_config["model_path"] = get_ckpt(model_key)
                         model_key_str = model_key
-                    grid_config["gen_config"] = sampling_configs[gen_config_key]
-                    grid_config["batch_size"] = 256 if "1b" in model_key_str else 256
-                    grid_config["test_set"] = test_set_value
-                    grid_config["test_data_path"] = get_data_path(f"{test_set_value}_smi")
-                    grid_config["run_name"] = f"{model_key_str}_{gen_config_key}_{test_set_value}"
+                    # grid_config["gen_config"] = sampling_configs[gen_config_key]
+                    # grid_config["batch_size"] = 256 if "1b" in model_key_str else 256
+                    # grid_config["test_set"] = test_set_value
+                    # grid_config["test_data_path"] = get_data_path(f"{test_set_value}_smi")
+                    grid_config["run_name"] = f"{model_key_str}"
                     job = executor.submit(run_inference, inference_config=grid_config)
                     jobs.append(job)
-        else:
-            for model_key, gen_config_key, test_set_value in itertools.product(param_grid["model_path"], param_grid["gen_config"], param_grid["test_set"]):
-                grid_config = dict(inference_config)
-                if isinstance(model_key, tuple):
-                    grid_config["model_path"] = get_ckpt(model_key[0], model_key[1])
-                    model_key_str = f"{model_key[0]}_{model_key[1]}"
-                else:
-                    grid_config["model_path"] = get_ckpt(model_key)
-                    model_key_str = model_key
-                grid_config["gen_config"] = sampling_configs[gen_config_key]
-                grid_config["batch_size"] = 256 if "1b" in model_key_str else 256
-                grid_config["test_set"] = test_set_value
-                grid_config["test_data_path"] = get_data_path(f"{test_set_value}_smi")
-                grid_config["run_name"] = f"{model_key_str}_{gen_config_key}_{test_set_value}"
-                run_inference(inference_config=grid_config)
     else:
         if executor is not None:
             executor.submit(run_inference, inference_config=inference_config)
@@ -243,9 +220,9 @@ if __name__ == "__main__":
     set_seed(42)
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, choices=["local", "a100", "h100"], required=True)
-    parser.add_argument("--grid_search", action="store_true")
-    parser.add_argument("--test_set", type=str, choices=["clean", "distinct", "corrected"], default="clean")
+    parser.add_argument("--grid_run_inference", action="store_true")
+    parser.add_argument("--test_set", type=str, choices=["clean", "distinct", "corrected"], default="distinct")
     args = parser.parse_args()
-    launch_inference_from_cli(device=args.device, grid_search=args.grid_search, test_set=args.test_set)
+    launch_inference_from_cli(device=args.device, grid_run_inference=args.grid_run_inference, test_set=args.test_set)
 
     
