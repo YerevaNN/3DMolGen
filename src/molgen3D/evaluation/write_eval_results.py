@@ -150,14 +150,14 @@ def read_gen_results_txt(gens_path: str) -> Optional[str]:
         return None
 
 def save_evaluation_results(cov_df: pd.DataFrame, matching: Dict[str, float], aggregated_metrics: Dict[str, np.ndarray],
-                            posebusters_full_results: Optional[pd.DataFrame], pass_rate: Optional[float], fail_smiles: Optional[List[str]], error_smiles: Optional[List[str]],
+                            posebusters_full_results: Optional[pd.DataFrame], posebusters_summary: Optional[pd.DataFrame], pass_rate: Optional[float], fail_smiles: Optional[List[str]], error_smiles: Optional[List[str]],
                             durations: Dict[str, float], rmsd_results: Dict[str, Dict[str, object]], missing: List[str], 
                             all_nan_keys: List[str], results_path: str, gen_stats: Dict[str, int], gt_stats: Dict[str, int],
                             args) -> None:
 
     os.makedirs(results_path, exist_ok=True)
     covmat_txt_path = os.path.join(results_path, "covmat_results.txt")
-    save_covmat_results_txt(cov_df, matching, posebusters_summary, durations, missing, all_nan_keys, results_path, gen_stats, gt_stats)
+    save_covmat_results_txt(cov_df, matching, posebusters_summary, posebusters_full_results, durations, missing, all_nan_keys, results_path, gen_stats, gt_stats)
      
      # Save aggregated metrics (Coverage/Precision/Matching statistics) as pickle file
     rmsd_pickle_path = os.path.join(results_path, "rmsd_matrix.pickle")

@@ -138,11 +138,11 @@ def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers:
     try:
     
         # df, summary, fail_smiles, error_smiles = run_all_posebusters(data=gen_data, config=config, full_report=False, max_workers=max_workers) # old function call
-        df, pass_rate, fail_smiles, error_smiles, fail_smiles = bust_full_gens(data=gen_data, config=config, full_report=False, max_workers=max_workers)
+        df, df_summary, pass_rate, fail_smiles, error_smiles = bust_full_gens(data=gen_data, config=config, full_report=False, max_workers=max_workers)
         print(f"PoseBusters completed successfully")
         if error_smiles:
             print(f"Warning: {len(error_smiles)} molecules had errors")
-        return df, pass_rate, fail_smiles, error_smiles
+        return df, df_summary, pass_rate, fail_smiles, error_smiles
     except Exception as e:
         print(f"PoseBusters failed with error: {e}")
         import traceback
@@ -200,12 +200,12 @@ def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
     cov_df, matching = summarize_metrics(agg)
     
     posebusters_duration = 0.0
-    #posebusters_summary = None # old function call
+    posebusters_summary = None 
     posebusters_full_results = None
     if args.posebusters != "None":
         pb_start = time.time()
-        posebusters_full_results, pass_rate, fail_smiles, error_smiles = run_posebusters_wrapper(processed_gen_data, args.posebusters, args.num_workers)
-        # print(f"Pass percentage: {posebusters_summary['pass_percentage'].iloc[0]:.2f}%\n") # old function call
+        posebusters_full_results, posebusters_summary, pass_rate, fail_smiles, error_smiles = run_posebusters_wrapper(processed_gen_data, args.posebusters, args.num_workers)
+        print(f"Pass percentage: {posebusters_summary['pass_percentage'].iloc[0]:.2f}%\n") 
         print(f"Pass percentage: {pass_rate:.2f}%\n")
         posebusters_duration = time.time() - pb_start
         
@@ -220,6 +220,7 @@ def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
         matching=matching,
         aggregated_metrics=agg,
         posebusters_full_results=posebusters_full_results,
+        posebusters_summary=posebusters_summary,
         pass_rate=pass_rate,
         fail_smiles=fail_smiles,
         error_smiles=error_smiles,

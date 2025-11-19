@@ -1,16 +1,21 @@
+import json
+import logging
+import math
+import multiprocessing
 import os
 import pickle
-import multiprocessing
-import math
-from typing import Dict, Iterable, List, Literal, Optional, Sequence, Tuple, TYPE_CHECKING
-
-import numpy as np
-from posebusters import PoseBusters
-import pandas as pd
 import random
 from concurrent.futures import ProcessPoolExecutor
-import itertools
+from typing import TYPE_CHECKING, Dict, Iterable, List, Literal, Optional, Sequence, Tuple
+
+import numpy as np
+import pandas as pd
 from tqdm import tqdm
+
+try:
+    from posebusters import PoseBusters
+except ImportError:  # pragma: no cover - optional dependency
+    PoseBusters = None  # type: ignore[assignment]
 
 try:
     import submitit  # type: ignore[import]
@@ -22,10 +27,15 @@ if TYPE_CHECKING:
 
 _POSEBUSTERS_CACHE = None
 _SHARED_CONFORMERS: List["Mol"] = []
+logger = logging.getLogger(__name__)
 
 def _init_posebusters(config):
     # Each process initializes its own PoseBusters instance once (expensive import/setup)
     global _POSEBUSTERS_CACHE
+    if PoseBusters is None:
+        raise ImportError(
+            "PoseBusters is not installed. Please install the 'posebusters' package to run these checks."
+        )
     if _POSEBUSTERS_CACHE is None:
         _POSEBUSTERS_CACHE = PoseBusters(config=config)
     return _POSEBUSTERS_CACHE
@@ -127,10 +137,11 @@ def _build_chunks_optimized(items_len: int, max_workers: int) -> List[Tuple[int,
     
 
 def _posebusters_chunk_worker(chunk: Sequence[Tuple[int, "Mol"]], config: str, full_report: bool) -> pd.DataFrame:
+    """Worker that processes a chunk of conformers."""
     if not chunk:
         return pd.DataFrame()
     indices, molecules = zip(*chunk)
-    runner = _init_posebusters(config)
+    runner = _init_posebusters(config) 
     df = runner.bust(list(molecules), None, None, full_report=full_report)
     if not isinstance(df, pd.DataFrame):
         raise TypeError("PoseBusters returned unexpected data type.")
@@ -147,7 +158,9 @@ def _posebusters_chunk_worker_by_range(index_range: Tuple[int, int], config: str
     if not _SHARED_CONFORMERS:
         raise RuntimeError("Shared conformer buffer is not initialized in worker process.")
     subset = _SHARED_CONFORMERS[start:end] # subset is a list of conformers from the shared memory (RDKit Mols)
-    indices = list(range(start, end))
+    indices = list(range(start, end)) # indices is a list of indices of the conformers to process
+    # initialize the PoseBusters instance (each process initializes its own PoseBusters instance once (expensive import/setup)
+    # (maybe it can be optimized to be a global instance that is shared?)) (i think this is the case, but i need to check)
     runner = _init_posebusters(config)
     df = runner.bust(list(subset), None, None, full_report=full_report)
     if not isinstance(df, pd.DataFrame):
@@ -155,6 +168,100 @@ def _posebusters_chunk_worker_by_range(index_range: Tuple[int, int], config: str
     df = df.reset_index(drop=True)
     df.insert(0, "conformer_index", indices)
     return df
+
+
+def _can_use_fork_sharing() -> bool:
+    """Return True when we can rely on ``fork`` semantics for shared memory."""
+    try:
+        method = multiprocessing.get_start_method(allow_none=True)  # type: ignore[arg-type]
+    except TypeError:
+        method = multiprocessing.get_start_method()
+    except RuntimeError:
+        method = None
+    if method is None:
+        try:
+            method = multiprocessing.get_context().get_start_method()
+        except RuntimeError:
+            method = None
+    return method == "fork"
+
+
+def _collect_posebusters_report(
+    rd_confs: Sequence["Mol"],
+    num_workers: int,
+    full_report: bool,
+    config: str,
+) -> pd.DataFrame:
+    """Run PoseBusters and return the concatenated per-conformer report."""
+    conformers: List["Mol"] = list(rd_confs)
+    if not conformers:
+        return pd.DataFrame()
+
+    if any(mol is None for mol in conformers):
+        raise ValueError("Encountered None entry in conformer list.")
+
+    indexed_confs: List[Tuple[int, "Mol"]] = list(enumerate(conformers))
+    max_workers = max(1, min(num_workers, len(indexed_confs)))
+
+    frames: List[pd.DataFrame] = []
+    # fork sharing is a way to share memory between processes, it is a way to avoid the overhead of creating a new process for each conformer
+    use_fork_sharing = _can_use_fork_sharing()
+
+    tasks: List[object]
+    worker_fn: object
+    # shared conformers is a list of conformers that are shared between processes, it is a way to avoid the overhead of creating a new process for each conformer
+    global _SHARED_CONFORMERS 
+
+    # here we are deciding which worker function to use based on the use_fork_sharing flag
+    if use_fork_sharing:
+        _SHARED_CONFORMERS = conformers
+        # task ranges are a list of tuples, each tuple contains the start and end index of a chunk of conformers to process
+        task_ranges = _build_chunks_optimized(len(conformers), max_workers)
+        if not task_ranges:
+            return pd.DataFrame()
+        tasks = task_ranges
+        worker_fn = _posebusters_chunk_worker_by_range
+    else:
+        chunks = _build_chunks(indexed_confs, max_workers)
+        if not chunks:
+            return pd.DataFrame()
+        tasks = chunks
+        worker_fn = _posebusters_chunk_worker
+
+    try:
+        if max_workers == 1:
+            frame = worker_fn(tasks[0], config, full_report)  # type: ignore[index]
+            if isinstance(frame, pd.DataFrame) and not frame.empty:
+                frames.append(frame)
+        else:
+            # here we are using the ProcessPoolExecutor to run the worker function for each chunk of conformers
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                # here we are submitting the worker function for each chunk of conformers to the ProcessPoolExecutor
+                futures = [
+                    executor.submit(worker_fn, task, config, full_report)  # type: ignore[arg-type]
+                    for task in tasks
+                    if (isinstance(task, tuple) and task[1] > task[0]) or (not isinstance(task, tuple) and task)
+                ]
+                for future in futures:
+                    result = future.result()
+                    # here we are appending the result of the worker function to the frames list
+                    if isinstance(result, pd.DataFrame) and not result.empty:
+                        frames.append(result)
+    finally:
+        if use_fork_sharing:
+            # here we are clearing the shared conformers list
+            _SHARED_CONFORMERS = []
+
+    if not frames:
+        return pd.DataFrame()
+
+    # here we are concatenating the frames list into a single dataframe
+    combined = pd.concat(frames, ignore_index=True)
+    if combined.empty:
+        return pd.DataFrame()
+    combined.sort_values("conformer_index", inplace=True)
+    combined.reset_index(drop=True, inplace=True)
+    return combined
 
 
 def bust_cpu(
@@ -182,87 +289,16 @@ def bust_cpu(
     if aggregation_type not in {"avg", "bool"}:
         raise ValueError(f"Unsupported aggregation_type: {aggregation_type}")
 
-    conformers: List["Mol"] = list(rd_confs)
-    if not conformers:
+    report_df = _collect_posebusters_report(
+        rd_confs,
+        num_workers=num_workers,
+        full_report=full_report,
+        config=config,
+    )
+    if report_df.empty:
         return [], float("nan")
 
-    if any(mol is None for mol in conformers):
-        raise ValueError("Encountered None entry in conformer list.")
-
-    indexed_confs: List[Tuple[int, "Mol"]] = list(enumerate(conformers))
-    max_workers = max(1, min(num_workers, len(indexed_confs)))
-
-    frames: List[pd.DataFrame] = [] # list of dataframes, one for each worker (reduce/aggregate them later )
-
-    def _can_use_fork_sharing() -> bool:
-        """
-        Defensive code to check if we can use fork sharing.
-        If we are not running on linux or the start method is not "fork", we cannot use fork sharing.
-        """
-        try:
-            method = multiprocessing.get_start_method(allow_none=True)  # type: ignore[arg-type]
-        except TypeError:
-            method = multiprocessing.get_start_method()
-        except RuntimeError:
-            method = None
-        if method is None:
-            try:
-                method = multiprocessing.get_context().get_start_method()
-            except RuntimeError:
-                method = None
-        return method == "fork"
-
-    use_fork_sharing = _can_use_fork_sharing()
-
-    tasks: List[object]
-    worker_fn: object
-    global _SHARED_CONFORMERS
-
-    if use_fork_sharing: # if we can use fork sharing, we can use the shared memory to pass the conformers to the workers
-        _SHARED_CONFORMERS = conformers
-        task_ranges = _build_chunks_optimized(len(conformers), max_workers)
-        if not task_ranges:
-            return [], float("nan")
-        tasks = task_ranges
-        worker_fn = _posebusters_chunk_worker_by_range
-    else: # if we cannot use fork sharing, we need to build chunks of conformers to pass to the workers
-        chunks = _build_chunks(indexed_confs, max_workers)
-        if not chunks:
-            return [], float("nan")
-        tasks = chunks
-        worker_fn = _posebusters_chunk_worker
-
-    try:
-        if max_workers == 1:
-            frame = worker_fn(tasks[0], config, full_report)  # type: ignore[index]
-            if isinstance(frame, pd.DataFrame) and not frame.empty:
-                frames.append(frame)
-        else:
-            with ProcessPoolExecutor(max_workers=max_workers) as executor:
-                # submit the tasks to the executor, and wait for the results
-                futures = [
-                    executor.submit(worker_fn, task, config, full_report)  # type: ignore[arg-type]
-                    for task in tasks
-                    if (isinstance(task, tuple) and task[1] > task[0]) or (not isinstance(task, tuple) and task)
-                ]
-                for future in futures:
-                    result = future.result()
-                    if isinstance(result, pd.DataFrame) and not result.empty:
-                        frames.append(result)
-    finally:
-        if use_fork_sharing:
-            _SHARED_CONFORMERS = []
-
-    if not frames:
-        return [], float("nan")
-
-    combined = pd.concat(frames, ignore_index=True)
-    if combined.empty:
-        return [], float("nan")
-    combined.sort_values("conformer_index", inplace=True)
-    combined.reset_index(drop=True, inplace=True)
-
-    pass_fraction = _compute_pass_fraction(combined)
+    pass_fraction = _compute_pass_fraction(report_df)
     if aggregation_type == "avg": # if we are aggregating by average, we can just convert the pass fraction to a list of floats
         pass_rates = [float(value) for value in pass_fraction.tolist()]
     else: # if we are aggregating by boolean, we need to convert the pass fraction to a list of 1s and 0s
@@ -278,71 +314,178 @@ def bust_full_gens(
     num_workers: int = 8,
     config: str = "mol",
     full_report: bool = False,
-) -> Tuple[pd.DataFrame, float]:
+    fail_threshold: float = 0.0,
+) -> Tuple[pd.DataFrame, pd.DataFrame, float, List[str], List[str]]:
     """Evaluate PoseBusters pass rates for an entire generation dictionary.
 
     Args:
-        smiles_to_confs: Mapping from canonical SMILES strings to sequences of RDKit conformers.
-            Each conformer should be an RDKit ``Mol`` containing a single 3D conformer.
-        num_workers: Number of worker processes to use. For ideal performance, align with
-            the number of available CPU cores minus other workloads.
+        smiles_to_confs: Mapping from SMILES strings to lists of RDKit conformers.
+        num_workers: Number of worker processes devoted to PoseBusters.
         config: PoseBusters configuration key (``"mol"`` or ``"redock"``).
-        full_report: Whether to request the full PoseBusters report (slower, more columns).
+        full_report: Whether to request the extended PoseBusters report.
+        fail_threshold: Allowed failure rate per SMILES (computed using boolean aggregation).
 
     Returns:
-        A tuple ``(summary_df, overall_pass_rate)`` where ``summary_df`` contains one row per
-        SMILES with aggregated pass statistics (boolean style, i.e. a conformer counts as 1
-        only if all PoseBusters checks pass) and ``overall_pass_rate`` is the arithmetic mean
-        over all conformers in the input.
+        Tuple ``(per_smiles_df, summary_df, overall_pass_rate, fail_smiles, error_smiles)``.
+
+        * ``per_smiles_df`` matches the schema in ``tests/evaluation/sample_by_smiles_df.csv``:
+          PoseBusters boolean checks per SMILES, ``pass_percentage`` (0–100), ``smiles``,
+          ``num_of_conformers``, and ``error``.
+        * ``summary_df`` mirrors ``tests/evaluation/sample_summary_df.csv``: a single ``"ALL"``
+          row containing dataset-wide counts, PoseBusters check means, and the overall pass rate.
+        * ``overall_pass_rate`` is the conformer-level arithmetic mean of ``pass_bool``
+          (guards against averaging per-SMILES percentages, e.g., 0.33 vs. 0.375).
+        * ``fail_smiles`` lists SMILES whose boolean pass percentage is below ``1 - fail_threshold``.
+        * ``error_smiles`` enumerates SMILES skipped because PoseBusters reported runtime errors.
     """
     if not isinstance(smiles_to_confs, dict):
         raise TypeError(f"Expected dict for smiles_to_confs, got {type(smiles_to_confs)}")
 
     flattened: List["Mol"] = []
-    conformer_smiles: List[str] = []
+    # Book-keeping strategy for per-conformer → SMILES provenance:
+    #   unique_smiles               : ["CCO", "c1ccccc1", "CN", ...]  (each string stored once)
+    #   smiles_to_idx               : {"CCO": 0, "c1ccccc1": 1, ...}  (string → integer ID)
+    #   flattened_idx_to_smiles_idx : [0, 0, 1, 2, 2, ...]            (parallel to `flattened`)
+    #
+    # Example with {"CCO": [mol0, mol1], "c1cc": [mol2], "CN": [mol3, mol4]}:
+    #   flattened                  = [mol0, mol1, mol2, mol3, mol4]
+    #   flattened_idx_to_smiles_idx= [0, 0, 1, 2, 2]
+    #   unique_smiles[flattened_idx_to_smiles_idx[3]] == "CN"
+    #
+    # This mimics the conceptual list [(smiles_id, conformer), ...] while keeping memory
+    # usage low by storing small ints instead of repeating long SMILES strings.
+    flattened_idx_to_smiles_idx: List[int] = []
+    unique_smiles: List[str] = []
+    smiles_to_idx: Dict[str, int] = {}
+    # Track any input sanitization we perform (missing conformers, None entries, etc.) so
+    # reporting layers can surface those details alongside PoseBusters errors.
+    input_validation_notes: Dict[str, List[str]] = {}
+
+    # Step 1 — defensive preprocessing: filter invalid conformers but record what was removed.
     for smiles, confs in smiles_to_confs.items():
-        if not confs:
+        if not confs: # Case 1: if there are no conformers for a given SMILES, add it to the input_validation_notes set
+            input_validation_notes.setdefault(smiles, []).append("no_conformers")
             continue
+
+        dropped_none = 0
+        valid_confs: List["Mol"] = []
+
         for mol in confs:
-            if mol is None:
-                raise ValueError(f"Encountered None conformer for SMILES {smiles}")
-            flattened.append(mol)
-            conformer_smiles.append(smiles)
+            if mol is None: # Case 2: if there is a None conformer, add the SMILES to the error_smiles set
+                dropped_none += 1
+                continue
+            else:
+                valid_confs.append(mol)
+        
+        # if there are no valid conformers for a given SMILES, skip the rest of the loop and continue to the next SMILES
+        if not valid_confs:
+            continue
 
+        if dropped_none == len(confs): # Case 3: if there are no valid conformers for a given SMILES, add it to the error_smiles set
+            input_validation_notes.setdefault(smiles, []).append(f"{dropped_none}_none_entries")
+            continue  # skip the rest of the loop and continue to the next SMILES
+
+        elif dropped_none > 0: # Case 4: if there are some None conformers for a given SMILES, add it to the input_validation_notes set
+            input_validation_notes.setdefault(smiles, []).append(f"{dropped_none}_none_entries")
+
+        # Step 2 — assign a stable integer ID for this SMILES once, reusing it for all conformers.
+        smiles_idx = smiles_to_idx.setdefault(smiles, len(unique_smiles))
+        if smiles_idx == len(unique_smiles): 
+            unique_smiles.append(smiles)
+
+        # Step 3 — append valid conformers and remember which SMILES each belongs to.
+        flattened.extend(valid_confs)
+        flattened_idx_to_smiles_idx.extend([smiles_idx] * len(valid_confs))
+
+    if input_validation_notes:
+        logger.info(
+            "PoseBusters input validation filtered %d SMILES: %s",
+            len(input_validation_notes),
+            json.dumps(input_validation_notes, sort_keys=True),
+        )
+
+    per_smiles_template = ["smiles", "num_of_conformers", "pass_percentage", "error"]
+    summary_template = ["smiles", "num_smiles", "num_conformers", "pass_percentage"]
     if not flattened:
-        empty_summary = pd.DataFrame(columns=["smiles", "num_conformers", "num_passed", "pass_percentage"])
-        return empty_summary, float("nan")
+        empty_per_smiles = pd.DataFrame(columns=per_smiles_template)
+        empty_summary = pd.DataFrame(columns=summary_template)
+        empty_summary.attrs["per_smiles_df"] = empty_per_smiles
+        empty_summary.attrs["input_validation_notes"] = input_validation_notes
+        return empty_per_smiles, empty_summary, float("nan"), [], []
 
-    pass_rates, overall_pass_rate = bust_cpu(
+    # Step 4 — run PoseBusters on the flattened conformer list (parallelized upstream).
+    per_conformer_df = _collect_posebusters_report(
         flattened,
         num_workers=num_workers,
-        aggregation_type="bool",
         full_report=full_report,
         config=config,
     )
+    if per_conformer_df.empty:
+        empty_per_smiles = pd.DataFrame(columns=per_smiles_template)
+        empty_summary = pd.DataFrame(columns=summary_template)
+        empty_summary.attrs["per_smiles_df"] = empty_per_smiles
+        empty_summary.attrs["input_validation_notes"] = input_validation_notes
+        return empty_per_smiles, empty_summary, float("nan"), [], []
 
-    per_smiles: Dict[str, Dict[str, float]] = {}
-    for smiles, passed in zip(conformer_smiles, pass_rates):
-        entry = per_smiles.setdefault(smiles, {"num_conformers": 0, "num_passed": 0.0})
-        entry["num_conformers"] += 1
-        entry["num_passed"] += float(passed)
+    # Step 5 — recover SMILES provenance and per-conformer pass metrics.
+    pass_fraction = _compute_pass_fraction(per_conformer_df)
+    per_conformer_df["pass_fraction"] = pass_fraction
+    per_conformer_df["pass_bool"] = (np.isclose(pass_fraction, 1.0)).astype(float)
+    per_conformer_df["smiles"] = per_conformer_df["conformer_index"].map(
+        lambda idx: unique_smiles[flattened_idx_to_smiles_idx[int(idx)]]
+    )
 
-    records = []
-    for smiles, stats in per_smiles.items():
-        num_conf = int(stats["num_conformers"])
-        num_passed = float(stats["num_passed"])
-        pass_percentage = num_passed / num_conf if num_conf else float("nan")
-        records.append(
-            {
-                "smiles": smiles,
-                "num_conformers": num_conf,
-                "num_passed": num_passed,
-                "pass_percentage": pass_percentage,
-            }
-        )
+    # Step 6 — aggregate per-SMILES statistics (matches tests/evaluation/sample_by_smiles_df.csv).
+    bool_columns = per_conformer_df.select_dtypes(include=["bool"]).columns.tolist()
+    per_smiles_records: List[Dict[str, float]] = []
+    grouped = per_conformer_df.groupby("smiles", sort=True)
+    for smiles, frame in grouped:
+        bool_vals = frame["pass_bool"]
+        record: Dict[str, float] = {}
+        for col in bool_columns:
+            record[col] = float(frame[col].mean())
+        record["pass_percentage"] = float(bool_vals.mean() * 100.0)
+        record["smiles"] = smiles
+        record["num_of_conformers"] = int(frame.shape[0])
+        record["error"] = ""
+        if "error" in frame.columns:
+            error_msgs = sorted({msg for msg in frame["error"].astype(str).tolist() if msg})
+            record["error"] = ";".join(error_msgs)
+        per_smiles_records.append(record)
 
-    summary_df = pd.DataFrame(records).sort_values("smiles").reset_index(drop=True)
-    return summary_df, overall_pass_rate
+    per_smiles_columns = [*bool_columns, "pass_percentage", "smiles", "num_of_conformers", "error"]
+    per_smiles_df = (
+        pd.DataFrame(per_smiles_records)
+        .reindex(columns=per_smiles_columns)
+        .sort_values("smiles")
+        .reset_index(drop=True)
+    )
+    overall_pass_rate = float(per_conformer_df["pass_bool"].mean())
+
+    # Step 7 — create the single-row summary (matches tests/evaluation/sample_summary_df.csv).
+    summary_record: Dict[str, float] = {
+        "smiles": "ALL",
+        "num_smiles": float(per_smiles_df.shape[0]),
+        "num_conformers": float(per_conformer_df.shape[0]),
+    }
+    for col in bool_columns:
+        summary_record[col] = float(per_conformer_df[col].mean())
+    summary_record["pass_percentage"] = float(overall_pass_rate * 100.0)
+    summary_columns = ["smiles", "num_smiles", "num_conformers", *bool_columns, "pass_percentage"]
+    summary_df = pd.DataFrame([summary_record], columns=summary_columns)
+    summary_df.attrs["per_smiles_df"] = per_smiles_df
+    summary_df.attrs["input_validation_notes"] = input_validation_notes
+
+    # Step 8 — identify SMILES whose boolean pass percentage drops below the fail threshold.
+    fail_cutoff = max(0.0, min(1.0, 1.0 - float(fail_threshold))) * 100.0
+    fail_smiles = per_smiles_df.loc[per_smiles_df["pass_percentage"] < fail_cutoff, "smiles"].tolist()
+
+    error_smiles: List[str] = []
+    if "error" in per_conformer_df.columns:
+        error_series = per_conformer_df["error"].fillna("")
+        error_smiles = sorted(per_conformer_df.loc[error_series != "", "smiles"].unique().tolist())
+
+    return per_smiles_df, summary_df, overall_pass_rate, fail_smiles, error_smiles
 
 def run_all_posebusters(data, config="mol", full_report=False,
                         max_workers=16, fail_threshold=0.0, chunk_size=200):
