@@ -98,11 +98,24 @@ def get_data_path(key: str) -> Path:
     return _abs(base) / rel
 
 
-def get_pretrain_dump_path(folder: str | Path) -> Path:
-    """Return the path under `pretrain_results_root` for the provided dump folder."""
+def get_root_path(base_key: str, folder: str | Path) -> Path:
+    """Return the path under the provided base key for the given folder."""
     folder_path = Path(folder)
     if folder_path.is_absolute():
         return folder_path
 
-    base = get_base_path("pretrain_results_root")
+    base = get_base_path(base_key)
     return base / folder_path
+
+
+def get_pretrain_dump_path(folder: str | Path, *, base_key: str = "pretrain_results_root") -> Path:
+    """Return the path under `base_key` for the provided dump folder."""
+    return get_root_path(base_key, folder)
+
+
+def get_pretrain_logs_path(folder: str | Path) -> Path:
+    return get_root_path("pretrain_logs_root", folder)
+
+
+def get_wandb_path(folder: str | Path) -> Path:
+    return get_root_path("wandb_root", folder)

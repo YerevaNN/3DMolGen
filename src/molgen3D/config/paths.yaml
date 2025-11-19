@@ -2,14 +2,15 @@ base_paths:
   project_root: "."
   data_root: "data"
   geom_data_root: "/nfs/ap/mnt/sxtn2/chem/GEOM_data"
-  ckpts_root: "/nfs/h100/raid/chem/checkpoints"
+  ckpts_root: "/nfs/h100/raid/chem/checkpoints/yerevann"
   hf_yerevann_root: "/nfs/h100/raid/chem/checkpoints/hf/yerevann"
   qwen_yerevann_root: "/nfs/h100/raid/chem/checkpoints/yerevann"
   grpo_root: "/nfs/h100/raid/chem/checkpoints/conf_grpo"
   grpo_outputs_root: "outputs/grpo_outputs"
   gen_results_root: "outputs/gen_results"
   eval_results_root: "outputs/eval_results"
-  pretrain_results_root: "outputs/pretrain_results"
+  pretrain_logs_root: "outputs/pretrain_logs"
+  wandb_root: "wandb"
 
 data:
   clean_smi: "clean_smi.pickle"
