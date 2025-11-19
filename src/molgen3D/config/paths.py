@@ -96,3 +96,13 @@ def get_data_path(key: str) -> Path:
         base = base_paths.get("data_root", ".")
 
     return _abs(base) / rel
+
+
+def get_pretrain_dump_path(folder: str | Path) -> Path:
+    """Return the path under `pretrain_results_root` for the provided dump folder."""
+    folder_path = Path(folder)
+    if folder_path.is_absolute():
+        return folder_path
+
+    base = get_base_path("pretrain_results_root")
+    return base / folder_path
