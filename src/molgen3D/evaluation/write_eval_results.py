@@ -93,11 +93,29 @@ def write_generation_info(f, gen_stats: Dict[str, int]) -> None:
         f.write(gen_txt_content)
         f.write("\n\n")
 
-def write_posebusters_section(f, posebusters_summary: Optional[pd.DataFrame]) -> None:
+def write_posebusters_section(
+    f,
+    posebusters_summary: Optional[pd.DataFrame],
+    pass_rate: Optional[float],
+    fail_smiles: Optional[List[str]],
+    error_smiles: Optional[List[str]]
+) -> None:
     """Write PoseBusters evaluation section."""
+    # Only write section if we have any PoseBusters data
+    has_data = (
+        posebusters_summary is not None or
+        pass_rate is not None or
+        (fail_smiles is not None and len(fail_smiles) > 0) or
+        (error_smiles is not None and len(error_smiles) > 0)
+    )
+
+    if not has_data:
+        return
+
+    write_section_header(f, "POSEBUSTERS EVALUATION")
+
+    # Write summary metrics from DataFrame
     if posebusters_summary is not None:
-        f.write("POSEBUSTERS EVALUATION\n")
-        f.write("-" * 40 + "\n")
         try:
             row = posebusters_summary.iloc[0]
             for col in posebusters_summary.columns:
@@ -108,7 +126,42 @@ def write_posebusters_section(f, posebusters_summary: Optional[pd.DataFrame]) ->
                     f.write(f"{col}: {val}\n")
         except Exception:
             f.write("Summary unavailable.\n")
-        f.write("\n")
+
+    # Write pass rate
+    if pass_rate is not None:
+        pass_pct = pass_rate * 100.0
+        f.write(
+            f"Pass rate: {format_float(pass_rate, 4)} "
+            f"({format_float(pass_pct, 2)}%)\n"
+        )
+
+    f.write("\n")
+
+    # Write fail_smiles section
+    if fail_smiles is not None:
+        if len(fail_smiles) > 0:
+            f.write("Failed SMILES (below threshold):\n")
+            for i, smiles in enumerate(fail_smiles, 1):
+                f.write(f"{i:3d}. {smiles}\n")
+            f.write("\n")
+        else:
+            f.write(
+                "Failed SMILES: None - all molecules passed "
+                "threshold\n\n"
+            )
+
+    # Write error_smiles section
+    if error_smiles is not None:
+        if len(error_smiles) > 0:
+            f.write("Error SMILES (processing errors):\n")
+            for i, smiles in enumerate(error_smiles, 1):
+                f.write(f"{i:3d}. {smiles}\n")
+            f.write("\n")
+        else:
+            f.write(
+                "Error SMILES: None - no processing errors\n\n"
+            )
+
 
 def write_detailed_logging(f, durations: Dict[str, float], missing: List[str], all_nan_keys: List[str], gen_stats: Dict[str, int]) -> None:
     """Write detailed logging info section."""
@@ -156,8 +209,7 @@ def save_evaluation_results(cov_df: pd.DataFrame, matching: Dict[str, float], ag
                             args) -> None:
 
     os.makedirs(results_path, exist_ok=True)
-    covmat_txt_path = os.path.join(results_path, "covmat_results.txt")
-    save_covmat_results_txt(cov_df, matching, posebusters_summary, posebusters_full_results, durations, missing, all_nan_keys, results_path, gen_stats, gt_stats)
+    save_covmat_results_txt(cov_df, matching, posebusters_summary, posebusters_full_results, pass_rate, fail_smiles, error_smiles, durations, missing, all_nan_keys, results_path, gen_stats, gt_stats)
      
      # Save aggregated metrics (Coverage/Precision/Matching statistics) as pickle file
     rmsd_pickle_path = os.path.join(results_path, "rmsd_matrix.pickle")
@@ -237,5 +289,5 @@ def save_covmat_results_txt(cov_df: pd.DataFrame, matching: Dict[str, float], po
         write_missing_molecules_section(f, missing)
         write_all_nan_section(f, all_nan_keys)
         write_generation_info(f, gen_stats)
-        write_posebusters_section(f, posebusters_summary)
+        write_posebusters_section(f, posebusters_summary, pass_rate, fail_smiles, error_smiles)
         write_detailed_logging(f, durations, missing, all_nan_keys, gen_stats)

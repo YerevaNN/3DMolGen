@@ -14,7 +14,6 @@ from tqdm import tqdm
 
 from molgen3D.evaluation.posebusters_check import bust_full_gens
 
-run_all_posebusters = None  # Global flag for posebusters availability
 from molgen3D.evaluation import rdkit_utils  # Import locally to avoid pickling issues
 from molgen3D.config.paths import get_data_path, get_base_path
 from molgen3D.evaluation.utils import create_slurm_executor, find_generation_pickles_path, format_float, covmat_metrics, DEFAULT_THRESHOLDS
@@ -105,14 +104,16 @@ def summarize_metrics(agg: Dict[str, np.ndarray]) -> Tuple[pd.DataFrame, Dict[st
     }
     return df, stats
 
-def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers: int) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
-    if run_all_posebusters is None:
-        print("PoseBusters not available (import failed)")
-        return None, None
+def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers: int) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[float], Optional[List[str]], Optional[List[str]]]:
+    """Wrapper for PoseBusters evaluation that returns 5 values consistently.
+    
+    Returns:
+        Tuple of (full_results_df, summary_df, pass_rate, fail_smiles, error_smiles)
+    """
     
     if not gen_data:
         print("PoseBusters: No data to process")
-        return None, None
+        return None, None, None, None, None
     
     num_molecules = len(gen_data)
     num_conformers = sum(len(mols) for mols in gen_data.values())
@@ -133,21 +134,20 @@ def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers:
     
     if num_conformers == 0:
         print("No conformers to evaluate, skipping PoseBusters")
-        return None, None
+        return None, None, None, None, None
     
     try:
-    
         # df, summary, fail_smiles, error_smiles = run_all_posebusters(data=gen_data, config=config, full_report=False, max_workers=max_workers) # old function call
-        df, df_summary, pass_rate, fail_smiles, error_smiles = bust_full_gens(data=gen_data, config=config, full_report=False, max_workers=max_workers)
-        print(f"PoseBusters completed successfully")
+        df_by_smiles, df_summary, pass_rate, fail_smiles, error_smiles = bust_full_gens(smiles_to_confs=gen_data, config=config, full_report=False, num_workers=max_workers)
+        print("PoseBusters completed successfully")
         if error_smiles:
             print(f"Warning: {len(error_smiles)} molecules had errors")
-        return df, df_summary, pass_rate, fail_smiles, error_smiles
+        return df_by_smiles, df_summary, pass_rate, fail_smiles, error_smiles
     except Exception as e:
         print(f"PoseBusters failed with error: {e}")
         import traceback
         traceback.print_exc()
-        return None, None
+        return None, None, None, None, None
 
 def get_missing_evaluation_dirs(gen_base: str, eval_base: str, max_recent: Optional[int]) -> List[str]:
     gen_path = Path(gen_base)
@@ -202,11 +202,14 @@ def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
     posebusters_duration = 0.0
     posebusters_summary = None 
     posebusters_full_results = None
+    pass_rate = None
+    fail_smiles = None
+    error_smiles = None
     if args.posebusters != "None":
         pb_start = time.time()
         posebusters_full_results, posebusters_summary, pass_rate, fail_smiles, error_smiles = run_posebusters_wrapper(processed_gen_data, args.posebusters, args.num_workers)
-        print(f"Pass percentage: {posebusters_summary['pass_percentage'].iloc[0]:.2f}%\n") 
-        print(f"Pass percentage: {pass_rate:.2f}%\n")
+        if pass_rate is not None:
+            print(f"Overall Pass percentage: {pass_rate:.2f}%\n")
         posebusters_duration = time.time() - pb_start
         
     durations = {
