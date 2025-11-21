@@ -5,7 +5,7 @@ import multiprocessing
 import os
 import pickle
 import random
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import TYPE_CHECKING, Dict, Iterable, List, Literal, Optional, Sequence, Tuple
 
 import numpy as np
@@ -204,6 +204,7 @@ def _collect_posebusters_report(
     full_report: bool,
     config: str,
     task_chunk_size: Optional[int] = None,
+    log_progress: bool = False,
 ) -> pd.DataFrame:
     """Run PoseBusters and return the concatenated per-conformer report."""
     conformers: List["Mol"] = list(rd_confs)
@@ -255,11 +256,24 @@ def _collect_posebusters_report(
                     for task in tasks
                     if (isinstance(task, tuple) and task[1] > task[0]) or (not isinstance(task, tuple) and task)
                 ]
-                for future in futures:
+                total_tasks = len(futures)
+                completed = 0
+                completed = 0
+                total_tasks = len(futures)
+                for future in as_completed(futures):
                     result = future.result()
                     # here we are appending the result of the worker function to the frames list
                     if isinstance(result, pd.DataFrame) and not result.empty:
                         frames.append(result)
+                    if log_progress and total_tasks:
+                        completed += 1
+                        percent = (completed / total_tasks) * 100.0
+                        logger.info(
+                            "PoseBusters tasks: %d/%d completed (%.1f%%)",
+                            completed,
+                            total_tasks,
+                            percent,
+                        )
     finally:
         if use_fork_sharing:
             # here we are clearing the shared conformers list
@@ -285,6 +299,7 @@ def bust_cpu(
     full_report: bool = False,
     config: str = "mol",
     task_chunk_size: Optional[int] = None,
+    log_progress: bool = False,
 ) -> Tuple[List[float], float]:
     """Run PoseBusters on a list of conformers and aggregate pass rates.
 
@@ -309,6 +324,7 @@ def bust_cpu(
         full_report=full_report,
         config=config,
         task_chunk_size=task_chunk_size,
+        log_progress=log_progress,
     )
     if report_df.empty:
         return [], float("nan")
@@ -331,6 +347,7 @@ def bust_full_gens(
     full_report: bool = False,
     fail_threshold: float = 0.0,
     task_chunk_size: Optional[int] = None,
+    log_progress: bool = False,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, float]:
     """Evaluate PoseBusters pass rates for an entire generation dictionary.
 
@@ -441,6 +458,7 @@ def bust_full_gens(
         full_report=full_report,
         config=config,
         task_chunk_size=task_chunk_size,
+        log_progress=log_progress,
     )
     if per_conformer_df.empty:
         empty_per_smiles = pd.DataFrame(columns=per_smiles_template)
