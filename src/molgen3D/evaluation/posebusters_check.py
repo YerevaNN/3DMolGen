@@ -88,7 +88,11 @@ def _compute_pass_fraction(report: pd.DataFrame) -> np.ndarray:
     return bool_df.astype(float).mean(axis=1).to_numpy(dtype=float)
 
 
-def _build_chunks(items: Sequence[Tuple[int, "Mol"]], max_workers: int) -> List[List[Tuple[int, "Mol"]]]:
+def _build_chunks(
+    items: Sequence[Tuple[int, "Mol"]],
+    max_workers: int,
+    chunk_size: Optional[int] = None,
+) -> List[List[Tuple[int, "Mol"]]]:
     """
     Each workers gets chunk_size conformers to process.
     
@@ -105,7 +109,9 @@ def _build_chunks(items: Sequence[Tuple[int, "Mol"]], max_workers: int) -> List[
         return []
     if max_workers <= 1:
         return [list(items)]
-    chunk_size = (len(items) + max_workers - 1) // max_workers # divide total # conformers by max_workers and round up
+    if chunk_size is None or chunk_size <= 0:
+        chunk_size = (len(items) + max_workers - 1) // max_workers  # divide total # conformers by max_workers and round up
+    chunk_size = max(1, min(chunk_size, len(items)))
     # optimization idea:
     # just return a list of indices ranges, so we know the range of indices to splice for each worker?
     # so when spawning workers, we can just pass the indices range to the worker and let it splice the molecules from the original list?
@@ -113,7 +119,11 @@ def _build_chunks(items: Sequence[Tuple[int, "Mol"]], max_workers: int) -> List[
     return [list(items[i:i + chunk_size]) for i in range(0, len(items), chunk_size)]
 
 
-def _build_chunks_optimized(items_len: int, max_workers: int) -> List[Tuple[int, int]]:
+def _build_chunks_optimized(
+    items_len: int,
+    max_workers: int,
+    chunk_size: Optional[int] = None,
+) -> List[Tuple[int, int]]:
     """Split a flattened conformer list into contiguous index ranges.
 
     Args:
@@ -128,7 +138,9 @@ def _build_chunks_optimized(items_len: int, max_workers: int) -> List[Tuple[int,
         return []
     if max_workers <= 1:
         return [(0, items_len)]
-    chunk_size = math.ceil(items_len / max_workers)
+    if chunk_size is None or chunk_size <= 0:
+        chunk_size = math.ceil(items_len / max_workers)
+    chunk_size = max(1, min(chunk_size, items_len))
     ranges: List[Tuple[int, int]] = []
     for start in range(0, items_len, chunk_size):
         end = min(start + chunk_size, items_len)
@@ -191,6 +203,7 @@ def _collect_posebusters_report(
     num_workers: int,
     full_report: bool,
     config: str,
+    task_chunk_size: Optional[int] = None,
 ) -> pd.DataFrame:
     """Run PoseBusters and return the concatenated per-conformer report."""
     conformers: List["Mol"] = list(rd_confs)
@@ -216,13 +229,13 @@ def _collect_posebusters_report(
     if use_fork_sharing:
         _SHARED_CONFORMERS = conformers
         # task ranges are a list of tuples, each tuple contains the start and end index of a chunk of conformers to process
-        task_ranges = _build_chunks_optimized(len(conformers), max_workers)
+        task_ranges = _build_chunks_optimized(len(conformers), max_workers, task_chunk_size)
         if not task_ranges:
             return pd.DataFrame()
         tasks = task_ranges
         worker_fn = _posebusters_chunk_worker_by_range
     else:
-        chunks = _build_chunks(indexed_confs, max_workers)
+        chunks = _build_chunks(indexed_confs, max_workers, task_chunk_size)
         if not chunks:
             return pd.DataFrame()
         tasks = chunks
@@ -271,6 +284,7 @@ def bust_cpu(
     aggregation_type: AggregationType = "avg",
     full_report: bool = False,
     config: str = "mol",
+    task_chunk_size: Optional[int] = None,
 ) -> Tuple[List[float], float]:
     """Run PoseBusters on a list of conformers and aggregate pass rates.
 
@@ -294,6 +308,7 @@ def bust_cpu(
         num_workers=num_workers,
         full_report=full_report,
         config=config,
+        task_chunk_size=task_chunk_size,
     )
     if report_df.empty:
         return [], float("nan")
@@ -315,6 +330,7 @@ def bust_full_gens(
     config: str = "mol",
     full_report: bool = False,
     fail_threshold: float = 0.0,
+    task_chunk_size: Optional[int] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, float]:
     """Evaluate PoseBusters pass rates for an entire generation dictionary.
 
@@ -424,6 +440,7 @@ def bust_full_gens(
         num_workers=num_workers,
         full_report=full_report,
         config=config,
+        task_chunk_size=task_chunk_size,
     )
     if per_conformer_df.empty:
         empty_per_smiles = pd.DataFrame(columns=per_smiles_template)
