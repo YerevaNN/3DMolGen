@@ -1,9 +1,10 @@
 import io
 import glob
-import numpy as np
 from pathlib import Path
-from typing import Union, Sequence, List
+from typing import List, Sequence, Union
+import numpy as np
 from loguru import logger
+
 
 def expand_paths(paths: Union[str, Sequence[str]]) -> List[str]:
     ps = [paths] if isinstance(paths, (str, Path)) else list(paths)
@@ -27,8 +28,10 @@ def expand_paths(paths: Union[str, Sequence[str]]) -> List[str]:
         raise FileNotFoundError(f"No JSONL files matched: {paths}")
     return out
 
+
 def idx_path(p: Union[str, Path]) -> Path:
     return Path(str(p) + ".idx")
+
 
 def build_line_index(p: Union[str, Path]) -> np.ndarray:
     p = Path(p)
@@ -41,11 +44,13 @@ def build_line_index(p: Union[str, Path]) -> np.ndarray:
         while True:
             offs.append(pos)
             line = f.readline()
-            if not line: break
+            if not line:
+                break
             pos += len(line)
     arr = np.array(offs[:-1], dtype=np.uint64)  # drop EOF sentinel
     arr.tofile(idxp)
     return arr
+
 
 def read_line_at(fp: io.BufferedReader, byte_off: int) -> bytes:
     fp.seek(byte_off)

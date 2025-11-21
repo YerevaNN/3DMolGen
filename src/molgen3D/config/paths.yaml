@@ -2,14 +2,15 @@ base_paths:
   project_root: "."
   data_root: "data"
   geom_data_root: "/nfs/ap/mnt/sxtn2/chem/GEOM_data"
-  ckpts_root: "/nfs/h100/raid/chem/checkpoints"
+  ckpts_root: "/nfs/h100/raid/chem/checkpoints/yerevann"
   hf_yerevann_root: "/nfs/h100/raid/chem/checkpoints/hf/yerevann"
   qwen_yerevann_root: "/nfs/h100/raid/chem/checkpoints/yerevann"
   grpo_root: "/nfs/h100/raid/chem/checkpoints/conf_grpo"
   grpo_outputs_root: "outputs/grpo_outputs"
   gen_results_root: "outputs/gen_results"
   eval_results_root: "outputs/eval_results"
-  pretrain_results_root: "outputs/pretrain_results"
+  pretrain_logs_root: "outputs/pretrain_logs"
+  wandb_root: "wandb"
 
 data:
   clean_smi: "clean_smi.pickle"
@@ -26,6 +27,8 @@ data:
 tokenizers:
   llama3_chem_v1: "src/molgen3D/training/tokenizers/Llama-3.2-chem-1B-v1"
   qwen3_0.6b_conf_v1: "/nfs/np/home/_vover_/models/saved_models/qwen3-0.6b-tokenizer-smiles-conformer"
+  qwen3_0.6b_orig: "src/molgen3D/training/tokenizers/qwen3-0.6b-orig"
+  
 
 models:
   # ---------- BASE MODELS ----------
@@ -39,10 +42,12 @@ models:
       "4e": "e184d4d867804fbd8a8c45bf/step-30000"
 
   m380_conf_v2:
-    root: "hf/yerevann/Llama-3.2-380M_conformers/26948ebd853e4fd9baddd36b"
+    root: "hf/yerevann/Llama-3.2-380M_conformers/fea47a381e4046e4956dc44a"
     steps:
-      "1e": "step-7800"
-      "2e": "step-15600"
+      "1e": "step-8700"
+      "2e": "step-17400"
+      "3e": "step-26100"
+      "4e": "step-34800"
       
   b1_conf:
     root: "hf/yerevann/Llama-3.2-1B_conformers"
