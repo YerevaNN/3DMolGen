@@ -315,7 +315,7 @@ def bust_full_gens(
     config: str = "mol",
     full_report: bool = False,
     fail_threshold: float = 0.0,
-) -> Tuple[pd.DataFrame, pd.DataFrame, float, List[str], List[str]]:
+) -> Tuple[pd.DataFrame, pd.DataFrame, float]:
     """Evaluate PoseBusters pass rates for an entire generation dictionary.
 
     Args:
@@ -324,19 +324,24 @@ def bust_full_gens(
         config: PoseBusters configuration key (``"mol"`` or ``"redock"``).
         full_report: Whether to request the extended PoseBusters report.
         fail_threshold: Allowed failure rate per SMILES (computed using boolean aggregation).
+            Note: This parameter is kept for API compatibility but is not used.
+            Users can filter ``per_smiles_df`` by ``pass_percentage`` directly.
 
     Returns:
-        Tuple ``(per_smiles_df, summary_df, overall_pass_rate, fail_smiles, error_smiles)``.
+        Tuple ``(per_smiles_df, summary_df, overall_pass_rate)``.
 
         * ``per_smiles_df`` matches the schema in ``tests/evaluation/sample_by_smiles_df.csv``:
           PoseBusters boolean checks per SMILES, ``pass_percentage`` (0–100), ``smiles``,
-          ``num_of_conformers``, and ``error``.
+          ``num_of_conformers``, and ``error``. Users can filter this DataFrame by
+          ``pass_percentage`` to identify failed SMILES.
         * ``summary_df`` mirrors ``tests/evaluation/sample_summary_df.csv``: a single ``"ALL"``
           row containing dataset-wide counts, PoseBusters check means, and the overall pass rate.
         * ``overall_pass_rate`` is the conformer-level arithmetic mean of ``pass_bool``
           (guards against averaging per-SMILES percentages, e.g., 0.33 vs. 0.375).
-        * ``fail_smiles`` lists SMILES whose boolean pass percentage is below ``1 - fail_threshold``.
-        * ``error_smiles`` enumerates SMILES skipped because PoseBusters reported runtime errors.
+
+    Note:
+        PoseBusters does not return an ``error`` column - it raises exceptions on errors.
+        The ``error`` column in ``per_smiles_df`` is part of the schema but will always be empty.
     """
     if not isinstance(smiles_to_confs, dict):
         raise TypeError(f"Expected dict for smiles_to_confs, got {type(smiles_to_confs)}")
@@ -371,7 +376,7 @@ def bust_full_gens(
         valid_confs: List["Mol"] = []
 
         for mol in confs:
-            if mol is None: # Case 2: if there is a None conformer, add the SMILES to the error_smiles set
+            if mol is None:  # Case 2: if there is a None conformer, skip it
                 dropped_none += 1
                 continue
             else:
@@ -381,7 +386,7 @@ def bust_full_gens(
         if not valid_confs:
             continue
 
-        if dropped_none == len(confs): # Case 3: if there are no valid conformers for a given SMILES, add it to the error_smiles set
+        if dropped_none == len(confs):  # Case 3: if there are no valid conformers for a given SMILES, skip it
             input_validation_notes.setdefault(smiles, []).append(f"{dropped_none}_none_entries")
             continue  # skip the rest of the loop and continue to the next SMILES
 
@@ -411,7 +416,7 @@ def bust_full_gens(
         empty_summary = pd.DataFrame(columns=summary_template)
         empty_summary.attrs["per_smiles_df"] = empty_per_smiles
         empty_summary.attrs["input_validation_notes"] = input_validation_notes
-        return empty_per_smiles, empty_summary, float("nan"), [], []
+        return empty_per_smiles, empty_summary, float("nan")
 
     # Step 4 — run PoseBusters on the flattened conformer list (parallelized upstream).
     per_conformer_df = _collect_posebusters_report(
@@ -425,7 +430,7 @@ def bust_full_gens(
         empty_summary = pd.DataFrame(columns=summary_template)
         empty_summary.attrs["per_smiles_df"] = empty_per_smiles
         empty_summary.attrs["input_validation_notes"] = input_validation_notes
-        return empty_per_smiles, empty_summary, float("nan"), [], []
+        return empty_per_smiles, empty_summary, float("nan")
 
     # Step 5 — recover SMILES provenance and per-conformer pass metrics.
     pass_fraction = _compute_pass_fraction(per_conformer_df)
@@ -476,16 +481,12 @@ def bust_full_gens(
     summary_df.attrs["per_smiles_df"] = per_smiles_df
     summary_df.attrs["input_validation_notes"] = input_validation_notes
 
-    # Step 8 — identify SMILES whose boolean pass percentage drops below the fail threshold.
-    fail_cutoff = max(0.0, min(1.0, 1.0 - float(fail_threshold))) * 100.0
-    fail_smiles = per_smiles_df.loc[per_smiles_df["pass_percentage"] < fail_cutoff, "smiles"].tolist()
+    # Note: fail_smiles and error_smiles removed as redundant.
+    # - fail_smiles: Users can filter per_smiles_df by pass_percentage directly
+    # - error_smiles: PoseBusters doesn't return an error column, it raises exceptions.
+    #   The error column in per_smiles_df is part of the schema but always empty.
 
-    error_smiles: List[str] = []
-    if "error" in per_conformer_df.columns:
-        error_series = per_conformer_df["error"].fillna("")
-        error_smiles = sorted(per_conformer_df.loc[error_series != "", "smiles"].unique().tolist())
-
-    return per_smiles_df, summary_df, overall_pass_rate, fail_smiles, error_smiles
+    return per_smiles_df, summary_df, overall_pass_rate
 
 def run_all_posebusters(data, config="mol", full_report=False,
                         max_workers=16, fail_threshold=0.0, chunk_size=200):

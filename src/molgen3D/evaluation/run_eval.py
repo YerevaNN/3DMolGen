@@ -104,16 +104,17 @@ def summarize_metrics(agg: Dict[str, np.ndarray]) -> Tuple[pd.DataFrame, Dict[st
     }
     return df, stats
 
-def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers: int) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[float], Optional[List[str]], Optional[List[str]]]:
-    """Wrapper for PoseBusters evaluation that returns 5 values consistently.
+def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers: int) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[float]]:
+    """Wrapper for PoseBusters evaluation.
     
     Returns:
-        Tuple of (full_results_df, summary_df, pass_rate, fail_smiles, error_smiles)
+        Tuple of (full_results_df, summary_df, pass_rate).
+        Note: fail_smiles and error_smiles removed - users can filter per_smiles_df by pass_percentage.
     """
     
     if not gen_data:
         print("PoseBusters: No data to process")
-        return None, None, None, None, None
+        return None, None, None
     
     num_molecules = len(gen_data)
     num_conformers = sum(len(mols) for mols in gen_data.values())
@@ -134,20 +135,19 @@ def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers:
     
     if num_conformers == 0:
         print("No conformers to evaluate, skipping PoseBusters")
-        return None, None, None, None, None
+        return None, None, None
     
     try:
-        # df, summary, fail_smiles, error_smiles = run_all_posebusters(data=gen_data, config=config, full_report=False, max_workers=max_workers) # old function call
-        df_by_smiles, df_summary, pass_rate, fail_smiles, error_smiles = bust_full_gens(smiles_to_confs=gen_data, config=config, full_report=False, num_workers=max_workers)
+        df_by_smiles, df_summary, pass_rate = bust_full_gens(
+            smiles_to_confs=gen_data, config=config, full_report=False, num_workers=max_workers
+        )
         print("PoseBusters completed successfully")
-        if error_smiles:
-            print(f"Warning: {len(error_smiles)} molecules had errors")
-        return df_by_smiles, df_summary, pass_rate, fail_smiles, error_smiles
+        return df_by_smiles, df_summary, pass_rate
     except Exception as e:
         print(f"PoseBusters failed with error: {e}")
         import traceback
         traceback.print_exc()
-        return None, None, None, None, None
+        return None, None, None
 
 def get_missing_evaluation_dirs(gen_base: str, eval_base: str, max_recent: Optional[int]) -> List[str]:
     gen_path = Path(gen_base)
@@ -203,13 +203,13 @@ def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
     posebusters_summary = None 
     posebusters_full_results = None
     pass_rate = None
-    fail_smiles = None
-    error_smiles = None
     if args.posebusters != "None":
         pb_start = time.time()
-        posebusters_full_results, posebusters_summary, pass_rate, fail_smiles, error_smiles = run_posebusters_wrapper(processed_gen_data, args.posebusters, args.num_workers)
+        posebusters_full_results, posebusters_summary, pass_rate = run_posebusters_wrapper(
+            processed_gen_data, args.posebusters, args.num_workers
+        )
         if pass_rate is not None:
-            print(f"Overall Pass percentage: {pass_rate:.2f}%\n")
+            print(f"Overall Pass percentage: {pass_rate:2f}%\n")
         posebusters_duration = time.time() - pb_start
         
     durations = {
@@ -225,8 +225,6 @@ def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
         posebusters_full_results=posebusters_full_results,
         posebusters_summary=posebusters_summary,
         pass_rate=pass_rate,
-        fail_smiles=fail_smiles,
-        error_smiles=error_smiles,
         durations=durations,
         rmsd_results=rmsd_results,
         missing=missing,
