@@ -2,11 +2,9 @@ import json
 import logging
 import math
 import multiprocessing
-import os
 import pickle
-import random
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from typing import TYPE_CHECKING, Dict, Iterable, List, Literal, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -141,6 +139,7 @@ def _build_chunks_optimized(
     if chunk_size is None or chunk_size <= 0:
         chunk_size = math.ceil(items_len / max_workers)
     chunk_size = max(1, min(chunk_size, items_len))
+    # split conformers into chunks of size chunk_size
     ranges: List[Tuple[int, int]] = []
     for start in range(0, items_len, chunk_size):
         end = min(start + chunk_size, items_len)
@@ -171,7 +170,7 @@ def _posebusters_chunk_worker_by_range(index_range: Tuple[int, int], config: str
         raise RuntimeError("Shared conformer buffer is not initialized in worker process.")
     subset = _SHARED_CONFORMERS[start:end] # subset is a list of conformers from the shared memory (RDKit Mols)
     indices = list(range(start, end)) # indices is a list of indices of the conformers to process
-    # initialize the PoseBusters instance (each process initializes its own PoseBusters instance once (expensive import/setup)
+    # initialize the PoseBusters instance (each process/worker initializes its own PoseBusters instance once (expensive import/setup)
     # (maybe it can be optimized to be a global instance that is shared?)) (i think this is the case, but i need to check)
     runner = _init_posebusters(config)
     df = runner.bust(list(subset), None, None, full_report=full_report)
@@ -258,8 +257,7 @@ def _collect_posebusters_report(
                 ]
                 total_tasks = len(futures)
                 completed = 0
-                completed = 0
-                total_tasks = len(futures)
+                # as tasks finish, we log progress to stdout if log_progress is True
                 for future in as_completed(futures):
                     result = future.result()
                     # here we are appending the result of the worker function to the frames list
@@ -346,7 +344,7 @@ def bust_full_gens(
     config: str = "mol",
     full_report: bool = False,
     fail_threshold: float = 0.0,
-    task_chunk_size: Optional[int] = None,
+    task_chunk_size: Optional[int] = 600,
     log_progress: bool = False,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, float]:
     """Evaluate PoseBusters pass rates for an entire generation dictionary.

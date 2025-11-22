@@ -1,23 +1,24 @@
 import argparse
-import math
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
-import pickle
-import time
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple, Iterable, Optional
+import time
+from typing import Dict, List, Optional, Tuple
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
 
-from molgen3D.evaluation.posebusters_check import bust_full_gens
-
-from molgen3D.evaluation import rdkit_utils  # Import locally to avoid pickling issues
-from molgen3D.config.paths import get_data_path, get_base_path
-from molgen3D.evaluation.utils import create_slurm_executor, find_generation_pickles_path, format_float, covmat_metrics, DEFAULT_THRESHOLDS
+from molgen3D.config.paths import get_base_path, get_data_path
 from molgen3D.data_processing.utils import load_pkl
+from molgen3D.evaluation import rdkit_utils
+from molgen3D.evaluation.posebusters_check import bust_full_gens
+from molgen3D.evaluation.utils import (
+    DEFAULT_THRESHOLDS,
+    covmat_metrics,
+    create_slurm_executor,
+    find_generation_pickles_path,
+)
 from molgen3D.evaluation.write_eval_results import save_evaluation_results
 
 def _compute_key_matrix(key: str, true_confs: List, gen_mols: List, use_alignmol: bool) -> Tuple[str, Dict[str, object], bool]:
@@ -108,8 +109,8 @@ def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers:
     """Wrapper for PoseBusters evaluation.
     
     Returns:
-        Tuple of (full_results_df, summary_df, pass_rate).
-        Note: fail_smiles and error_smiles removed - users can filter per_smiles_df by pass_percentage.
+        Tuple of (df_by_smiles, df_summary, pass_rate).
+        Note: fail_smiles and error_smiles removed - users can filter by_smiles_df by pass_percentage.
     """
     
     if not gen_data:
@@ -201,11 +202,11 @@ def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
     
     posebusters_duration = 0.0
     posebusters_summary = None 
-    posebusters_full_results = None
+    posebusters_by_smiles = None
     pass_rate = None
     if args.posebusters != "None":
         pb_start = time.time()
-        posebusters_full_results, posebusters_summary, pass_rate = run_posebusters_wrapper(
+        posebusters_by_smiles, posebusters_summary, pass_rate = run_posebusters_wrapper(
             processed_gen_data, args.posebusters, args.num_workers
         )
         if pass_rate is not None:
@@ -222,7 +223,7 @@ def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
         cov_df=cov_df,
         matching=matching,
         aggregated_metrics=agg,
-        posebusters_full_results=posebusters_full_results,
+        posebusters_full_results=posebusters_by_smiles,
         posebusters_summary=posebusters_summary,
         pass_rate=pass_rate,
         durations=durations,

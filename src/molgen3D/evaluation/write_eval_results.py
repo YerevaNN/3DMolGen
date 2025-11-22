@@ -182,7 +182,7 @@ def save_evaluation_results(cov_df: pd.DataFrame, matching: Dict[str, float], ag
                             args) -> None:
 
     os.makedirs(results_path, exist_ok=True)
-    save_covmat_results_txt(cov_df, matching, posebusters_summary, posebusters_full_results, pass_rate, durations, missing, all_nan_keys, results_path, gen_stats, gt_stats)
+    save_covmat_results_txt(cov_df, matching, posebusters_summary, pass_rate, durations, missing, all_nan_keys, results_path, gen_stats, gt_stats)
      
      # Save aggregated metrics (Coverage/Precision/Matching statistics) as pickle file
     rmsd_pickle_path = os.path.join(results_path, "rmsd_matrix.pickle")
@@ -239,17 +239,16 @@ def save_evaluation_results(cov_df: pd.DataFrame, matching: Dict[str, float], ag
     rmsd_075_df.to_csv(rmsd_matrix_path, index=False)
     print(f"Saved RMSD matrix at 0.75 threshold to: {rmsd_matrix_path}")
 
-    # Save full posebusters results as pickle
+    # Save full posebusters results as pickle file
     if posebusters_full_results is not None:
         posebusters_pickle_path = os.path.join(results_path, "posebusters.pickle")
         with open(posebusters_pickle_path, "wb") as f:
             pickle.dump(posebusters_full_results, f)
         print(f"Saved full PoseBusters results to: {posebusters_pickle_path}")
 
-def save_covmat_results_txt(cov_df: pd.DataFrame, matching: Dict[str, float], posebusters_summary: Optional[pd.DataFrame], 
-                            posebusters_full_results: Optional[pd.DataFrame], pass_rate: Optional[float],
-                            durations: Dict[str, float], missing: List[str], all_nan_keys: List[str], results_path: str,
-                            gen_stats: Dict[str, int], gt_stats: Dict[str, int]) -> None:
+def save_covmat_results_txt(cov_df: pd.DataFrame, matching: Dict[str, float], posebusters_summary: Optional[pd.DataFrame],
+                            pass_rate: Optional[float], durations: Dict[str, float], missing: List[str],
+                            all_nan_keys: List[str], results_path: str, gen_stats: Dict[str, int], gt_stats: Dict[str, int]) -> None:
     """Save comprehensive evaluation results to text file."""
     idx075 = int(np.argmin(np.abs(DEFAULT_THRESHOLDS - THRESHOLD_075)))
     cov_row_075 = cov_df.iloc[idx075]
