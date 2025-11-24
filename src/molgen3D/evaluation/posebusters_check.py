@@ -297,7 +297,7 @@ def bust_cpu(
     full_report: bool = False,
     config: str = "mol",
     task_chunk_size: Optional[int] = None,
-    log_progress: bool = False,
+    log_progress: bool = True,
 ) -> Tuple[List[float], float]:
     """Run PoseBusters on a list of conformers and aggregate pass rates.
 
@@ -345,7 +345,7 @@ def bust_full_gens(
     full_report: bool = False,
     fail_threshold: float = 0.0,
     task_chunk_size: Optional[int] = 600,
-    log_progress: bool = False,
+    log_progress: bool = True,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, float]:
     """Evaluate PoseBusters pass rates for an entire generation dictionary.
 
