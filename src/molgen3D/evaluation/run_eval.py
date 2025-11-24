@@ -1,22 +1,24 @@
 import argparse
-import math
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
-import pickle
-import time
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple, Iterable, Optional
+import time
+from typing import Dict, List, Optional, Tuple
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
 
-run_all_posebusters = None  # Global flag for posebusters availability
-from molgen3D.evaluation import rdkit_utils  # Import locally to avoid pickling issues
-from molgen3D.config.paths import get_data_path, get_base_path
-from molgen3D.evaluation.utils import create_slurm_executor, find_generation_pickles_path, format_float, covmat_metrics, DEFAULT_THRESHOLDS
+from molgen3D.config.paths import get_base_path, get_data_path
 from molgen3D.data_processing.utils import load_pkl
+from molgen3D.evaluation import rdkit_utils
+from molgen3D.evaluation.posebusters_check import bust_full_gens
+from molgen3D.evaluation.utils import (
+    DEFAULT_THRESHOLDS,
+    covmat_metrics,
+    create_slurm_executor,
+    find_generation_pickles_path,
+)
 from molgen3D.evaluation.write_eval_results import save_evaluation_results
 
 def _compute_key_matrix(key: str, true_confs: List, gen_mols: List, use_alignmol: bool) -> Tuple[str, Dict[str, object], bool]:
@@ -103,14 +105,17 @@ def summarize_metrics(agg: Dict[str, np.ndarray]) -> Tuple[pd.DataFrame, Dict[st
     }
     return df, stats
 
-def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers: int) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
-    if run_all_posebusters is None:
-        print("PoseBusters not available (import failed)")
-        return None, None
+def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers: int) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[float]]:
+    """Wrapper for PoseBusters evaluation.
+    
+    Returns:
+        Tuple of (df_by_smiles, df_summary, pass_rate).
+        Note: fail_smiles and error_smiles removed - users can filter by_smiles_df by pass_percentage.
+    """
     
     if not gen_data:
         print("PoseBusters: No data to process")
-        return None, None
+        return None, None, None
     
     num_molecules = len(gen_data)
     num_conformers = sum(len(mols) for mols in gen_data.values())
@@ -131,19 +136,19 @@ def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers:
     
     if num_conformers == 0:
         print("No conformers to evaluate, skipping PoseBusters")
-        return None, None
+        return None, None, None
     
     try:
-        df, summary, fail_smiles, error_smiles = run_all_posebusters(data=gen_data, config=config, full_report=False, max_workers=max_workers)
-        print(f"PoseBusters completed successfully")
-        if error_smiles:
-            print(f"Warning: {len(error_smiles)} molecules had errors")
-        return df, summary
+        df_by_smiles, df_summary, pass_rate = bust_full_gens(
+            smiles_to_confs=gen_data, config=config, full_report=False, num_workers=max_workers
+        )
+        print("PoseBusters completed successfully")
+        return df_by_smiles, df_summary, pass_rate
     except Exception as e:
         print(f"PoseBusters failed with error: {e}")
         import traceback
         traceback.print_exc()
-        return None, None
+        return None, None, None
 
 def get_missing_evaluation_dirs(gen_base: str, eval_base: str, max_recent: Optional[int]) -> List[str]:
     gen_path = Path(gen_base)
@@ -196,12 +201,16 @@ def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
     cov_df, matching = summarize_metrics(agg)
     
     posebusters_duration = 0.0
-    posebusters_summary = None
-    posebusters_full_results = None
+    posebusters_summary = None 
+    posebusters_by_smiles = None
+    pass_rate = None
     if args.posebusters != "None":
         pb_start = time.time()
-        posebusters_full_results, posebusters_summary = run_posebusters_wrapper(processed_gen_data, args.posebusters, args.num_workers)
-        print(f"Pass percentage: {posebusters_summary['pass_percentage'].iloc[0]:.2f}%\n")
+        posebusters_by_smiles, posebusters_summary, pass_rate = run_posebusters_wrapper(
+            processed_gen_data, args.posebusters, args.num_workers
+        )
+        if pass_rate is not None:
+            print(f"Overall Pass percentage: {pass_rate:2f}%\n")
         posebusters_duration = time.time() - pb_start
         
     durations = {
@@ -214,8 +223,9 @@ def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
         cov_df=cov_df,
         matching=matching,
         aggregated_metrics=agg,
+        posebusters_full_results=posebusters_by_smiles,
         posebusters_summary=posebusters_summary,
-        posebusters_full_results=posebusters_full_results,
+        pass_rate=pass_rate,
         durations=durations,
         rmsd_results=rmsd_results,
         missing=missing,

@@ -1,0 +1,11 @@
+{
+  "source_path": "/auto/home/aram.dovlatyan/3DMolGen-new/3DMolGen/data/clean_smi.pickle",
+  "created_at": "2025-11-17T15:03:54.715948Z",
+  "num_entries": 3,
+  "max_conformers_per_entry": 4,
+  "smiles": [
+    "NC(=O)C1CCC1",
+    "CC(C)(C)n1cn[nH]c1=S",
+    "Cc1c(C#N)c2ccccc2n1C"
+  ]
+}

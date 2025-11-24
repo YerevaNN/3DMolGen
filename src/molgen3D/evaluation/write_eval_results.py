@@ -93,11 +93,25 @@ def write_generation_info(f, gen_stats: Dict[str, int]) -> None:
         f.write(gen_txt_content)
         f.write("\n\n")
 
-def write_posebusters_section(f, posebusters_summary: Optional[pd.DataFrame]) -> None:
+def write_posebusters_section(
+    f,
+    posebusters_summary: Optional[pd.DataFrame],
+    pass_rate: Optional[float],
+) -> None:
     """Write PoseBusters evaluation section."""
+    # Only write section if we have any PoseBusters data
+    has_data = (
+        posebusters_summary is not None or
+        pass_rate is not None
+    )
+
+    if not has_data:
+        return
+
+    write_section_header(f, "POSEBUSTERS EVALUATION")
+
+    # Write summary metrics from DataFrame
     if posebusters_summary is not None:
-        f.write("POSEBUSTERS EVALUATION\n")
-        f.write("-" * 40 + "\n")
         try:
             row = posebusters_summary.iloc[0]
             for col in posebusters_summary.columns:
@@ -108,7 +122,19 @@ def write_posebusters_section(f, posebusters_summary: Optional[pd.DataFrame]) ->
                     f.write(f"{col}: {val}\n")
         except Exception:
             f.write("Summary unavailable.\n")
-        f.write("\n")
+
+    # Write pass rate
+    if pass_rate is not None:
+        pass_pct = pass_rate * 100.0
+        f.write(
+            f"Pass rate: {format_float(pass_rate, 4)} "
+            f"({format_float(pass_pct, 2)}%)\n"
+        )
+
+    f.write("\n")
+    # Note: fail_smiles and error_smiles removed.
+    # Users can filter per_smiles_df (saved in pickle) by pass_percentage to identify failed SMILES.
+
 
 def write_detailed_logging(f, durations: Dict[str, float], missing: List[str], all_nan_keys: List[str], gen_stats: Dict[str, int]) -> None:
     """Write detailed logging info section."""
@@ -150,14 +176,13 @@ def read_gen_results_txt(gens_path: str) -> Optional[str]:
         return None
 
 def save_evaluation_results(cov_df: pd.DataFrame, matching: Dict[str, float], aggregated_metrics: Dict[str, np.ndarray],
-                            posebusters_summary: Optional[pd.DataFrame], posebusters_full_results: Optional[pd.DataFrame], 
+                            posebusters_full_results: Optional[pd.DataFrame], posebusters_summary: Optional[pd.DataFrame], pass_rate: Optional[float],
                             durations: Dict[str, float], rmsd_results: Dict[str, Dict[str, object]], missing: List[str], 
                             all_nan_keys: List[str], results_path: str, gen_stats: Dict[str, int], gt_stats: Dict[str, int],
                             args) -> None:
 
     os.makedirs(results_path, exist_ok=True)
-    covmat_txt_path = os.path.join(results_path, "covmat_results.txt")
-    save_covmat_results_txt(cov_df, matching, posebusters_summary, durations, missing, all_nan_keys, results_path, gen_stats, gt_stats)
+    save_covmat_results_txt(cov_df, matching, posebusters_summary, pass_rate, durations, missing, all_nan_keys, results_path, gen_stats, gt_stats)
      
      # Save aggregated metrics (Coverage/Precision/Matching statistics) as pickle file
     rmsd_pickle_path = os.path.join(results_path, "rmsd_matrix.pickle")
@@ -214,7 +239,7 @@ def save_evaluation_results(cov_df: pd.DataFrame, matching: Dict[str, float], ag
     rmsd_075_df.to_csv(rmsd_matrix_path, index=False)
     print(f"Saved RMSD matrix at 0.75 threshold to: {rmsd_matrix_path}")
 
-    # Save full posebusters results as pickle
+    # Save full posebusters results as pickle file
     if posebusters_full_results is not None:
         posebusters_pickle_path = os.path.join(results_path, "posebusters.pickle")
         with open(posebusters_pickle_path, "wb") as f:
@@ -222,8 +247,8 @@ def save_evaluation_results(cov_df: pd.DataFrame, matching: Dict[str, float], ag
         print(f"Saved full PoseBusters results to: {posebusters_pickle_path}")
 
 def save_covmat_results_txt(cov_df: pd.DataFrame, matching: Dict[str, float], posebusters_summary: Optional[pd.DataFrame],
-                            durations: Dict[str, float], missing: List[str], all_nan_keys: List[str], results_path: str,
-                            gen_stats: Dict[str, int], gt_stats: Dict[str, int]) -> None:
+                            pass_rate: Optional[float], durations: Dict[str, float], missing: List[str],
+                            all_nan_keys: List[str], results_path: str, gen_stats: Dict[str, int], gt_stats: Dict[str, int]) -> None:
     """Save comprehensive evaluation results to text file."""
     idx075 = int(np.argmin(np.abs(DEFAULT_THRESHOLDS - THRESHOLD_075)))
     cov_row_075 = cov_df.iloc[idx075]
@@ -236,5 +261,5 @@ def save_covmat_results_txt(cov_df: pd.DataFrame, matching: Dict[str, float], po
         write_missing_molecules_section(f, missing)
         write_all_nan_section(f, all_nan_keys)
         write_generation_info(f, gen_stats)
-        write_posebusters_section(f, posebusters_summary)
+        write_posebusters_section(f, posebusters_summary, pass_rate)
         write_detailed_logging(f, durations, missing, all_nan_keys, gen_stats)
