@@ -11,6 +11,7 @@ base_paths:
   eval_results_root: "outputs/eval_results"
   pretrain_logs_root: "outputs/pretrain_logs"
   wandb_root: "wandb"
+  qwen3_0.6b_base_model: "/nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b/Qwen3-0.6B-Base"
 
 data:
   clean_smi: "clean_smi.pickle"
@@ -27,7 +28,8 @@ data:
 tokenizers:
   llama3_chem_v1: "src/molgen3D/training/tokenizers/Llama-3.2-chem-1B-v1"
   qwen3_0.6b_conf_v1: "/nfs/np/home/_vover_/models/saved_models/qwen3-0.6b-tokenizer-smiles-conformer"
-  qwen3_0.6b_orig: "src/molgen3D/training/tokenizers/qwen3-0.6b-orig"
+  qwen3_0.6b_custom: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_custom"
+  qwen3_0.6b_origin: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_original"
   
 
 models:
