@@ -20,38 +20,50 @@ from molgen3D.training.pretraining.dataprocessing.dataloader import build_datalo
 
 
 def validate_tokenizer(tokenizer_path):
-    """Load and validate tokenizer has required special tokens."""
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, use_fast=True)
-
-    bos_id = tokenizer.bos_token_id
-    eos_id = tokenizer.eos_token_id
-
-    if bos_id is None or eos_id is None:
-        raise RuntimeError("Tokenizer must define bos_token_id and eos_token_id.")
-
-    return tokenizer, bos_id, eos_id
+    """Load and validate tokenizer."""
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, use_fast=True, fix_mistral_regex=True)
+    return tokenizer
 
 
-def analyze_sample(sample_tokens: List[int], eos_id: int, tokenizer) -> Dict[str, Any]:
+def analyze_sample(sample_tokens: List[int], sep_id: int, pad_id: int, tokenizer) -> Dict[str, Any]:
     """Analyze a single sample and return statistics."""
     if not sample_tokens:
-        return {"items": 0, "complete": False, "eos_count": 0, "token_count": 0, "text_length": 0, "tokens": [], "text": ""}
+        return {"items": 0, "complete": False, "sep_count": 0, "token_count": 0, "text_length": 0, "tokens": [], "text": ""}
 
-    eos_count = sum(1 for token in sample_tokens if token == eos_id)
-    ends_with_eos = sample_tokens[-1] == eos_id
+    # Count padding tokens at the end (they use the same ID as separators)
+    # Padding only appears at the tail, so count consecutive pad_id from the end
+    padding_count = 0
+    for token in reversed(sample_tokens):
+        if token == pad_id:
+            padding_count += 1
+        else:
+            break
+    
+    # Count all occurrences of sep_id/pad_id, then subtract padding
+    total_sep_pad = sum(1 for token in sample_tokens if token == sep_id)
+    sep_count = total_sep_pad - padding_count
+    
+    # A sample is complete if it ends with a separator (not padding)
+    # If there's no padding, check if last token is separator
+    # If there is padding, check if the token before padding is separator
+    if padding_count == 0:
+        ends_with_sep = (sample_tokens[-1] == sep_id) if sample_tokens else False
+    else:
+        # Token before padding should be separator for complete sequence
+        ends_with_sep = (len(sample_tokens) > padding_count and sample_tokens[-(padding_count + 1)] == sep_id)
 
-    # Each EOS represents an item (molecular conformer), so EOS count = number of items
-    items_in_sample = eos_count
+    # Each separator represents an item boundary, so separator count = number of items
+    items_in_sample = sep_count
 
     try:
-        full_text = tokenizer.decode(sample_tokens)
+        full_text = tokenizer.decode(sample_tokens, skip_special_tokens=False)
     except Exception:
         full_text = "<decode_error>"
 
     return {
         "items": items_in_sample,
-        "complete": ends_with_eos,
-        "eos_count": eos_count,
+        "complete": ends_with_sep,
+        "sep_count": sep_count,
         "token_count": len(sample_tokens),
         "text": full_text,
         "tokens": sample_tokens
@@ -73,7 +85,7 @@ def display_sample_analysis(sample_idx: int, stats: Dict[str, Any]) -> None:
         print(f"\nDecoded text: {stats['text']!r}")
 
 
-def run_smoke_test(args, tokenizer, bos_id, eos_id):
+def run_smoke_test(args, tokenizer):
     """Run the smoke test with comprehensive statistics."""
     start_time = time.time()
 
@@ -89,6 +101,14 @@ def run_smoke_test(args, tokenizer, bos_id, eos_id):
         shuffle_lines=True,
     )
 
+    # Get separator and pad IDs from dataset (they're the same token: <|endoftext|>)
+    dataset = loader.dataset
+    sep_id = getattr(dataset, "sep_id", None)
+    pad_id = getattr(dataset, "pad_id", None)
+    
+    if sep_id is None or pad_id is None:
+        raise RuntimeError("Dataset missing separator/pad token IDs.")
+
     # Display configuration
     print("\n" + "="*60)
     print("MOLECULAR CONFORMER DATALOADER SMOKE TEST")
@@ -96,8 +116,9 @@ def run_smoke_test(args, tokenizer, bos_id, eos_id):
     print("Definitions: Item = dataset line (SMILES+conformer), Sample = 2048-token sequence, Batch = sample collection")
     print("="*60)
     print(f"Train paths: {args.train_path}")
+    print(f"Tokenizer alias: {args.tokenizer_name}")
     print(f"Tokenizer: {args.tokenizer_path}")
-    print(f"Special tokens: BOS={bos_id}, EOS={eos_id}")
+    print(f"Separator/Pad token ID: {sep_id} (<|endoftext|>)")
     print(f"Sequence length: {args.seq_len}")
     print(f"Batch size: {args.batch_size}")
     print(f"Workers: {args.num_workers}")
@@ -111,6 +132,7 @@ def run_smoke_test(args, tokenizer, bos_id, eos_id):
         "complete_samples": 0,
         "items_per_sample": [],
         "tokens_per_sample": [],
+        "pad_counts": [],
         "seq_len": args.seq_len
     }
 
@@ -118,9 +140,10 @@ def run_smoke_test(args, tokenizer, bos_id, eos_id):
 
     for batch_idx, (inputs, labels) in enumerate(loader):
         batch_start_time = time.time()
-        assert inputs.shape == labels.shape, "Input and label shapes must match"
+        input_ids = inputs["input"] if isinstance(inputs, dict) else inputs
+        assert input_ids.shape == labels.shape, "Input and label shapes must match"
 
-        batch_size, seq_len = inputs.shape
+        batch_size, seq_len = input_ids.shape
         batch_num = batch_idx + 1
 
         print(f"\n--- Batch {batch_num}/{args.max_batches} ({batch_size} samples) ---")
@@ -131,9 +154,16 @@ def run_smoke_test(args, tokenizer, bos_id, eos_id):
         batch_complete = 0
         samples_to_show = min(batch_size, 4)
 
+        if pad_id is not None:
+            pad_counts_batch = ((input_ids == pad_id).sum(dim=1)).tolist()
+        else:
+            pad_counts_batch = [0] * batch_size
+        stats["pad_counts"].extend(pad_counts_batch)
+
         for sample_idx in range(samples_to_show):
-            sample_tokens = inputs[sample_idx].tolist()
-            sample_stats = analyze_sample(sample_tokens, eos_id, tokenizer)
+            sample_tensor = input_ids[sample_idx]
+            sample_tokens = sample_tensor.tolist()
+            sample_stats = analyze_sample(sample_tokens, sep_id, pad_id, tokenizer)
 
             batch_items.append(sample_stats["items"])
             batch_tokens.append(sample_stats["token_count"])
@@ -163,6 +193,10 @@ def run_smoke_test(args, tokenizer, bos_id, eos_id):
 
     # Final comprehensive statistics
     display_comprehensive_stats(stats, start_time, val_count)
+
+    avg_pad = sum(stats["pad_counts"]) / len(stats["pad_counts"]) if stats["pad_counts"] else 0.0
+    print(f"\nTokenizer path used: {args.tokenizer_path}")
+    print(f"Avg pads per sample: {avg_pad:.2f}")
 
 
 def count_validation_samples(tokenizer_path: str) -> int:
@@ -194,7 +228,8 @@ def count_validation_samples(tokenizer_path: str) -> int:
 
     try:
         for inputs, targets in dataloader:
-            batch_size = inputs.shape[0]
+            input_tensor = inputs["input"] if isinstance(inputs, dict) else inputs
+            batch_size = input_tensor.shape[0]
             sample_count += batch_size
             batch_count += 1
 
@@ -281,8 +316,14 @@ Examples:
     )
     parser.add_argument(
         "--tokenizer_path",
-        default=str(get_tokenizer_path("llama3_chem_v1")),
-        help="HuggingFace tokenizer path (default: llama3_chem_v1 from paths.yaml)"
+        default="",
+        help="Explicit HuggingFace tokenizer path (overrides --tokenizer_name)"
+    )
+    parser.add_argument(
+        "--tokenizer_name",
+        type=str,
+        default="qwen3_0.6b_origin",
+        help="Alias to resolve via paths.yaml (default: qwen3_0.6b_origin, can be set to llama3_chem_v1 or qwen3_06b_custom)"
     )
     parser.add_argument(
         "--seq_len", type=int, default=2048,
@@ -304,15 +345,18 @@ Examples:
     args = parser.parse_args()
 
     # Validate and load tokenizer
+    tokenizer_path = args.tokenizer_path or str(get_tokenizer_path(args.tokenizer_name))
+    args.tokenizer_path = tokenizer_path
+
     try:
-        tokenizer, bos_id, eos_id = validate_tokenizer(args.tokenizer_path)
+        tokenizer = validate_tokenizer(tokenizer_path)
     except Exception as e:
         print(f"ERROR: Failed to load tokenizer: {e}")
         return 1
 
     # Run the smoke test
     try:
-        run_smoke_test(args, tokenizer, bos_id, eos_id)
+        run_smoke_test(args, tokenizer)
         return 0
     except Exception as e:
         print(f"ERROR: Smoke test failed: {e}")

@@ -5,9 +5,8 @@ import json
 import os
 import random
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Sequence, Tuple, Union
+from typing import BinaryIO, Dict, Iterator, List, Optional, Sequence, Tuple, Union
 
-import numpy as np
 import torch
 from collections import defaultdict
 from loguru import logger
@@ -35,8 +34,11 @@ from molgen3D.training.pretraining.config.custom_job_config import (
     JobConfig as MolGenJobConfig,
     MolGenDataConfig,
 )
+from molgen3D.training.pretraining.dataprocessing.sequence_packing import (
+    PendingUnit,
+    SequenceState,
+)
 from molgen3D.training.pretraining.dataprocessing.text_processing import (
-    ChunkPacker,
     build_unit,
     is_valid_unit,
 )
@@ -66,6 +68,30 @@ def _resolve_special_token_id(tokenizer, attr_name: str, fallback_tokens: Sequen
             return int(converted)
 
     return None
+
+
+def ensure_tokenizer_pad_token(tokenizer, token: str = "<|endoftext|>") -> int:
+    """
+    Ensure the tokenizer exposes <|endoftext|> and uses it as the pad token so
+    separators/padding share the same id.
+    """
+    token_id = tokenizer.convert_tokens_to_ids(token)
+    if token_id is None or token_id < 0:
+        tokenizer.add_special_tokens({"additional_special_tokens": [token]})
+        token_id = tokenizer.convert_tokens_to_ids(token)
+    if token_id is None or token_id < 0:
+        raise RuntimeError(f"Failed to add {token} token to tokenizer.")
+
+    if tokenizer.pad_token != token:
+        tokenizer.add_special_tokens({"pad_token": token})
+        tokenizer.pad_token = token
+
+    pad_id = tokenizer.pad_token_id
+    if pad_id is None:
+        raise RuntimeError("Failed to configure tokenizer pad token.")
+    if pad_id != token_id:
+        token_id = pad_id
+    return int(token_id)
 
 
 class TitanStatefulDataLoader(StatefulDataLoader, BaseDataLoader):
@@ -135,11 +161,8 @@ class _PreviewLogger:
 
 class JsonlTaggedPackedDataset(IterableDataset):
     """
-    JSONL -> unit string -> HF tokenize(no specials) -> pack to 2048.
-    - BOS at start of each chunk
-    - EOS between units
-    - no unit splitting; over-long units dropped
-    Resume works with torchdata.StatefulDataLoader (if available).
+    JSONL -> unit string -> fast tokenizer -> atomic sequences separated by <|endoftext|>.
+    Buffered shuffle with limited lookahead keeps units intact and deterministic.
     """
     def __init__(
         self,
@@ -152,12 +175,14 @@ class JsonlTaggedPackedDataset(IterableDataset):
         seed: int = 1234,
         world_size: Optional[int] = None,
         rank: Optional[int] = None,
+        shuffle_buffer_size: int = 4096,
+        lookahead_limit: int = 100,
+        ignore_index: int = -100,
     ):
         super().__init__()
         self.files = _coerce_train_targets(train_path)
         self.idxs = [build_line_index(p) for p in self.files]
 
-        # world/rank from env (torchrun/Titan sets these)
         if world_size is None or rank is None:
             self.world_size = int(os.environ.get("WORLD_SIZE", "1"))
             self.rank = int(os.environ.get("RANK", "0"))
@@ -165,49 +190,42 @@ class JsonlTaggedPackedDataset(IterableDataset):
             self.world_size = world_size
             self.rank = rank
 
-        # tokenizer (HF only for simplicity)
-        self.tk = AutoTokenizer.from_pretrained(str(tokenizer_path), use_fast=True)
-        self.bos_id = _resolve_special_token_id(
-            self.tk,
-            "bos_token_id",
-            (
-                getattr(self.tk, "bos_token", None),
-                "<|im_start|>",
-                "<s>",
-                getattr(self.tk, "cls_token", None),
-            ),
+        self.tk = AutoTokenizer.from_pretrained(
+            str(tokenizer_path),
+            use_fast=True,
+            fix_mistral_regex=True,
         )
-        self.eos_id = _resolve_special_token_id(
-            self.tk,
-            "eos_token_id",
-            (
-                getattr(self.tk, "eos_token", None),
-                "</s>",
-                "<|im_end|>",
-                "<|endoftext|>",
-                getattr(self.tk, "sep_token", None),
-            ),
-        )
-        if self.bos_id is None or self.eos_id is None:
-            raise RuntimeError(
-                "Tokenizer must expose bos/eos tokens. "
-                "Tried common aliases (<|im_start|>, <|im_end|>, etc.) but none were found."
-            )
+        self.sep_id = ensure_tokenizer_pad_token(self.tk)
+        self.pad_id = self.sep_id
 
         self.seq_len = int(seq_len)
+        self.max_unit_tokens = max(0, self.seq_len - 1)
         self.min_emb_len = int(min_emb_len)
         self.shuffle_lines = bool(shuffle_lines)
         self.infinite = bool(infinite)
+        self.shuffle_buffer_size = max(1, int(shuffle_buffer_size))
+        self.lookahead_limit = max(1, int(lookahead_limit))
+        self.ignore_index = int(ignore_index)
 
         self._epoch = 0
         self._rng = random.Random(seed + self.rank * 97)
-        self._packer = ChunkPacker(self.seq_len, self.bos_id, self.eos_id)
-        self._start_k = 0     # resume cursor within worker's pair list
+        self._start_k = 0
         self._pairs_total = 0
-        self._preview = _PreviewLogger(self.tk)
+        self._pair_cursor = self._start_k
+        self._pair_buffer_positions: List[int] = []
+        self._pending_units: List[PendingUnit] = []
+        self._sequence_state = SequenceState(
+            seq_len=self.seq_len,
+            separator_id=self.sep_id,
+            pad_id=self.pad_id,
+            ignore_index=self.ignore_index,
+        )
+        self._monster_warning_shown = False
+        self._preview = _PreviewLogger(self.tk, limit=2)
+        self._reset_epoch_state()
 
-    def _pairs_for_epoch(self) -> List[Tuple[int,int]]:
-        pairs: List[Tuple[int,int]] = []
+    def _pairs_for_epoch(self) -> List[Tuple[int, int]]:
+        pairs: List[Tuple[int, int]] = []
         base = 0
         for fi, idx in enumerate(self.idxs):
             n = len(idx)
@@ -221,7 +239,7 @@ class JsonlTaggedPackedDataset(IterableDataset):
             base += n
         return pairs
 
-    def __iter__(self) -> Iterator[Tuple[torch.Tensor, torch.Tensor]]:
+    def __iter__(self) -> Iterator[Tuple[Dict[str, torch.Tensor], torch.Tensor]]:
         wi = get_worker_info()
         wid = wi.id if wi else 0
         nworkers = wi.num_workers if wi else 1
@@ -230,43 +248,30 @@ class JsonlTaggedPackedDataset(IterableDataset):
             all_pairs = self._pairs_for_epoch()
             worker_pairs = [p for i, p in enumerate(all_pairs) if (i % nworkers) == wid]
             self._pairs_total = len(worker_pairs)
-            k = self._start_k
-
             fps = [open(p, "rb") for p in self.files]
+            preview_enabled = (self._epoch == 0) and (wid == 0)
             try:
-                while k < self._pairs_total:
-                    fi, li = worker_pairs[k]
-                    k += 1
-                    self._start_k = k
-
-                    raw = read_line_at(fps[fi], int(self.idxs[fi][li]))
-                    if not raw:
-                        continue
-
-                    tokens = self._extract_tokens(raw)
-                    if tokens is None:
-                        continue
-
-                    preview_enabled = (wid == 0)
-                    yield from self._pack_tokens(tokens, preview_enabled)
+                yield from self._pack_from_pairs(worker_pairs, fps, preview_enabled)
             finally:
-                for f in fps: f.close()
+                for f in fps:
+                    f.close()
 
             if not self.infinite:
                 break
             self._epoch += 1
-            # deterministic but different shuffle each epoch per rank
             self._rng.seed(1337 + self._epoch * 100003 + self.rank * 97)
             self._start_k = 0
+            self._reset_epoch_state()
 
-    # ------ resume for StatefulDataLoader ------
     def state_dict(self) -> Dict:
         return {
             "epoch": self._epoch,
             "rng_state": self._rng.getstate(),
             "start_k": self._start_k,
             "pairs_total": self._pairs_total,
-            "packer": self._packer.state_dict(),
+            "pair_buffer": list(self._pair_buffer_positions),
+            "pending_units": [unit.tokens for unit in self._pending_units],
+            "sequence_tokens": self._sequence_state.export_tokens(),
         }
 
     def load_state_dict(self, s: Dict):
@@ -274,9 +279,124 @@ class JsonlTaggedPackedDataset(IterableDataset):
         self._rng.setstate(s.get("rng_state", random.Random().getstate()))
         self._start_k = int(s.get("start_k", 0))
         self._pairs_total = int(s.get("pairs_total", 0))
-        self._packer.load_state_dict(s.get("packer", {}))
+        self._pair_buffer_positions = [int(idx) for idx in s.get("pair_buffer", [])]
+        pending = s.get("pending_units", [])
+        self._pending_units = [
+            PendingUnit(tokens=list(tokens), total_len=len(tokens) + 1)
+            for tokens in pending
+        ]
+        self._sequence_state.load_tokens(s.get("sequence_tokens", []))
+        self._pair_cursor = self._start_k
+        self._monster_warning_shown = False
 
-    def _extract_tokens(self, raw: bytes) -> Optional[List[int]]:
+    def _reset_epoch_state(self) -> None:
+        self._pair_buffer_positions = []
+        self._pending_units = []
+        self._sequence_state.reset()
+        self._pair_cursor = self._start_k
+        self._monster_warning_shown = False
+
+    def _fill_pair_buffer(self, worker_pairs: List[Tuple[int, int]]) -> None:
+        while (
+            len(self._pair_buffer_positions) < self.shuffle_buffer_size
+            and self._pair_cursor < len(worker_pairs)
+        ):
+            self._pair_buffer_positions.append(self._pair_cursor)
+            self._pair_cursor += 1
+            self._start_k = self._pair_cursor
+
+    def _ensure_pending_units(
+        self,
+        worker_pairs: List[Tuple[int, int]],
+        fps: List[BinaryIO],
+    ) -> None:
+        self._fill_pair_buffer(worker_pairs)
+        while len(self._pending_units) < self.lookahead_limit + 1:
+            unit = self._draw_unit_from_buffer(worker_pairs, fps)
+            if unit is None:
+                break
+            self._pending_units.append(unit)
+
+    def _draw_unit_from_buffer(
+        self,
+        worker_pairs: List[Tuple[int, int]],
+        fps: List[BinaryIO],
+    ) -> Optional[PendingUnit]:
+        while self._pair_buffer_positions:
+            idx = self._rng.randrange(len(self._pair_buffer_positions))
+            pair_index = self._pair_buffer_positions[idx]
+            pair = worker_pairs[pair_index]
+            unit = self._read_unit_from_pair(fps, pair)
+            self._replace_buffer_entry(idx, worker_pairs)
+            if unit is not None:
+                return unit
+        return None
+
+    def _replace_buffer_entry(self, idx: int, worker_pairs: List[Tuple[int, int]]) -> None:
+        if self._pair_cursor < len(worker_pairs):
+            self._pair_buffer_positions[idx] = self._pair_cursor
+            self._pair_cursor += 1
+            self._start_k = self._pair_cursor
+        else:
+            self._pair_buffer_positions.pop(idx)
+
+    def _select_fitting_unit(self) -> Optional[PendingUnit]:
+        limit = min(self.lookahead_limit, len(self._pending_units))
+        if limit == 0:
+            return None
+
+        available_space = self.seq_len - self._sequence_state.used_len
+        best_idx: Optional[int] = None
+        best_remaining: Optional[int] = None
+
+        for idx in range(limit):
+            unit = self._pending_units[idx]
+            if unit.total_len > available_space:
+                continue
+            remaining = available_space - unit.total_len
+            if best_remaining is None or remaining < best_remaining:
+                best_idx = idx
+                best_remaining = remaining
+                if remaining == 0:
+                    break
+
+        if best_idx is not None:
+            return self._pending_units.pop(best_idx)
+
+        return None
+
+    def _evict_monster_unit(self) -> bool:
+        threshold = self.seq_len - 1
+        limit = min(self.lookahead_limit, len(self._pending_units))
+        for idx in range(limit):
+            unit = self._pending_units[idx]
+            if unit.total_len > threshold:
+                del self._pending_units[idx]
+                self._maybe_log_monster(len(unit.tokens))
+                return True
+        return False
+
+    def _maybe_log_monster(self, token_len: int) -> None:
+        if self._monster_warning_shown:
+            return
+        logger.warning(
+            "Rank {} skipping unit of {} tokens because it exceeds max tokens {}",
+            self.rank,
+            token_len,
+            self.max_unit_tokens,
+        )
+        self._monster_warning_shown = True
+
+    def _read_unit_from_pair(
+        self,
+        fps: List[BinaryIO],
+        pair: Tuple[int, int],
+    ) -> Optional[PendingUnit]:
+        fi, li = pair
+        raw = read_line_at(fps[fi], int(self.idxs[fi][li]))
+        if not raw:
+            return None
+
         try:
             obj = json.loads(raw)
         except Exception:
@@ -287,25 +407,45 @@ class JsonlTaggedPackedDataset(IterableDataset):
         if not is_valid_unit(canon, emb, min_emb_len=self.min_emb_len):
             return None
         unit = build_unit(canon, emb)
-        toks = self.tk.encode(unit, add_special_tokens=False)
-        return [self.eos_id] + toks
+        tokens = self.tk.encode(unit, add_special_tokens=False)
+        if not tokens:
+            return None
+        if len(tokens) > self.max_unit_tokens:
+            self._maybe_log_monster(len(tokens))
+            return None
+        return PendingUnit(tokens=tokens, total_len=len(tokens) + 1)
 
-    def _pack_tokens(
-        self, toks: List[int], preview_enabled: bool
-    ) -> Iterator[Tuple[Dict[str, torch.Tensor], torch.Tensor]]:
-        unit_completed = self._packer.try_add_unit(toks)
-        if not unit_completed and self._packer.pending_unit:
-            yield from self._flush_blocks(preview_enabled)
-        yield from self._flush_blocks(preview_enabled)
-
-    def _flush_blocks(
+    def _pack_from_pairs(
         self,
+        worker_pairs: List[Tuple[int, int]],
+        fps: List[BinaryIO],
         preview_enabled: bool,
     ) -> Iterator[Tuple[Dict[str, torch.Tensor], torch.Tensor]]:
-        for inp, lab in self._packer.yield_blocks():
-            if preview_enabled:
-                self._preview.maybe_log(self.rank, inp)
-            yield {"input": inp}, lab
+        while True:
+            self._ensure_pending_units(worker_pairs, fps)
+            if not self._pending_units:
+                break
+            unit = self._select_fitting_unit()
+            if unit:
+                self._sequence_state.append_unit(unit)
+                continue
+            if self._sequence_state.has_content():
+                yield self._finalize_with_logging(preview_enabled)
+                continue
+            if self._evict_monster_unit():
+                continue
+            break
+        if self._sequence_state.has_content():
+            yield self._finalize_with_logging(preview_enabled)
+
+    def _finalize_with_logging(
+        self,
+        preview_enabled: bool,
+    ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
+        inp, lab = self._sequence_state.finalize()
+        if preview_enabled:
+            self._preview.maybe_log(self.rank, inp)
+        return {"input": inp}, lab
 
 # ---------- Titan factory ----------
 def build_dataloader(
@@ -325,6 +465,7 @@ def build_dataloader(
     prefetch_factor: Optional[int] = None,
     world_size: Optional[int] = None,
     rank: Optional[int] = None,
+    lookahead_limit: int = 100,
 ):
     ds = JsonlTaggedPackedDataset(
         train_path=train_path,
@@ -336,6 +477,7 @@ def build_dataloader(
         seed=seed if seed is not None else 1234,
         world_size=world_size,
         rank=rank,
+        lookahead_limit=lookahead_limit,
     )
     effective_persistent = (
         persistent_workers if persistent_workers is not None else (num_workers > 0)
@@ -419,6 +561,7 @@ def build_molgen_dataloader(
         prefetch_factor=data_cfg.prefetch_factor,
         world_size=dp_world_size,
         rank=dp_rank,
+        lookahead_limit=data_cfg.lookahead_limit,
     )
 
 
