@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import os
+import json
 from transformers import AutoTokenizer, AutoModel, AutoModelForCausalLM
 
 # ----- CONFIG -----
@@ -22,6 +23,10 @@ NEW_TOKENS = ["[SMILES]", "[CONFORMERS]", "[/SMILES]", "[/CONFORMERS]"]
 # ----- SCRIPT -----
 
 def main():
+    # load_model_and_tokenizer()
+    sanity_checks()
+
+def load_model_and_tokenizer():
     print(f"Loading model and tokenizer from Hugging Face: {HF_MODEL_NAME}")
     
     # Load tokenizer and model from Hugging Face
@@ -182,79 +187,116 @@ def main():
     os.makedirs(CUSTOM_TOK_DIR, exist_ok=True)
     print(f"\nSaving custom tokenizer with extra tokens to: {CUSTOM_TOK_DIR}")
     tokenizer.save_pretrained(CUSTOM_TOK_DIR)
+    
+    # Store metadata for sanity_checks to read
+    metadata_file = os.path.join(CUSTOM_TOK_DIR, "metadata.json")
+    with open(metadata_file, 'w') as f:
+        json.dump({
+            "orig_vocab_size": orig_vocab_size,
+            "num_added": num_added,
+            "new_vocab_size": new_vocab_size,
+            "orig_embed_shape": list(orig_embed_shape) if orig_embed_shape is not None else None
+        }, f, indent=2)
 
     # 4) Save the model (unchanged, no resizing)
     os.makedirs(MODEL_DIR, exist_ok=True)
     print(f"Saving model to: {MODEL_DIR}")
     model.save_pretrained(MODEL_DIR)
 
+def sanity_checks():
     # ----- SANITY CHECKS -----
     print("\n=== Sanity Checks ===")
+    
+    # Load metadata if available (from previous run of load_model_and_tokenizer)
+    metadata_file = os.path.join(CUSTOM_TOK_DIR, "metadata.json")
+    orig_vocab_size = None
+    num_added = None
+    new_vocab_size = None
+    orig_embed_shape = None
+    
+    if os.path.exists(metadata_file):
+        with open(metadata_file, 'r') as f:
+            metadata = json.load(f)
+            orig_vocab_size = metadata.get("orig_vocab_size")
+            num_added = metadata.get("num_added")
+            new_vocab_size = metadata.get("new_vocab_size")
+            orig_embed_shape = tuple(metadata["orig_embed_shape"]) if metadata.get("orig_embed_shape") else None
+            print(f"Loaded metadata: orig_vocab_size={orig_vocab_size}, num_added={num_added}, new_vocab_size={new_vocab_size}")
+    else:
+        print("Warning: metadata.json not found. Some checks will be skipped.")
 
-    # 1) Fast tokenizer?
-    print(f"Tokenizer is_fast before reload: {tokenizer.is_fast}")
+    # 1) Reload both original and custom tokenizers and verify
+    print("\n=== Reloading and Verifying ===")
+    print("Reloading original tokenizer...")
+    if not os.path.exists(ORIG_TOK_DIR):
+        print(f"Warning: Original tokenizer directory not found: {ORIG_TOK_DIR}")
+        print("Skipping original tokenizer checks.")
+    else:
+        orig_tok = AutoTokenizer.from_pretrained(ORIG_TOK_DIR)
+        print(f"Original reloaded vocab size: {len(orig_tok)} (is_fast={orig_tok.is_fast})")
+        if orig_vocab_size is not None:
+            assert len(orig_tok) == orig_vocab_size, f"Reloaded original vocab size mismatch: expected {orig_vocab_size}, got {len(orig_tok)}"
 
-    # 2) Vocab size increased by num_added
-    expected_new_size = orig_vocab_size + num_added
-    assert new_vocab_size == expected_new_size, (
-        f"Vocab size mismatch: expected {expected_new_size}, got {new_vocab_size}"
-    )
+    print("Reloading custom tokenizer...")
+    if not os.path.exists(CUSTOM_TOK_DIR):
+        print(f"Error: Custom tokenizer directory not found: {CUSTOM_TOK_DIR}")
+        print("Please run load_model_and_tokenizer() first.")
+        return
+    
+    custom_tok = AutoTokenizer.from_pretrained(CUSTOM_TOK_DIR)
+    print(f"Custom reloaded vocab size: {len(custom_tok)} (is_fast={custom_tok.is_fast})")
+    
+    # 2) Verify vocab size increased by num_added
+    if orig_vocab_size is not None and num_added is not None:
+        expected_new_size = orig_vocab_size + num_added
+        assert len(custom_tok) == expected_new_size, (
+            f"Vocab size mismatch: expected {expected_new_size}, got {len(custom_tok)}"
+        )
+        if new_vocab_size is not None:
+            assert len(custom_tok) == new_vocab_size, (
+                f"Vocab size mismatch: expected {new_vocab_size}, got {len(custom_tok)}"
+            )
 
     # 3) New tokens have valid (non-UNK) IDs
-    unk_id = tokenizer.unk_token_id
+    unk_id = custom_tok.unk_token_id
     for tok in NEW_TOKENS:
-        tid = tokenizer.convert_tokens_to_ids(tok)
+        tid = custom_tok.convert_tokens_to_ids(tok)
         print(f"Token {tok!r} -> id {tid}")
         assert tid is not None and tid != unk_id, (
             f"Token {tok!r} did not get a valid id (got {tid}, unk={unk_id})"
         )
 
-    # 4) Reload both original and custom tokenizers and re-check via AutoTokenizer
-    print("\n=== Reloading and Verifying ===")
-    print("Reloading original tokenizer...")
-    orig_tok = AutoTokenizer.from_pretrained(ORIG_TOK_DIR)
-    print(f"Original reloaded vocab size: {len(orig_tok)} (is_fast={orig_tok.is_fast})")
-    assert len(orig_tok) == orig_vocab_size, "Reloaded original vocab size mismatch"
-
-    print("Reloading custom tokenizer...")
-    custom_tok = AutoTokenizer.from_pretrained(CUSTOM_TOK_DIR)
-    print(f"Custom reloaded vocab size: {len(custom_tok)} (is_fast={custom_tok.is_fast})")
-    assert len(custom_tok) == new_vocab_size, "Reloaded custom vocab size mismatch"
-
-    for tok in NEW_TOKENS:
-        tid = custom_tok.convert_tokens_to_ids(tok)
-        print(f"[reload] Token {tok!r} -> id {tid}")
-        assert tid is not None and tid != custom_tok.unk_token_id, (
-            f"[reload] Token {tok!r} did not get a valid id after reload"
-        )
-
-    # 5) Reload model and verify embedding size (should be unchanged)
+    # 4) Reload model and verify embedding size (should be unchanged)
     print("\nReloading model...")
-    try:
-        reloaded_model = AutoModelForCausalLM.from_pretrained(MODEL_DIR)
-    except Exception:
-        reloaded_model = AutoModel.from_pretrained(MODEL_DIR)
-    
-    if hasattr(reloaded_model, 'embed_tokens'):
-        reloaded_embedding = reloaded_model.embed_tokens
-    elif hasattr(reloaded_model, 'wte'):
-        reloaded_embedding = reloaded_model.wte
-    elif hasattr(reloaded_model, 'embeddings') and hasattr(reloaded_model.embeddings, 'word_embeddings'):
-        reloaded_embedding = reloaded_model.embeddings.word_embeddings
+    if not os.path.exists(MODEL_DIR):
+        print(f"Warning: Model directory not found: {MODEL_DIR}")
+        print("Skipping model embedding checks.")
     else:
-        reloaded_embedding = None
-    
-    if reloaded_embedding is not None:
-        reloaded_embed_shape = reloaded_embedding.weight.shape
-        print(f"Reloaded model embedding shape: {reloaded_embed_shape}")
-        print(f"  - Vocab size: {reloaded_embed_shape[0]}")
-        print(f"  - Embedding dim: {reloaded_embed_shape[1]}")
-        # Verify embedding shape matches original (model was not resized)
-        if orig_embed_shape is not None:
-            assert reloaded_embed_shape == orig_embed_shape, (
-                f"Embedding shape changed: {orig_embed_shape} -> {reloaded_embed_shape}"
-            )
-            print(f"  ✓ Embedding shape matches original")
+        try:
+            reloaded_model = AutoModelForCausalLM.from_pretrained(MODEL_DIR)
+        except Exception:
+            reloaded_model = AutoModel.from_pretrained(MODEL_DIR)
+        
+        if hasattr(reloaded_model, 'embed_tokens'):
+            reloaded_embedding = reloaded_model.embed_tokens
+        elif hasattr(reloaded_model, 'wte'):
+            reloaded_embedding = reloaded_model.wte
+        elif hasattr(reloaded_model, 'embeddings') and hasattr(reloaded_model.embeddings, 'word_embeddings'):
+            reloaded_embedding = reloaded_model.embeddings.word_embeddings
+        else:
+            reloaded_embedding = None
+        
+        if reloaded_embedding is not None:
+            reloaded_embed_shape = reloaded_embedding.weight.shape
+            print(f"Reloaded model embedding shape: {reloaded_embed_shape}")
+            print(f"  - Vocab size: {reloaded_embed_shape[0]}")
+            print(f"  - Embedding dim: {reloaded_embed_shape[1]}")
+            # Verify embedding shape matches original (model was not resized)
+            if orig_embed_shape is not None:
+                assert reloaded_embed_shape == orig_embed_shape, (
+                    f"Embedding shape changed: {orig_embed_shape} -> {reloaded_embed_shape}"
+                )
+                print(f"  ✓ Embedding shape matches original")
 
     print("\nAll sanity checks passed ✅")
 
