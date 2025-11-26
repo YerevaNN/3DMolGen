@@ -10,11 +10,12 @@ import argparse
 import glob
 import json
 import os
+import random
 import sys
 import time
-from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Sequence, Tuple, Union
+
 
 # Fix module resolution when running this file directly
 _script_dir = Path(__file__).resolve().parent
@@ -27,9 +28,7 @@ if str(_repo_root) not in sys.path:
 # Import our modules
 from transformers import AutoTokenizer
 from molgen3D.config.paths import get_data_path, get_tokenizer_path
-from molgen3D.training.pretraining.dataprocessing.text_processing import build_unit, is_valid_unit
 from molgen3D.training.pretraining.dataprocessing.dataloader import build_dataloader
-from molgen3D.training.pretraining.dataprocessing.utils import expand_paths
 
 
 def debug_examine_files():
@@ -99,278 +98,392 @@ def debug_examine_files():
 
 def count_lines_in_jsonl_files(directory):
     """Count total lines across all .jsonl files in directory."""
+    files_with_counts = list_jsonl_files_with_counts(directory)
+    total_lines = sum(count for _, count in files_with_counts)
+    return total_lines, len(files_with_counts)
+
+
+def list_jsonl_files_with_counts(directory: str) -> List[Tuple[str, int]]:
+    """Return all .jsonl files under `directory` and their line counts."""
     if not directory or not os.path.exists(directory):
-        return 0, 0
-
+        return []
     jsonl_files = sorted(glob.glob(os.path.join(directory, "*.jsonl")))
-    if not jsonl_files:
-        return 0, 0
-
-    total_lines = 0
+    out: List[Tuple[str, int]] = []
     for file in jsonl_files:
         with open(file, 'r') as f:
-            lines = sum(1 for _ in f)
-            total_lines += lines
+            count = sum(1 for _ in f)
+        out.append((file, count))
+    return out
 
-    return total_lines, len(jsonl_files)
+
+def get_file_sizes(files_with_counts: List[Tuple[str, int]]) -> Dict[str, int]:
+    """Get file sizes in bytes for all files."""
+    file_sizes = {}
+    for file_path, _ in files_with_counts:
+        if os.path.exists(file_path):
+            file_sizes[file_path] = os.path.getsize(file_path)
+    return file_sizes
 
 
-def sample_items_and_create_samples(dataset_path: str, tokenizer_path: str, seq_len: int, num_items: int = 10000) -> Optional[Dict[str, Any]]:
-    """Load items from dataset and pack them into samples (2048-token sequences) using actual dataloader logic."""
+def get_bytes_for_lines(file_path: str, num_lines: int) -> Optional[int]:
+    """
+    Get the byte size of the first num_lines in a file.
+    
+    Args:
+        file_path: Path to the file
+        num_lines: Number of lines to read
+    
+    Returns:
+        Byte size of the first num_lines, or None if file doesn't exist
+    """
+    if not os.path.exists(file_path):
+        return None
+    
     try:
-        # Load tokenizer for processing
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, use_fast=True)
-
-        # First, get total items and build file list
-        if not os.path.exists(dataset_path):
-            return None
-
-        jsonl_files = sorted(glob.glob(os.path.join(dataset_path, "*.jsonl")))
-        if not jsonl_files:
-            return None
-
-        # Build cumulative item counts per file
-        import random
-        random.seed(random.randint(0, 2**31 - 1))  # Random seed for this run
-
-        file_item_counts = []
-        total_items = 0
-
-        for file_path in jsonl_files:
-            with open(file_path, 'r') as f:
-                count = sum(1 for _ in f)
-                file_item_counts.append((file_path, count))
-                total_items += count
-
-        if total_items == 0:
-            return None
-
-        # Sample random item indices
-        if num_items >= total_items:
-            selected_indices = list(range(total_items))
-        else:
-            selected_indices = sorted(random.sample(range(total_items), num_items))
-
-        print(f"  Loading {len(selected_indices)} items from {total_items:,} total items...")
-
-        # Convert global indices to file-specific indices and collect all tokenized items
-        all_tokenized_items = []
-        items_processed = 0
-
-        global_idx = 0
-        selected_idx = 0
-
-        for file_path, file_item_count in file_item_counts:
-            if selected_idx >= len(selected_indices):
-                break
-
-            file_start_idx = global_idx
-            file_end_idx = global_idx + file_item_count
-
-            # Find indices that belong to this file
-            file_indices = []
-            while selected_idx < len(selected_indices) and selected_indices[selected_idx] < file_end_idx:
-                file_indices.append(selected_indices[selected_idx] - file_start_idx)
-                selected_idx += 1
-
-            if not file_indices:
-                global_idx = file_end_idx
-                continue
-
-            # Read the specific lines from this file
-            with open(file_path, 'r') as f:
-                lines = f.readlines()
-
-            for local_idx in file_indices:
-                if local_idx < len(lines):
-                    line = lines[local_idx].strip()
-                    if not line:
-                        continue
-
-                    try:
-                        # Parse JSON line for item
-                        data = json.loads(line)
-                        if not isinstance(data, dict) or 'canonical_smiles' not in data or 'embedded_smiles' not in data:
-                            continue
-
-                        canonical = data['canonical_smiles']
-                        embedded = data['embedded_smiles']
-
-                        # Validate and build unit (item)
-                        if not is_valid_unit(canonical, embedded):
-                            continue
-
-                        processed_text = build_unit(canonical, embedded)
-
-                        # Use actual dataloader tokenization logic: EOS at end of each item
-                        tokens = tokenizer.encode(processed_text, add_special_tokens=False) + [tokenizer.eos_token_id]
-
-                        all_tokenized_items.append({
-                            'tokens': tokens,
-                            'canonical': canonical,
-                            'embedded': embedded,
-                            'processed_text': processed_text,
-                        })
-
-                        items_processed += 1
-
-                    except (json.JSONDecodeError, KeyError, Exception):
-                        continue
-
-            global_idx = file_end_idx
-
-        if items_processed == 0:
-            return None
-
-        # Now pack all items into samples (2048-token sequences) using ChunkPacker
-        from molgen3D.training.pretraining.dataprocessing.text_processing import ChunkPacker
-
-        packer = ChunkPacker(seq_len=seq_len, bos_id=tokenizer.bos_token_id, eos_id=tokenizer.eos_token_id)
-        samples_created = []
-
-        # Feed all tokenized items to the packer and collect samples as they become available
-        print(f"  Packing {len(all_tokenized_items)} items with ChunkPacker...")
-        for i, item in enumerate(all_tokenized_items):
-            packer.try_add_unit(item['tokens'])
-
-            # Collect any completed samples after adding this item
-            for inp, lab in packer.yield_blocks():
-                sample_tokens = inp.tolist()
-                decoded_text = tokenizer.decode(sample_tokens)
-                samples_created.append({
-                    'tokens': sample_tokens,
-                    'decoded_text': decoded_text,
-                    'token_count': len(sample_tokens),  # Should be seq_len
-                })
-
-            if (i + 1) % 500 == 0:
-                print(f"    Added {i+1} items, created {len(samples_created)} samples so far")
-
-        print(f"  Total samples created: {len(samples_created)}")
-
-        # Handle any remaining content in the buffer (partial sample)
-        # In real dataloader, this would be carried to next batch, but for estimation we'll treat it as a partial sample
-        if len(packer.buf) > 0:
-            print(f"  Remaining buffer length: {len(packer.buf)}")
-            # For estimation, we'll consider the remaining buffer as a partial sample
-            # but only if it contains actual content (not just padding)
-            remaining_tokens = packer.buf[:]
-            if len(remaining_tokens) > 0:
-                # Don't pad this one since it's partial - just include as-is for counting purposes
-                decoded_text = tokenizer.decode(remaining_tokens)
-                samples_created.append({
-                    'tokens': remaining_tokens,
-                    'decoded_text': decoded_text,
-                    'token_count': len(remaining_tokens),
-                })
-                print(f"  Created 1 partial sample from remaining buffer ({len(remaining_tokens)} tokens)")
-
-        # Calculate stats
-        total_tokens_in_samples = len(samples_created) * seq_len
-        avg_items_per_sample = items_processed / len(samples_created) if samples_created else 0
-
-        return {
-            'items_processed': items_processed,
-            'samples_created': len(samples_created),
-            'total_tokens_in_samples': total_tokens_in_samples,
-            'avg_items_per_sample': avg_items_per_sample,
-            'samples': samples_created[:2],  # Only keep first 2 samples for display
-            'first_item': all_tokenized_items[0] if all_tokenized_items else None,  # For detailed token breakdown
-        }
-
-    except Exception as e:
-        print(f"ERROR: Failed to process items: {e}")
+        with open(file_path, 'rb') as f:
+            bytes_count = 0
+            lines_read = 0
+            for line in f:
+                bytes_count += len(line)
+                lines_read += 1
+                if lines_read >= num_lines:
+                    break
+            return bytes_count
+    except Exception:
         return None
 
 
-def estimate_dataset(dataset_name, dataset_path, tokenizer_path, tokenizer, num_items, seq_len, is_validation=False):
+def verify_estimate_with_file_sizes(
+    sampled_file: str,
+    sampled_count: int,
+    files_with_counts: List[Tuple[str, int]],
+    total_items: int,
+    threshold_percent: float = 10.0,
+) -> Optional[Dict[str, Any]]:
+    """
+    Verify the line count estimate using file sizes.
+    
+    Gets the byte size of sampled lines, calculates extrapolation factor,
+    and checks if total bytes matches sampled_bytes * extrapolation_factor.
+    
+    Args:
+        sampled_file: Path to the sampled file
+        sampled_count: Number of lines that were sampled
+        files_with_counts: List of (file_path, line_count) tuples
+        total_items: Total line count from counting
+        threshold_percent: Maximum allowed difference percentage (default: 10%)
+    
+    Returns:
+        Dictionary with verification results, or None if verification failed
+    """
+    if not os.path.exists(sampled_file) or sampled_count == 0 or total_items == 0:
+        return None
+    
+    # Get byte size of the sampled lines
+    sampled_bytes = get_bytes_for_lines(sampled_file, sampled_count)
+    if sampled_bytes is None:
+        return None
+    
+    # Calculate extrapolation factor
+    extrapolation_factor = total_items / sampled_count
+    
+    # Calculate expected total bytes
+    expected_total_bytes = sampled_bytes * extrapolation_factor
+    
+    # Get actual total size of all files
+    file_sizes = get_file_sizes(files_with_counts)
+    actual_total_bytes = sum(file_sizes.get(file_path, 0) for file_path, _ in files_with_counts)
+    
+    if actual_total_bytes == 0:
+        return None
+    
+    # Calculate difference
+    difference = abs(actual_total_bytes - expected_total_bytes)
+    difference_percent = (difference / actual_total_bytes * 100) if actual_total_bytes > 0 else 0.0
+    
+    # Check if within threshold
+    is_within_threshold = difference_percent <= threshold_percent
+    
+    return {
+        'sampled_bytes': sampled_bytes,
+        'sampled_line_count': sampled_count,
+        'extrapolation_factor': extrapolation_factor,
+        'expected_total_bytes': expected_total_bytes,
+        'actual_total_bytes': actual_total_bytes,
+        'difference': difference,
+        'difference_percent': difference_percent,
+        'threshold_percent': threshold_percent,
+        'is_within_threshold': is_within_threshold,
+    }
+
+
+def collect_samples_from_dataloader(
+    train_path: Union[str, Sequence[str]],
+    tokenizer_path: str,
+    tokenizer: AutoTokenizer,
+    seq_len: int,
+    max_items: int,
+    batch_size: int = 1,
+    shuffle_lines: bool = False,
+    seed: int = 0,
+) -> Optional[Dict[str, Any]]:
+    """Run the dataloader until at least `max_items` units are observed."""
+    loader = build_dataloader(
+        train_path=train_path,
+        tokenizer_path=tokenizer_path,
+        seq_len=seq_len,
+        batch_size=batch_size,
+        num_workers=0,
+        pin_memory=False,
+        shuffle_lines=shuffle_lines,
+        infinite=False,
+        seed=seed,
+        min_emb_len=16,
+        drop_last=False,
+        persistent_workers=False,
+        prefetch_factor=None,
+        world_size=1,
+        rank=0,
+    )
+
+    dataset = getattr(loader, "dataset", None)
+    if dataset is None:
+        return None
+    pad_id = getattr(dataset, "pad_id", None)
+    sep_id = getattr(dataset, "sep_id", None)
+    if pad_id is None or sep_id is None:
+        raise RuntimeError("Dataset missing pad/separator token IDs.")
+
+    pad_total = 0
+    items_total = 0
+    samples_processed = 0
+    stop = False
+
+    for batch_idx, batch in enumerate(loader):
+        inputs, _ = batch
+        input_tensor = inputs["input"] if isinstance(inputs, dict) else inputs
+        bsz = input_tensor.size(0)
+        for sample_idx in range(bsz):
+            sample = input_tensor[sample_idx]
+            
+            # Count padding tokens at the end (they use the same ID as separators)
+            padding_count = 0
+            for token in reversed(sample.tolist()):
+                if token == pad_id:
+                    padding_count += 1
+                else:
+                    break
+            
+            # Count all sep_id/pad_id tokens, then subtract padding to get separator count
+            total_sep_pad = int((sample == sep_id).sum().item())
+            sep_count = total_sep_pad - padding_count
+            pad_count = padding_count
+            
+            items_total += sep_count
+            pad_total += pad_count
+            samples_processed += 1
+            if items_total >= max_items:
+                stop = True
+                break
+        if stop:
+            break
+
+    if samples_processed == 0:
+        return None
+
+    avg_items_per_sample = items_total / samples_processed if samples_processed else 0.0
+    avg_pad_per_sample = pad_total / samples_processed if samples_processed else 0.0
+
+    return {
+        "train_path": train_path,
+        "samples_processed": samples_processed,
+        "items_total": items_total,
+        "avg_items_per_sample": avg_items_per_sample,
+        "avg_pad_per_sample": avg_pad_per_sample,
+        "tokenizer_path": tokenizer_path,
+        "pad_total": pad_total,
+        "seq_len": seq_len,
+    }
+
+
+
+def estimate_dataset(
+    dataset_name,
+    dataset_path,
+    tokenizer_path,
+    tokenizer,
+    num_items,
+    seq_len,
+    is_validation=False,
+    sampled_file: Optional[str] = None,
+    sampled_count: Optional[int] = None,
+    sample_seed: int = 0,
+    files_with_counts: Optional[List[Tuple[str, int]]] = None,
+    print_overview: bool = True,
+):
     """Estimate tokens and samples by loading items and creating samples using dataloader logic."""
     dataset_type = "VALIDATION" if is_validation else "TRAIN"
-    print(f"\n{'='*70}")
-    print(f"{dataset_type} DATASET: {dataset_name}")
-    print(f"{'='*70}")
+    if print_overview:
+        print(f"\n{'='*70}")
+        print(f"{dataset_type} DATASET: {dataset_name}")
+        print(f"{'='*70}")
 
-    # Count total items in dataset
     if not dataset_path:
         print("ERROR: No dataset path provided")
         return None
 
-    total_items, num_files = count_lines_in_jsonl_files(dataset_path)
-    print(f"Dataset path: {dataset_path}")
-    print(f"Total .jsonl files: {num_files}")
-    print(f"Total items in dataset: {total_items:,}")
+    files_with_counts = files_with_counts or list_jsonl_files_with_counts(dataset_path)
+    total_items = sum(count for _, count in files_with_counts)
+    num_files = len(files_with_counts)
+    if print_overview:
+        print(f"Dataset path: {dataset_path}")
+        print(f"Total .jsonl files: {num_files}")
+        print(f"Total items in dataset: {total_items:,}")
+        if files_with_counts:
+            print("\nDataset files:")
+            for file_path, count in files_with_counts:
+                print(f"  {file_path}: {count} lines")
 
     if total_items == 0:
         print("ERROR: No items found in dataset")
         return None
 
-    # Load items and create samples using dataloader logic
-    sample_result = sample_items_and_create_samples(
-        dataset_path,
+    if sampled_file and sampled_count is not None:
+        selected_file, selected_count = sampled_file, sampled_count
+        print(f"\nUsing pre-selected sampling file: {selected_file}")
+    else:
+        selected_file, selected_count = random.choice(files_with_counts)
+        print(f"\nSampling from {selected_file} ({selected_count} lines)")
+
+    print(f"\nSampling from {selected_file} ({selected_count} lines)")
+    stats = collect_samples_from_dataloader(
+        selected_file,
         tokenizer_path,
+        tokenizer,
         seq_len,
-        num_items
+        max_items=min(num_items, selected_count),
+        batch_size=1,
+        shuffle_lines=False,
+        seed=sample_seed,
     )
 
-    if sample_result is None:
-        print("ERROR: Failed to process items")
+    if stats is None:
+        print("ERROR: Failed to sample sequences via dataloader.")
         return None
 
-    items_processed = sample_result['items_processed']
-    samples_created = sample_result['samples_created']
-    total_tokens_in_samples = sample_result['total_tokens_in_samples']
-    avg_items_per_sample = sample_result['avg_items_per_sample']
-    samples = sample_result['samples']  # First 2 samples
-    first_item = sample_result['first_item']
+    samples_processed = stats['samples_processed']
+    avg_items_per_sample = stats['avg_items_per_sample']
+    avg_pad_per_sample = stats['avg_pad_per_sample']
 
-    print(f"\nFROM SAMPLE OF {items_processed} ITEMS:")
-    print(f"  Samples created: {samples_created}")
-    print(f"  Total tokens in samples: {total_tokens_in_samples:,}")
-    print(f"  Avg items per sample: {avg_items_per_sample:.2f}")
-
-    if items_processed == 0:
-        print("ERROR: No items were successfully processed.")
+    if samples_processed == 0:
+        print("ERROR: No samples were analyzed.")
         return None
 
-    # Extrapolate to full dataset
-    items_ratio = total_items / items_processed
-    estimated_total_samples = int(samples_created * items_ratio)
+    estimated_total_samples = int(total_items / avg_items_per_sample) if avg_items_per_sample else 0
     estimated_total_tokens = estimated_total_samples * seq_len
+    estimated_pad_tokens = int(avg_pad_per_sample * estimated_total_samples)
+    estimated_effective_tokens = max(0, estimated_total_tokens - estimated_pad_tokens)
+    
+    # Calculate pad percentage metrics
+    avg_pad_percentage = (avg_pad_per_sample / seq_len * 100) if seq_len > 0 else 0.0
+    estimated_pad_percentage = (estimated_pad_tokens / estimated_total_tokens * 100) if estimated_total_tokens > 0 else 0.0
 
-    print(f"\nEXTRAPOLATED TO FULL DATASET:")
-    print(f"  Estimated total samples (seq_len={seq_len}): {estimated_total_samples:,}")
+    # Verify estimate using file sizes
+    verification = verify_estimate_with_file_sizes(
+        selected_file,
+        selected_count,
+        files_with_counts,
+        total_items,
+        threshold_percent=10.0,
+    )
+
+    # Organized stats printing
+    print(f"\n{'─'*70}")
+    print(f"Sampling Statistics:")
+    print(f"  Samples analyzed: {samples_processed:,}")
+    print(f"  Sampling file: {os.path.basename(selected_file)}")
+    print(f"  Avg items/sample: {avg_items_per_sample:.2f}")
+    print(f"  Avg pad tokens/sample: {avg_pad_per_sample:.2f} ({avg_pad_percentage:.2f}% of seq_len)")
+    print(f"\nExtrapolated Dataset Statistics:")
+    print(f"  Total items: {total_items:,}")
+    print(f"  Estimated samples (seq_len={seq_len}): {estimated_total_samples:,}")
     print(f"  Estimated total tokens: {estimated_total_tokens:,}")
-
-    # Print decoded version of first 2 samples
-    if samples:
-        print(f"\nSAMPLE ANALYSIS:")
-        for i, sample in enumerate(samples, 1):
-            print(f"\n--- Sample {i} ---")
-            print(f"Tokens: {sample['token_count']}")
-            print(f"Decoded: {sample['decoded_text']!r}")
-
-    # Print full token-to-decoded breakdown of 1 item only
-    if first_item:
-        print(f"\nFIRST ITEM TOKEN BREAKDOWN:")
-        print(f"SMILES: {first_item['canonical']}")
-        print(f"Tokens: {len(first_item['tokens'])}")
-        print(f"Decoded: {tokenizer.decode(first_item['tokens'])!r}")
-
-        print(f"\nDetailed token breakdown:")
-        for j, token_id in enumerate(first_item['tokens'][:50]):  # Show first 50 tokens
-            token_text = tokenizer.decode([token_id])
-            print(f"Token {j:3d}: {token_id:6d} -> {repr(token_text)}")
-        if len(first_item['tokens']) > 50:
-            print(f"... and {len(first_item['tokens']) - 50} more tokens")
+    print(f"  Estimated pad tokens: {estimated_pad_tokens:,} ({estimated_pad_percentage:.2f}% of total)")
+    print(f"  Estimated effective tokens: {estimated_effective_tokens:,}")
+    print(f"  Tokenizer path: {stats['tokenizer_path']}")
+    
+    # Verification section
+    if verification:
+        print(f"\n{'─'*70}")
+        print(f"Verification (File Size Based):")
+        print(f"  Sampled lines: {verification['sampled_line_count']:,}")
+        print(f"  Sampled bytes: {verification['sampled_bytes']:,} bytes ({verification['sampled_bytes'] / (1024**2):.2f} MB)")
+        print(f"  Extrapolation factor: {verification['extrapolation_factor']:.2f}x")
+        print(f"  Expected total bytes: {verification['expected_total_bytes']:,.0f} bytes ({verification['expected_total_bytes'] / (1024**3):.2f} GB)")
+        print(f"  Actual total bytes: {verification['actual_total_bytes']:,} bytes ({verification['actual_total_bytes'] / (1024**3):.2f} GB)")
+        print(f"  Difference: {verification['difference']:,.0f} bytes ({verification['difference_percent']:.2f}%)")
+        if verification['is_within_threshold']:
+            print(f"  ✓ Verification PASSED (within {verification['threshold_percent']:.1f}% threshold)")
+        else:
+            print(f"  ⚠️  Verification WARNING (exceeds {verification['threshold_percent']:.1f}% threshold)")
+    else:
+        print(f"\n{'─'*70}")
+        print(f"Verification (File Size Based):")
+        print(f"  ⚠️  Could not perform verification (file size data unavailable)")
 
     return {
         'total_items': total_items,
-        'items_processed': items_processed,
-        'samples_created': samples_created,
+        'samples_processed': samples_processed,
         'avg_items_per_sample': avg_items_per_sample,
+        'avg_pad_per_sample': avg_pad_per_sample,
+        'avg_pad_percentage': avg_pad_percentage,
         'estimated_total_samples': estimated_total_samples,
         'estimated_total_tokens': estimated_total_tokens,
+        'estimated_pad_tokens': estimated_pad_tokens,
+        'estimated_pad_percentage': estimated_pad_percentage,
+        'estimated_effective_tokens': estimated_effective_tokens,
+        'tokenizer_path': stats['tokenizer_path'],
+        'sampled_file': selected_file,
+        'verification': verification,
     }
+
+
+def analyze_dataset(
+    dataset_name: str,
+    dataset_path: str,
+    tokenizer_map: Dict[str, Tuple[str, AutoTokenizer]],
+    num_items: int,
+    seq_len: int,
+    is_validation: bool,
+):
+    results: Dict[str, Optional[Dict[str, Any]]] = {}
+    files_with_counts = list_jsonl_files_with_counts(dataset_path)
+    if not files_with_counts:
+        print(f"ERROR: No files found for dataset {dataset_name} at {dataset_path}")
+        return results
+    selected_file, selected_count = random.choice(files_with_counts)
+    sample_seed = random.randint(0, 2**31 - 1)
+
+    first = True
+    for alias, (tokenizer_path, tokenizer) in tokenizer_map.items():
+        print(f"\n>>> Tokenizer: {alias}")
+        stats = estimate_dataset(
+            dataset_name,
+            dataset_path,
+            tokenizer_path,
+            tokenizer,
+            num_items,
+            seq_len,
+            is_validation=is_validation,
+            sampled_file=selected_file,
+            sampled_count=selected_count,
+            sample_seed=sample_seed,
+            files_with_counts=files_with_counts,
+            print_overview=first,
+        )
+        results[alias] = stats
+        first = False
+    return results
 
 
 def main():
@@ -412,6 +525,12 @@ Examples:
         help="Sequence length for tokenization",
     )
     parser.add_argument(
+        "--tokenizer-aliases",
+        nargs="+",
+        default=["qwen3_0.6b_origin", "qwen3_0.6b_custom"],
+        help="Tokenizer aliases to evaluate (default: qwen3_0.6b_origin qwen3_0.6b_custom)",
+    )
+    parser.add_argument(
         "--num-items",
         type=int,
         default=10000,
@@ -433,40 +552,62 @@ Examples:
     print("MOLGEN3D DATASET TOKEN COUNTING TOOL")
     print("="*70)
     print(f"Loading {args.num_items} items from datasets to estimate sample/token counts")
-    print(f"Sequence length: {args.seq_len} (samples = 2048-token sequences)")
+    print(f"Sequence length: {args.seq_len} (samples = {args.seq_len}-token sequences)")
+    print(f"Tokenizer aliases: {', '.join(args.tokenizer_aliases)}")
     print("="*70)
 
-    # Load tokenizer
-    print("Loading tokenizer...")
-    tokenizer_path = str(get_tokenizer_path("llama3_chem_v1"))
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, use_fast=True)
-    print(f"Tokenizer loaded. Vocab size: {tokenizer.vocab_size}")
+    tokenizer_map: Dict[str, Tuple[str, AutoTokenizer]] = {}
+    print("\nLoading tokenizers:")
+    loaded_paths = {}  # Track paths to detect duplicates
+    for alias in args.tokenizer_aliases:
+        tok_path = str(get_tokenizer_path(alias))
+        abs_tok_path = os.path.abspath(tok_path)
+        
+        # Check for duplicate paths
+        if abs_tok_path in loaded_paths.values():
+            print(f"  WARNING: {alias} has the same path as {[k for k, v in loaded_paths.items() if v == abs_tok_path][0]}")
+            print(f"           Path: {abs_tok_path}")
+        
+        # Load tokenizer fresh each time
+        tok = AutoTokenizer.from_pretrained(tok_path, use_fast=True, fix_mistral_regex=True, local_files_only=False)
+        vocab_size = len(tok)  # Use len() to get actual vocab size from the tokenizer
+        tokenizer_map[alias] = (tok_path, tok)
+        loaded_paths[alias] = abs_tok_path
+        
+        # Print with both relative and absolute path for clarity
+        print(f"  - {alias}: vocab_size={vocab_size} (path: {abs_tok_path})")
+        
+        # Verify the tokenizer actually loaded from the expected path
+        if hasattr(tok, 'name_or_path'):
+            actual_path = tok.name_or_path
+            if actual_path != tok_path and actual_path != abs_tok_path:
+                print(f"    NOTE: Tokenizer reports path as: {actual_path}")
 
     start_time = time.time()
 
     # Analyze train dataset
-    train_stats = estimate_dataset(
+    train_stats = analyze_dataset(
         args.train_dataset_name,
         train_path,
-        tokenizer_path,
-        tokenizer,
+        tokenizer_map,
         args.num_items,
         args.seq_len,
-        is_validation=False
+        is_validation=False,
     )
 
     # Analyze validation dataset
-    valid_stats = None
+    valid_stats: Union[None, Dict[str, Optional[Dict[str, Any]]]] = None
     if not args.skip_validation:
-        valid_stats = estimate_dataset(
+        valid_stats = analyze_dataset(
             args.valid_dataset_name,
             valid_path,
-            tokenizer_path,
-            tokenizer,
+            tokenizer_map,
             args.num_items,
             args.seq_len,
-            is_validation=True
+            is_validation=True,
         )
+    else:
+        valid_stats = {}
 
     # Print final comprehensive summary
     total_time = time.time() - start_time
@@ -476,34 +617,70 @@ Examples:
     print(f"Total analysis time: {total_time:.2f}s")
 
     if train_stats:
-        print(f"\nTRAIN DATASET ({args.train_dataset_name}):")
-        print(f"  Total items: {train_stats['total_items']:,}")
-        print(f"  Avg items per sample: {train_stats['avg_items_per_sample']:.2f}")
-        print(f"  Estimated total tokens: {train_stats['estimated_total_tokens']:,}")
-        print(f"  Estimated total samples: {train_stats['estimated_total_samples']:,}")
-        print(f"  Estimated data size: ~{train_stats['estimated_total_tokens'] * 2 / (1024**3):.1f} GB (2 bytes/token)")
+        print(f"\n{'='*70}")
+        print(f"TRAIN DATASET ({args.train_dataset_name})")
+        print(f"{'='*70}")
+        for alias, stats in train_stats.items():
+            if not stats:
+                continue
+            print(f"\nTokenizer: {alias}")
+            print(f"  Path: {stats['tokenizer_path']}")
+            print(f"  Sampled file: {os.path.basename(stats['sampled_file'])}")
+            print(f"\n  Dataset Statistics:")
+            print(f"    Total items: {stats['total_items']:,}")
+            print(f"    Avg items/sample: {stats['avg_items_per_sample']:.2f}")
+            avg_pad_pct = stats.get('avg_pad_percentage', (stats['avg_pad_per_sample'] / args.seq_len * 100) if args.seq_len > 0 else 0.0)
+            print(f"    Avg pad tokens/sample: {stats['avg_pad_per_sample']:.2f} ({avg_pad_pct:.2f}% of seq_len)")
+            print(f"\n  Estimated Totals:")
+            print(f"    Samples: {stats['estimated_total_samples']:,}")
+            print(f"    Total tokens: {stats['estimated_total_tokens']:,}")
+            est_pad_pct = stats.get('estimated_pad_percentage', (stats['estimated_pad_tokens'] / stats['estimated_total_tokens'] * 100) if stats['estimated_total_tokens'] > 0 else 0.0)
+            print(f"    Pad tokens: {stats['estimated_pad_tokens']:,} ({est_pad_pct:.2f}% of total)")
+            print(f"    Effective tokens: {stats['estimated_effective_tokens']:,}")
+            print(f"    Data size: ~{stats['estimated_total_tokens'] * 2 / (1024**3):.1f} GB (2 bytes/token)")
     else:
         print(f"\nTRAIN DATASET: Failed to estimate")
 
     if valid_stats:
-        print(f"\nVALIDATION DATASET ({args.valid_dataset_name}):")
-        print(f"  Total items: {valid_stats['total_items']:,}")
-        print(f"  Avg items per sample: {valid_stats['avg_items_per_sample']:.2f}")
-        print(f"  Estimated total tokens: {valid_stats['estimated_total_tokens']:,}")
-        print(f"  Estimated total samples: {valid_stats['estimated_total_samples']:,}")
-        print(f"  Estimated data size: ~{valid_stats['estimated_total_tokens'] * 2 / (1024**3):.1f} GB (2 bytes/token)")
+        print(f"\n{'='*70}")
+        print(f"VALIDATION DATASET ({args.valid_dataset_name})")
+        print(f"{'='*70}")
+        for alias, stats in valid_stats.items():
+            if not stats:
+                continue
+            print(f"\nTokenizer: {alias}")
+            print(f"  Path: {stats['tokenizer_path']}")
+            print(f"  Sampled file: {os.path.basename(stats['sampled_file'])}")
+            print(f"\n  Dataset Statistics:")
+            print(f"    Total items: {stats['total_items']:,}")
+            print(f"    Avg items/sample: {stats['avg_items_per_sample']:.2f}")
+            avg_pad_pct = stats.get('avg_pad_percentage', (stats['avg_pad_per_sample'] / args.seq_len * 100) if args.seq_len > 0 else 0.0)
+            print(f"    Avg pad tokens/sample: {stats['avg_pad_per_sample']:.2f} ({avg_pad_pct:.2f}% of seq_len)")
+            print(f"\n  Estimated Totals:")
+            print(f"    Samples: {stats['estimated_total_samples']:,}")
+            print(f"    Total tokens: {stats['estimated_total_tokens']:,}")
+            est_pad_pct = stats.get('estimated_pad_percentage', (stats['estimated_pad_tokens'] / stats['estimated_total_tokens'] * 100) if stats['estimated_total_tokens'] > 0 else 0.0)
+            print(f"    Pad tokens: {stats['estimated_pad_tokens']:,} ({est_pad_pct:.2f}% of total)")
+            print(f"    Effective tokens: {stats['estimated_effective_tokens']:,}")
+            print(f"    Data size: ~{stats['estimated_total_tokens'] * 2 / (1024**3):.1f} GB (2 bytes/token)")
     elif not args.skip_validation:
         print(f"\nVALIDATION DATASET: Failed to estimate")
 
     # Training recommendations
-    if train_stats and valid_stats:
-        train_samples = train_stats['estimated_total_samples']
-        valid_samples = valid_stats['estimated_total_samples']
-
-        print(f"\nTRAINING RECOMMENDATIONS:")
+    primary_alias = args.tokenizer_aliases[0] if args.tokenizer_aliases else None
+    if (
+        primary_alias
+        and isinstance(train_stats, dict)
+        and isinstance(valid_stats, dict)
+        and train_stats.get(primary_alias)
+        and valid_stats.get(primary_alias)
+    ):
+        train_samples = train_stats[primary_alias]['estimated_total_samples']
+        valid_samples = valid_stats[primary_alias]['estimated_total_samples']
+        print(f"\nTRAINING RECOMMENDATIONS (based on {primary_alias}):")
         print(f"  Train/Valid split: {train_samples/valid_samples:.1f}:1")
         print(f"  Gradient accumulation: Consider ~{max(1, int(1000000 // train_samples))} if batch_size=1")
-        print(f"  Epochs for 100M tokens: ~{int(100000000 // train_stats['estimated_total_tokens'])}")
+        print(f"  Epochs for 100M tokens: ~{int(100000000 // train_stats[primary_alias]['estimated_total_tokens'])}")
 
     print(f"\n{'='*70}")
     print("Analysis complete!")
