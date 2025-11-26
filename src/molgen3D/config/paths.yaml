@@ -9,8 +9,9 @@ base_paths:
   grpo_outputs_root: "outputs/grpo_outputs"
   gen_results_root: "outputs/gen_results"
   eval_results_root: "outputs/eval_results"
+  pretrain_results_root: "outputs/pretrain_results"
   pretrain_logs_root: "outputs/pretrain_logs"
-  wandb_root: "wandb"
+  wandb_root: "wandb_runs"
   qwen3_0.6b_base_model: "/nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b/Qwen3-0.6B-Base"
 
 data:
