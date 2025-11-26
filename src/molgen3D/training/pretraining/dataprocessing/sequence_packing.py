@@ -45,15 +45,19 @@ class SequenceState:
         if not self.tokens:
             raise ValueError("Cannot finalize an empty sequence.")
         seq = list(self.tokens)
-        pad_needed = self.seq_len - len(seq)
+        real_len = len(seq)
+        pad_needed = self.seq_len - real_len
         if pad_needed < 0:
             raise ValueError("Sequence longer than configured seq_len.")
         if pad_needed:
             seq.extend([self.pad_id] * pad_needed)
         inp = torch.tensor(seq, dtype=torch.long)
-        lab = inp.clone()
-        if pad_needed:
-            lab[-pad_needed:] = self.ignore_index
+        lab = torch.empty_like(inp)
+        lab[:-1] = inp[1:]
+        lab[-1] = self.ignore_index
+        cutoff = max(0, real_len - 1)
+        if cutoff < lab.numel():
+            lab[cutoff:] = self.ignore_index
         self.reset()
         return inp, lab
 
