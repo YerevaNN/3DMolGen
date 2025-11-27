@@ -74,7 +74,7 @@ class MolGenDataConfig:
     drop_last: bool = True
     persistent_workers: Optional[bool] = None
     prefetch_factor: Optional[int] = None
-    lookahead_limit: int = 100
+    lookahead_limit: Optional[int] = None
 
     def __post_init__(self) -> None:
         """
@@ -97,6 +97,8 @@ class MolGenDataConfig:
             )
         )
         self.tokenizer_override = tokenizer_override
+        if self.lookahead_limit is None:
+            self.lookahead_limit = 100
 
 
 @dataclass
@@ -133,7 +135,8 @@ class JobConfig(TorchTitanJobConfig):
 
     def __post_init__(self) -> None:  # pragma: no cover - simple wiring
         if self.wsds_scheduler.enable:
-            if self.wsds_scheduler.base_lr is None:
-                self.wsds_scheduler.base_lr = self.optimizer.lr
-            if getattr(self.wsds_scheduler, "lr_max", None) is None:
-                self.wsds_scheduler.lr_max = self.optimizer.lr
+            lr = getattr(self.optimizer, "lr", None)
+            if lr is None:
+                raise ValueError("optimizer.lr must be set when WSDS scheduler is enabled.")
+            self.wsds_scheduler.base_lr = lr
+            setattr(self.wsds_scheduler, "lr_max", lr)

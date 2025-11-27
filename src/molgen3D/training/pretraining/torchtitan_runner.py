@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import re
 import secrets
 from dataclasses import dataclass
@@ -164,6 +165,14 @@ def _plan_run_layout(
 
 
 def _load_tokenizer_details(tokenizer_path: Path) -> TokenizerDetails:
+    metadata = {}
+    meta_file = tokenizer_path / "metadata.json"
+    if meta_file.exists():
+        try:
+            metadata = json.loads(meta_file.read_text())
+        except Exception:
+            _log_rank("Failed to read tokenizer metadata at %s; falling back to heuristic.", meta_file)
+
     tokenizer = AutoTokenizer.from_pretrained(
         str(tokenizer_path),
         use_fast=True,
@@ -171,13 +180,28 @@ def _load_tokenizer_details(tokenizer_path: Path) -> TokenizerDetails:
     )
     ensure_tokenizer_pad_token(tokenizer)
     vocab_size = len(tokenizer)
-    added_tokens = len(tokenizer.get_added_vocab())
-    base_vocab = max(0, vocab_size - added_tokens)
+    base_vocab = metadata.get("orig_vocab_size")
+    if base_vocab is not None:
+        try:
+            base_vocab = int(base_vocab)
+        except (TypeError, ValueError):
+            base_vocab = None
+    if base_vocab is None:
+        added_from_tokenizer = len(tokenizer.get_added_vocab())
+        base_vocab = max(0, vocab_size - added_from_tokenizer)
+    added_tokens = metadata.get("num_added")
+    if added_tokens is not None:
+        try:
+            added_tokens = int(added_tokens)
+        except (TypeError, ValueError):
+            added_tokens = None
+    if added_tokens is None:
+        added_tokens = max(0, vocab_size - int(base_vocab))
     return TokenizerDetails(
         path=tokenizer_path,
         vocab_size=vocab_size,
-        added_tokens=added_tokens,
-        base_vocab_size=base_vocab,
+        added_tokens=int(added_tokens),
+        base_vocab_size=int(base_vocab),
     )
 
 
@@ -202,12 +226,6 @@ def _apply_run_environment(
         os.environ["WANDB_ENTITY"] = cfg.wandb_entity
     if cfg.wandb_group:
         os.environ["WANDB_GROUP"] = cfg.wandb_group
-
-
-def _resolve_optional_path(value: Optional[str]) -> Optional[str]:
-    if not value:
-        return None
-    return str(_resolve_tag_or_path(value))
 
 
 def _configure_initial_load(job_config, run_settings: MolGenRunConfig) -> None:
