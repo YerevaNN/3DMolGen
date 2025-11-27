@@ -44,7 +44,7 @@ def _log_rank(msg: str, *args) -> None:
 @dataclass
 class QwenPretrainRunConfig:
     run_desc: str
-    train_toml: str = "src/molgen3D/config/pretrain/qwen3_06b_wsds.toml"
+    train_toml: str = "src/molgen3D/config/pretrain/qwen3_06b.toml"
     export_hf_checkpoints: bool = False
     wandb_project: Optional[str] = None
     wandb_entity: Optional[str] = None
