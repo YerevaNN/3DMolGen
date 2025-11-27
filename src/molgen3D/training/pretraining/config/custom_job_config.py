@@ -138,5 +138,9 @@ class JobConfig(TorchTitanJobConfig):
             lr = getattr(self.optimizer, "lr", None)
             if lr is None:
                 raise ValueError("optimizer.lr must be set when WSDS scheduler is enabled.")
-            self.wsds_scheduler.base_lr = lr
-            setattr(self.wsds_scheduler, "lr_max", lr)
+            if self.wsds_scheduler.base_lr is None:
+                self.wsds_scheduler.base_lr = lr
+            lr_max = getattr(self.wsds_scheduler, "lr_max", None)
+            if lr_max is None or lr_max <= 0:
+                self.wsds_scheduler.lr_max = lr
+        
