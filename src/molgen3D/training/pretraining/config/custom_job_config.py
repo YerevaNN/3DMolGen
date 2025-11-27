@@ -132,5 +132,8 @@ class JobConfig(TorchTitanJobConfig):
     checkpoint: MolGenCheckpointConfig = field(default_factory=MolGenCheckpointConfig)
 
     def __post_init__(self) -> None:  # pragma: no cover - simple wiring
-        if self.wsds_scheduler.enable and self.wsds_scheduler.base_lr is None:
-            self.wsds_scheduler.base_lr = self.optimizer.lr
+        if self.wsds_scheduler.enable:
+            if self.wsds_scheduler.base_lr is None:
+                self.wsds_scheduler.base_lr = self.optimizer.lr
+            if getattr(self.wsds_scheduler, "lr_max", None) is None:
+                self.wsds_scheduler.lr_max = self.optimizer.lr

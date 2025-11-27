@@ -49,7 +49,7 @@ This section controls initialization mode and tokenizer selection.
 
 ### `[optimizer]`
 - `name = "AdamW"` *(recommended)*.
-- `lr` *(required)* – keep this synchronized with `[wsds_scheduler].lr_max` and the scheduler warmup steps.
+- `lr` *(optional, defaults to WSDS base_lr when omitted)* – if you leave it unset, `custom_job_config` copies the effective LR into `wsds_scheduler.base_lr` / `lr_max`. Set it explicitly only when you need a non-default learning rate.
 - `beta1`, `beta2`, `eps`, `weight_decay` *(optional)* – standard defaults.
 
 ### `[lr_scheduler]`
