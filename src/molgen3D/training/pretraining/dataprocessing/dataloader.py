@@ -8,11 +8,12 @@ from pathlib import Path
 from typing import BinaryIO, Dict, Iterator, List, Optional, Sequence, Tuple, Union
 
 import torch
-from collections import defaultdict
+from collections import defaultdict, deque
 from loguru import logger
 from torch.utils.data import IterableDataset, get_worker_info
 from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers import AutoTokenizer
+from typing import Callable
 
 try:  # TorchTitan is optional for some downstream uses
     from torchtitan.components.dataloader import BaseDataLoader
@@ -47,6 +48,17 @@ from molgen3D.training.pretraining.dataprocessing.utils import (
     expand_paths,
     read_line_at,
 )
+
+try:  # optional faster JSON parser
+    import orjson as _fast_json
+except Exception:  # pragma: no cover
+    _fast_json = None
+
+
+def _json_loads(raw: str):
+    if _fast_json is not None:
+        return _fast_json.loads(raw.encode("utf-8"))
+    return json.loads(raw)
 
 
 def _resolve_special_token_id(tokenizer, attr_name: str, fallback_tokens: Sequence[Optional[str]]) -> Optional[int]:
@@ -182,6 +194,10 @@ class JsonlTaggedPackedDataset(IterableDataset):
         super().__init__()
         self.files = _coerce_train_targets(train_path)
         self.idxs = [build_line_index(p) for p in self.files]
+        self._all_pairs: List[Tuple[int, int]] = []
+        for fi, idx in enumerate(self.idxs):
+            self._all_pairs.extend((fi, li) for li in range(len(idx)))
+        self._all_pair_indices = list(range(len(self._all_pairs)))
 
         if world_size is None or rank is None:
             self.world_size = int(os.environ.get("WORLD_SIZE", "1"))
@@ -190,13 +206,10 @@ class JsonlTaggedPackedDataset(IterableDataset):
             self.world_size = world_size
             self.rank = rank
 
-        self.tk = AutoTokenizer.from_pretrained(
-            str(tokenizer_path),
-            use_fast=True,
-            fix_mistral_regex=True,
-        )
-        self.sep_id = ensure_tokenizer_pad_token(self.tk)
-        self.pad_id = self.sep_id
+        self._tokenizer_path = tokenizer_path
+        self._tokenizer = None
+        self.sep_id: Optional[int] = None
+        self.pad_id: Optional[int] = None
 
         self.seq_len = int(seq_len)
         self.max_unit_tokens = max(0, self.seq_len - 1)
@@ -212,31 +225,47 @@ class JsonlTaggedPackedDataset(IterableDataset):
         self._start_k = 0
         self._pairs_total = 0
         self._pair_cursor = self._start_k
-        self._pair_buffer_positions: List[int] = []
+        self._pair_buffer: deque[Tuple[int, int]] = deque()
         self._pending_units: List[PendingUnit] = []
+        self._sequence_state: Optional[SequenceState] = None
+        self._monster_warning_shown = False
+        self._preview: Optional[_PreviewLogger] = None
+        self._reset_epoch_state()
+
+    @property
+    def tk(self):
+        self._ensure_tokenizer_ready()
+        return self._tokenizer
+
+    def _ensure_tokenizer_ready(self) -> None:
+        if self._tokenizer is not None:
+            return
+        tokenizer = AutoTokenizer.from_pretrained(
+            str(self._tokenizer_path),
+            use_fast=True,
+            fix_mistral_regex=True,
+        )
+        sep_id = ensure_tokenizer_pad_token(tokenizer)
+        self._tokenizer = tokenizer
+        self.sep_id = sep_id
+        self.pad_id = sep_id
+        self._preview = _PreviewLogger(tokenizer, limit=2)
         self._sequence_state = SequenceState(
             seq_len=self.seq_len,
             separator_id=self.sep_id,
             pad_id=self.pad_id,
             ignore_index=self.ignore_index,
         )
-        self._monster_warning_shown = False
-        self._preview = _PreviewLogger(self.tk, limit=2)
-        self._reset_epoch_state()
 
     def _pairs_for_epoch(self) -> List[Tuple[int, int]]:
+        indices = list(self._all_pair_indices)
+        if self.shuffle_lines:
+            self._rng.shuffle(indices)
         pairs: List[Tuple[int, int]] = []
-        base = 0
-        for fi, idx in enumerate(self.idxs):
-            n = len(idx)
-            order = list(range(n))
-            if self.shuffle_lines:
-                self._rng.shuffle(order)
-            for li in order:
-                g = base + li
-                if (g % self.world_size) == self.rank:
-                    pairs.append((fi, li))
-            base += n
+        for global_idx in indices:
+            if (global_idx % self.world_size) != self.rank:
+                continue
+            pairs.append(self._all_pairs[global_idx])
         return pairs
 
     def __iter__(self) -> Iterator[Tuple[Dict[str, torch.Tensor], torch.Tensor]]:
@@ -244,34 +273,37 @@ class JsonlTaggedPackedDataset(IterableDataset):
         wid = wi.id if wi else 0
         nworkers = wi.num_workers if wi else 1
 
-        while True:
-            all_pairs = self._pairs_for_epoch()
-            worker_pairs = [p for i, p in enumerate(all_pairs) if (i % nworkers) == wid]
-            self._pairs_total = len(worker_pairs)
-            fps = [open(p, "rb") for p in self.files]
-            preview_enabled = (self._epoch == 0) and (wid == 0)
-            try:
+        self._ensure_tokenizer_ready()
+        fps = [open(p, "rb") for p in self.files]
+        try:
+            while True:
+                all_pairs = self._pairs_for_epoch()
+                worker_pairs = [p for i, p in enumerate(all_pairs) if (i % nworkers) == wid]
+                self._pairs_total = len(worker_pairs)
+                preview_enabled = (self._epoch == 0) and (wid == 0)
                 yield from self._pack_from_pairs(worker_pairs, fps, preview_enabled)
-            finally:
-                for f in fps:
-                    f.close()
 
-            if not self.infinite:
-                break
-            self._epoch += 1
-            self._rng.seed(1337 + self._epoch * 100003 + self.rank * 97)
-            self._start_k = 0
-            self._reset_epoch_state()
+                if not self.infinite:
+                    break
+                self._epoch += 1
+                self._start_k = 0
+                self._reset_epoch_state()
+        finally:
+            for f in fps:
+                f.close()
 
     def state_dict(self) -> Dict:
+        sequence_tokens = (
+            self._sequence_state.export_tokens() if self._sequence_state else []
+        )
         return {
             "epoch": self._epoch,
             "rng_state": self._rng.getstate(),
             "start_k": self._start_k,
             "pairs_total": self._pairs_total,
-            "pair_buffer": list(self._pair_buffer_positions),
+            "pair_buffer": list(self._pair_buffer),
             "pending_units": [unit.tokens for unit in self._pending_units],
-            "sequence_tokens": self._sequence_state.export_tokens(),
+            "sequence_tokens": sequence_tokens,
         }
 
     def load_state_dict(self, s: Dict):
@@ -279,29 +311,32 @@ class JsonlTaggedPackedDataset(IterableDataset):
         self._rng.setstate(s.get("rng_state", random.Random().getstate()))
         self._start_k = int(s.get("start_k", 0))
         self._pairs_total = int(s.get("pairs_total", 0))
-        self._pair_buffer_positions = [int(idx) for idx in s.get("pair_buffer", [])]
+        self._pair_buffer = deque(tuple(pair) for pair in s.get("pair_buffer", []))
         pending = s.get("pending_units", [])
         self._pending_units = [
             PendingUnit(tokens=list(tokens), total_len=len(tokens) + 1)
             for tokens in pending
         ]
+        if self._sequence_state is None:
+            self._ensure_tokenizer_ready()
         self._sequence_state.load_tokens(s.get("sequence_tokens", []))
         self._pair_cursor = self._start_k
         self._monster_warning_shown = False
 
     def _reset_epoch_state(self) -> None:
-        self._pair_buffer_positions = []
+        self._pair_buffer.clear()
         self._pending_units = []
-        self._sequence_state.reset()
+        if self._sequence_state is not None:
+            self._sequence_state.reset()
         self._pair_cursor = self._start_k
         self._monster_warning_shown = False
 
     def _fill_pair_buffer(self, worker_pairs: List[Tuple[int, int]]) -> None:
         while (
-            len(self._pair_buffer_positions) < self.shuffle_buffer_size
+            len(self._pair_buffer) < self.shuffle_buffer_size
             and self._pair_cursor < len(worker_pairs)
         ):
-            self._pair_buffer_positions.append(self._pair_cursor)
+            self._pair_buffer.append(worker_pairs[self._pair_cursor])
             self._pair_cursor += 1
             self._start_k = self._pair_cursor
 
@@ -322,23 +357,12 @@ class JsonlTaggedPackedDataset(IterableDataset):
         worker_pairs: List[Tuple[int, int]],
         fps: List[BinaryIO],
     ) -> Optional[PendingUnit]:
-        while self._pair_buffer_positions:
-            idx = self._rng.randrange(len(self._pair_buffer_positions))
-            pair_index = self._pair_buffer_positions[idx]
-            pair = worker_pairs[pair_index]
+        while self._pair_buffer:
+            pair = self._pair_buffer.popleft()
             unit = self._read_unit_from_pair(fps, pair)
-            self._replace_buffer_entry(idx, worker_pairs)
             if unit is not None:
                 return unit
         return None
-
-    def _replace_buffer_entry(self, idx: int, worker_pairs: List[Tuple[int, int]]) -> None:
-        if self._pair_cursor < len(worker_pairs):
-            self._pair_buffer_positions[idx] = self._pair_cursor
-            self._pair_cursor += 1
-            self._start_k = self._pair_cursor
-        else:
-            self._pair_buffer_positions.pop(idx)
 
     def _select_fitting_unit(self) -> Optional[PendingUnit]:
         limit = min(self.lookahead_limit, len(self._pending_units))
@@ -398,7 +422,7 @@ class JsonlTaggedPackedDataset(IterableDataset):
             return None
 
         try:
-            obj = json.loads(raw)
+            obj = _json_loads(raw)
         except Exception:
             return None
 
@@ -407,7 +431,7 @@ class JsonlTaggedPackedDataset(IterableDataset):
         if not is_valid_unit(canon, emb, min_emb_len=self.min_emb_len):
             return None
         unit = build_unit(canon, emb)
-        tokens = self.tk.encode(unit, add_special_tokens=False)
+        tokens = self._tokenizer.encode(unit, add_special_tokens=False)
         if not tokens:
             return None
         if len(tokens) > self.max_unit_tokens:
@@ -443,7 +467,7 @@ class JsonlTaggedPackedDataset(IterableDataset):
         preview_enabled: bool,
     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
         inp, lab = self._sequence_state.finalize()
-        if preview_enabled:
+        if preview_enabled and self._preview is not None:
             self._preview.maybe_log(self.rank, inp)
         return {"input": inp}, lab
 
@@ -641,12 +665,15 @@ def build_molgen_validator(
             "'molgen3D.training.pretraining.config.custom_job_config'."
         )
 
+    # Use fewer workers for validation to reduce memory usage
+    # Validation doesn't need as many workers as training since it's not as performance-critical
+    val_num_workers = min(data_cfg.num_workers, 2)  # Cap at 2 workers for validation
     validation_dataloader = build_dataloader(
         train_path=_resolve_validation_path(job_config),
         tokenizer_path=_resolve_tokenizer_path(data_cfg, job_config),
         seq_len=job_config.validation.seq_len,
         batch_size=job_config.validation.local_batch_size,
-        num_workers=data_cfg.num_workers,
+        num_workers=val_num_workers,
         pin_memory=data_cfg.pin_memory,
         shuffle_lines=False,
         infinite=False,
@@ -654,7 +681,7 @@ def build_molgen_validator(
         min_emb_len=data_cfg.min_emb_len,
         drop_last=False,
         persistent_workers=False,
-        prefetch_factor=data_cfg.prefetch_factor,
+        prefetch_factor=min(data_cfg.prefetch_factor or 2, 2),  # Reduce prefetch for validation
         world_size=dp_world_size,
         rank=dp_rank,
     )

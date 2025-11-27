@@ -62,8 +62,9 @@ Controls the custom warmup/stable/decay schedule.
 - `enable = true` *(recommended)* – turn off only if you want to rely solely on Titan’s scheduler.
 - `warmup_steps` *(required)* – typically 500.
 - `checkpoints` *(optional)* – cosmetic markers for when you expect stage transitions. Adjust when `training.steps` changes.
-- `lr_max`, `lr_min` *(required)* – top/bottom LR bounds; `lr_max` normally matches `optimizer.lr`.
-- `decay_frac` *(optional)* – fraction of total steps allocated to the decay phase.
+- `lr_max` *(optional)* – if omitted, we automatically copy `[optimizer].lr`, so the optimizer stays the source of truth. Override only when you intentionally want WSDS to run at a different peak LR.
+- `lr_min` *(required)* – lowest LR after decay.
+- `decay_frac` *(optional)* – fraction of total steps allocated to the decay phase (or use `decay_steps` for an absolute value).
 
 ### `[checkpoint]`
 - `enable = true` *(required)*.
