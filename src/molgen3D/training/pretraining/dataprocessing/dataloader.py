@@ -61,6 +61,33 @@ def _json_loads(raw: str):
     return json.loads(raw)
 
 
+def _coerce_rng_state(state):
+    """
+    Torch random RNG expects a tuple (version, state, gauss). Some launchers may
+    serialize StatefulDataLoader state via JSON, which converts tuples to lists
+    or dict structures. Normalize those back into tuples before calling setstate.
+    """
+
+    def _tupleify(obj):
+        if isinstance(obj, list):
+            return tuple(_tupleify(x) for x in obj)
+        return obj
+
+    if state is None:
+        return random.Random().getstate()
+
+    if isinstance(state, dict):
+        version = state.get("version")
+        nested = _tupleify(state.get("state"))
+        gauss = state.get("gauss")
+        return (version, nested, gauss)
+
+    if isinstance(state, (list, tuple)):
+        return tuple(_tupleify(elem) for elem in state)
+
+    return state
+
+
 def _resolve_special_token_id(tokenizer, attr_name: str, fallback_tokens: Sequence[Optional[str]]) -> Optional[int]:
     """
     Attempts to resolve a tokenizer special token id, falling back to common aliases.
@@ -333,7 +360,8 @@ class JsonlTaggedPackedDataset(IterableDataset):
 
     def load_state_dict(self, s: Dict):
         self._epoch = int(s.get("epoch", 0))
-        self._rng.setstate(s.get("rng_state", random.Random().getstate()))
+        rng_state = s.get("rng_state")
+        self._rng.setstate(_coerce_rng_state(rng_state))
         self._start_k = int(s.get("start_k", 0))
         self._pairs_total = int(s.get("pairs_total", 0))
         self._pair_buffer = deque(tuple(pair) for pair in s.get("pair_buffer", []))
