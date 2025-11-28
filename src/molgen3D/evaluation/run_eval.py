@@ -308,8 +308,9 @@ def main() -> None:
     parser.add_argument("--num-workers", type=int, default=10, help="Number of workers for evaluation")
     parser.add_argument("--max-recent", type=int, default=3, help="Max recent missing directories to evaluate")
     parser.add_argument("--specific-dir", type=str, default=None, help="Specific directory to evaluate")
-    parser.add_argument("--test_set", type=str, default="distinct", choices=["clean", "distinct"], help="Test set to evaluate")
+    parser.add_argument("--test_set", type=str, default="distinct", choices=["clean", "distinct", "xl"], help="Test set to evaluate")
     args = parser.parse_args()
+    
     run_directory_mode(args)
 
 if __name__ == "__main__":

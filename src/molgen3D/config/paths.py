@@ -50,7 +50,7 @@ def get_ckpt(alias: str, key: str | None = None) -> Path:
     elif root_rel.startswith("2025-"):
         base = base_paths.get("grpo_root", base_paths.get("ckpts_root", "."))
     else:
-        base = base_paths.get("ckpts_root", ".")
+        base = base_paths.get("hf_yerevann_root", ".")
 
     return _abs(base) / root_rel / step_rel
 
