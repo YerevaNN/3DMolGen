@@ -180,6 +180,7 @@ class JsonlTaggedPackedDataset(IterableDataset):
         self,
         train_path: Union[str, Sequence[str]],
         tokenizer_path: str,
+        tokenizer=None,
         seq_len: int = 2048,
         min_emb_len: int = 16,
         shuffle_lines: bool = True,
@@ -190,6 +191,7 @@ class JsonlTaggedPackedDataset(IterableDataset):
         shuffle_buffer_size: int = 4096,
         lookahead_limit: int = 100,
         ignore_index: int = -100,
+        truncate_overflow_units: bool = True,
     ):
         super().__init__()
         self.files = _coerce_train_targets(train_path)
@@ -207,7 +209,7 @@ class JsonlTaggedPackedDataset(IterableDataset):
             self.rank = rank
 
         self._tokenizer_path = tokenizer_path
-        self._tokenizer = None
+        self._tokenizer = tokenizer
         self.sep_id: Optional[int] = None
         self.pad_id: Optional[int] = None
 
@@ -219,6 +221,7 @@ class JsonlTaggedPackedDataset(IterableDataset):
         self.shuffle_buffer_size = max(1, int(shuffle_buffer_size))
         self.lookahead_limit = max(1, int(lookahead_limit))
         self.ignore_index = int(ignore_index)
+        self.truncate_overflow_units = bool(truncate_overflow_units)
 
         self._epoch = 0
         self._rng = random.Random(seed + self.rank * 97)
@@ -229,6 +232,7 @@ class JsonlTaggedPackedDataset(IterableDataset):
         self._pending_units: List[PendingUnit] = []
         self._sequence_state: Optional[SequenceState] = None
         self._monster_warning_shown = False
+        self._truncation_warning_shown = False
         self._preview: Optional[_PreviewLogger] = None
         self._reset_epoch_state()
 
@@ -238,17 +242,38 @@ class JsonlTaggedPackedDataset(IterableDataset):
         return self._tokenizer
 
     def _ensure_tokenizer_ready(self) -> None:
-        if self._tokenizer is not None:
-            return
-        tokenizer = AutoTokenizer.from_pretrained(
-            str(self._tokenizer_path),
-            use_fast=True,
-            fix_mistral_regex=True,
-        )
-        sep_id = ensure_tokenizer_pad_token(tokenizer)
-        self._tokenizer = tokenizer
-        self.sep_id = sep_id
-        self.pad_id = sep_id
+        tokenizer = self._tokenizer
+        # If no tokenizer is provided, or if the provided object does not expose
+        # the standard HuggingFace tokenization APIs (e.g. TorchTitan's
+        # HuggingFaceTokenizer wrapper), fall back to constructing a fresh
+        # AutoTokenizer from the configured path so we can reliably control
+        # padding / special tokens.
+        if tokenizer is None or not hasattr(tokenizer, "convert_tokens_to_ids"):
+            tokenizer = AutoTokenizer.from_pretrained(
+                str(self._tokenizer_path),
+                use_fast=True,
+                fix_mistral_regex=True,
+            )
+            sep_id = ensure_tokenizer_pad_token(tokenizer)
+            self._tokenizer = tokenizer
+            self.sep_id = sep_id
+            self.pad_id = sep_id
+        else:
+            pad_id = _resolve_special_token_id(
+                tokenizer,
+                "pad_token_id",
+                [
+                    getattr(tokenizer, "pad_token", None),
+                    "<pad>",
+                    "<|endoftext|>",
+                ],
+            )
+            if pad_id is None:
+                raise RuntimeError(
+                    "Provided tokenizer must expose a pad token id or support resolving one."
+                )
+            self.sep_id = int(pad_id)
+            self.pad_id = int(pad_id)
         self._preview = _PreviewLogger(tokenizer, limit=2)
         self._sequence_state = SequenceState(
             seq_len=self.seq_len,
@@ -322,6 +347,7 @@ class JsonlTaggedPackedDataset(IterableDataset):
         self._sequence_state.load_tokens(s.get("sequence_tokens", []))
         self._pair_cursor = self._start_k
         self._monster_warning_shown = False
+        self._truncation_warning_shown = False
 
     def _reset_epoch_state(self) -> None:
         self._pair_buffer.clear()
@@ -330,6 +356,7 @@ class JsonlTaggedPackedDataset(IterableDataset):
             self._sequence_state.reset()
         self._pair_cursor = self._start_k
         self._monster_warning_shown = False
+        self._truncation_warning_shown = False
 
     def _fill_pair_buffer(self, worker_pairs: List[Tuple[int, int]]) -> None:
         while (
@@ -411,6 +438,18 @@ class JsonlTaggedPackedDataset(IterableDataset):
         )
         self._monster_warning_shown = True
 
+    def _maybe_log_truncation(self, original_len: int, truncated_len: int) -> None:
+        if self._truncation_warning_shown:
+            return
+        logger.warning(
+            "Rank {} truncating unit from {} to {} tokens to fit max tokens {}",
+            self.rank,
+            original_len,
+            truncated_len,
+            self.max_unit_tokens,
+        )
+        self._truncation_warning_shown = True
+
     def _read_unit_from_pair(
         self,
         fps: List[BinaryIO],
@@ -435,8 +474,12 @@ class JsonlTaggedPackedDataset(IterableDataset):
         if not tokens:
             return None
         if len(tokens) > self.max_unit_tokens:
-            self._maybe_log_monster(len(tokens))
-            return None
+            if not self.truncate_overflow_units:
+                self._maybe_log_monster(len(tokens))
+                return None
+            original_len = len(tokens)
+            tokens = tokens[: self.max_unit_tokens]
+            self._maybe_log_truncation(original_len, len(tokens))
         return PendingUnit(tokens=tokens, total_len=len(tokens) + 1)
 
     def _pack_from_pairs(
@@ -477,7 +520,7 @@ def build_dataloader(
     tokenizer_path: str,
     seq_len: int,
     batch_size: int,
-    *,
+    *, tokenizer=None,
     num_workers: int = 4,
     pin_memory: bool = True,
     shuffle_lines: bool = True,
@@ -490,10 +533,12 @@ def build_dataloader(
     world_size: Optional[int] = None,
     rank: Optional[int] = None,
     lookahead_limit: int = 100,
+    truncate_overflow_units: bool = True,
 ):
     ds = JsonlTaggedPackedDataset(
         train_path=train_path,
         tokenizer_path=tokenizer_path,
+        tokenizer=tokenizer,
         seq_len=seq_len,
         min_emb_len=min_emb_len,
         shuffle_lines=shuffle_lines,
@@ -502,6 +547,7 @@ def build_dataloader(
         world_size=world_size,
         rank=rank,
         lookahead_limit=lookahead_limit,
+        truncate_overflow_units=truncate_overflow_units,
     )
     effective_persistent = (
         persistent_workers if persistent_workers is not None else (num_workers > 0)
@@ -572,6 +618,7 @@ def build_molgen_dataloader(
     return build_dataloader(
         train_path=train_path,
         tokenizer_path=tokenizer_path,
+        tokenizer=tokenizer,
         seq_len=job_config.training.seq_len,
         batch_size=job_config.training.local_batch_size,
         num_workers=data_cfg.num_workers,
@@ -671,6 +718,7 @@ def build_molgen_validator(
     validation_dataloader = build_dataloader(
         train_path=_resolve_validation_path(job_config),
         tokenizer_path=_resolve_tokenizer_path(data_cfg, job_config),
+        tokenizer=tokenizer,
         seq_len=job_config.validation.seq_len,
         batch_size=job_config.validation.local_batch_size,
         num_workers=val_num_workers,

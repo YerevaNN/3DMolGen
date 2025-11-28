@@ -33,6 +33,6 @@ def test_metrics_use_expected_reduction_ops():
 
 def test_qwen_wrapper_does_not_apply_softmax():
     """Invariant: model wrapper leaves logits unnormalized."""
-    src = inspect.getsource(qwen3_custom._parallelize_with_resize)
+    src = inspect.getsource(qwen3_custom._parallelize_with_molgen)
     assert ".softmax" not in src
     assert "F.softmax" not in src
