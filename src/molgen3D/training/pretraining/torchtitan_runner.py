@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import re
-import secrets
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -35,8 +34,20 @@ _TEE_ENABLED = False
 _RUN_NAME_PREFIX_LEN = len("YYMMDD-HHMM-")
 
 
+def _current_rank() -> int:
+    if dist.is_available() and dist.is_initialized():
+        return dist.get_rank()
+    env_rank = os.environ.get("RANK")
+    if env_rank is not None:
+        try:
+            return int(env_rank)
+        except ValueError:
+            return 0
+    return 0
+
+
 def _is_log_rank() -> bool:
-    return (not dist.is_available()) or (not dist.is_initialized()) or dist.get_rank() == 0
+    return _current_rank() == 0
 
 
 def _log_rank(msg: str, *args) -> None:
@@ -90,13 +101,6 @@ def _resolve_config_path(path_str: str) -> Path:
     return path if path.is_absolute() else (paths.REPO_ROOT / path)
 
 
-def _generate_run_identifiers(run_desc: str) -> tuple[str, str]:
-    timestamp = datetime.now().strftime("%y%m%d-%H%M")
-    run_hash = secrets.token_hex(2)
-    run_name = f"{timestamp}-{run_hash}-{_sanitize_description(run_desc)}"
-    return run_name, run_hash
-
-
 def _extract_run_hash_from_name(run_name: str) -> Optional[str]:
     if len(run_name) <= _RUN_NAME_PREFIX_LEN:
         return None
@@ -137,7 +141,7 @@ def _plan_run_layout(
                 "Unable to derive run_name while resuming; "
                 "set molgen_run.run_name explicitly."
             )
-        run_hash = _extract_run_hash_from_name(run_name) or secrets.token_hex(2)
+        run_hash = _extract_run_hash_from_name(run_name) or "resume"
         logs_dir = logs_root / run_name
         wandb_dir = wandb_root / run_name
         return RunLayout(
@@ -151,9 +155,10 @@ def _plan_run_layout(
 
     if run_settings.run_name:
         run_name = run_settings.run_name
-        run_hash = _extract_run_hash_from_name(run_name) or secrets.token_hex(2)
     else:
-        run_name, run_hash = _generate_run_identifiers(run_desc)
+        run_name = _sanitize_description(run_desc) or "run"
+
+    run_hash = _extract_run_hash_from_name(run_name) or "0000"
     logs_dir = logs_root / run_name
     ckpts_dir = ckpts_root / run_name
     wandb_dir = wandb_root / run_name
@@ -395,7 +400,7 @@ def _prepare_job_config(
 
 def _enable_runtime_log(logs_dir: Path, rotate_existing: bool = False) -> None:
     global _TEE_ENABLED
-    if _TEE_ENABLED:
+    if _TEE_ENABLED or not _is_log_rank():
         return
     log_path = logs_dir / "runtime.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)

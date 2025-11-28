@@ -215,28 +215,22 @@ def _patch_metric_logging() -> None:
 
     def _build_metric_logger(job_config, parallel_dims, tag=None):
         metrics_config = job_config.metrics
-        has_logging = (
-            metrics_config.enable_tensorboard or metrics_config.enable_wandb
-        )
-        should_log = has_logging
-        if has_logging and not metrics_config.save_for_all_ranks:
-            metrics_rank = titan_metrics._get_metrics_rank(
-                parallel_dims, job_config
-            )
-            should_log = torch.distributed.get_rank() == metrics_rank
+        has_logging = metrics_config.enable_tensorboard or metrics_config.enable_wandb
 
-        if not should_log:
+        if not has_logging:
             return titan_metrics.BaseLogger()
 
+        if not metrics_config.save_for_all_ranks:
+            metrics_rank = titan_metrics._get_metrics_rank(parallel_dims, job_config)
+            if torch.distributed.get_rank() != metrics_rank:
+                return titan_metrics.BaseLogger()
+
         dump_dir = job_config.job.dump_folder
-        base_log_dir = os.path.join(
-            dump_dir, metrics_config.save_tb_folder or "tb"
-        )
+        base_log_dir = os.path.join(dump_dir, metrics_config.save_tb_folder or "tb")
 
         if job_config.fault_tolerance.enable:
             base_log_dir = os.path.join(
-                base_log_dir,
-                f"replica_{job_config.fault_tolerance.replica_id}",
+                base_log_dir, f"replica_{job_config.fault_tolerance.replica_id}"
             )
 
         if metrics_config.save_for_all_ranks:
@@ -247,20 +241,15 @@ def _patch_metric_logging() -> None:
         logger_container = titan_metrics.LoggerContainer()
 
         if metrics_config.enable_wandb:
-            if _maybe_import_wandb() is not None:
-                wandb_logger = titan_metrics.WandBLogger(
-                    base_log_dir, job_config, tag
-                )
+            wandb_mod = _maybe_import_wandb()
+            if wandb_mod is not None:
+                wandb_logger = titan_metrics.WandBLogger(base_log_dir, job_config, tag)
                 logger_container.add_logger(wandb_logger)
             else:
-                _log_rank(
-                    "Skipping W&B logger because wandb is unavailable in this environment."
-                )
+                _log_rank("Skipping W&B logger because wandb is unavailable.")
 
         if metrics_config.enable_tensorboard:
-            tensorboard_logger = titan_metrics.TensorBoardLogger(
-                base_log_dir, tag
-            )
+            tensorboard_logger = titan_metrics.TensorBoardLogger(base_log_dir, tag)
             logger_container.add_logger(tensorboard_logger)
 
         return logger_container
