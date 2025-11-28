@@ -78,6 +78,7 @@ def sample_dataloader(
     loader = build_dataloader(
         train_path=str(file_path),
         tokenizer_path=tokenizer_path,
+        tokenizer=tokenizer,
         seq_len=seq_len,
         batch_size=batch_size,
         num_workers=0,
@@ -304,6 +305,7 @@ def exhaust_validation_dataset(
         loader = build_dataloader(
             train_path=directory,
             tokenizer_path=tokenizer_path,
+            tokenizer=tokenizer,
             seq_len=seq_len,
             batch_size=batch_size,
             num_workers=num_workers,
