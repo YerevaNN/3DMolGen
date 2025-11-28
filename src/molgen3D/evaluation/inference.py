@@ -1,4 +1,4 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, LogitsProcessorList
 import torch
 import cloudpickle
 import random
@@ -16,9 +16,12 @@ from datetime import datetime
 torch.set_grad_enabled(False)
 
 # from utils import parse_molecule_with_coordinates
-from molgen3D.data_processing.utils import decode_cartesian_raw
 from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2, strip_smiles
 from molgen3D.evaluation.utils import extract_between, same_molecular_graph
+from molgen3D.evaluation.constrained_logits import (
+    ConformerConstraintLogitsProcessor,
+    build_templates_for_batch,
+)
 from molgen3D.config.paths import get_ckpt, get_tokenizer_path, get_data_path, get_base_path
 from molgen3D.config.sampling_config import sampling_configs, gen_num_codes
 
@@ -60,9 +63,23 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id)
     # Extract prompts and geom_smiles from batch
     prompts = [item[1] for item in batch]
     geom_smiles_list = [item[0] for item in batch]
+    smiles_list = []
+    for p in prompts:
+        smi = extract_between(p, "[SMILES]", "[/SMILES]")
+        if smi is None:
+            raise ValueError(f"Prompt is missing SMILES tags: {p}")
+        smiles_list.append(smi)
     
     tokenized_prompts = tokenizer(prompts, return_tensors="pt", padding=True)
     tokenized_prompts = {k: v.to(model.device, non_blocking=True) for k, v in tokenized_prompts.items()}
+
+    # Build per-sequence constraint templates and prompt lengths
+    templates = build_templates_for_batch(smiles_list, tokenizer)
+    prompt_lengths = [int(mask.sum().item()) for mask in tokenized_prompts["attention_mask"]]
+    logits_processor = LogitsProcessorList(
+        [ConformerConstraintLogitsProcessor(templates, prompt_lengths)]
+    )
+
     with torch.inference_mode():
         outputs = model.generate(
             input_ids=tokenized_prompts["input_ids"], 
@@ -70,6 +87,7 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id)
             max_new_tokens=2000,
             eos_token_id=eos_token_id, 
             generation_config=gen_config,
+            logits_processor=logits_processor,
             use_cache=True,
             return_dict_in_generate=False,
         )
