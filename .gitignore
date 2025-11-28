@@ -2,6 +2,8 @@ venv
 .cursorignore
 .cursorrules   
 .cursor/ 
+AGENTS.md
+
 # Editor files
 *~
 *.swp
