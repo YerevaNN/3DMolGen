@@ -72,7 +72,7 @@ Controls the custom warmup/stable/decay schedule.
 - `keep_latest_k` *(recommended)* – set to 3–4 to limit storage.
 - `folder = "checkpoint"` *(required)* – directory under `<run-name>` where Titan saves DCPs.
 - `initial_load_path`, `initial_load_model_only`, `initial_load_in_hf` *(see `[molgen_run]`)* – these fields are overwritten automatically by `launch_qwen3_pretrain` depending on `init_mode`.
-- `last_save_in_hf`, `save_hf_per_checkpoint` *(optional)* – set to `true` to emit Hugging Face safetensors when saving DCPs.
+// NOTE: HF export per checkpoint is no longer supported in the MolGen Qwen3 integration.
 - `async_mode = "async"` *(optional)* – leave `async` for faster checkpointing; switch to `sync` when network contention causes issues.
 
 ### `[metrics]`

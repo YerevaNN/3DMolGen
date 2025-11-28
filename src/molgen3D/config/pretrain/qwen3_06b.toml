@@ -5,9 +5,9 @@ print_config = true
 custom_config_module = "molgen3D.training.pretraining.config.custom_job_config"
 
 [molgen_run]
-init_mode = "scratch" # scratch | hf_pretrain | resume
+init_mode = "hf_pretrain" # scratch | hf_pretrain | resume
 tokenizer_tag = "tokenizers:qwen3_0.6b_custom"
-# base_model_tag = "base_paths:qwen3_0.6b_base_model"
+base_model_tag = "base_paths:qwen3_0.6b_base_model"
 # resume_run_path_tag = "ckpts:qwen3_0.6b_previous_run"
 
 [model]
@@ -22,7 +22,6 @@ custom_import = "molgen3D.training.pretraining.torchtitan_model.qwen3_custom"
 seq_len = 2048
 local_batch_size = 6
 global_batch_size = -1
-gradient_accumulation_steps = 2
 steps = 4000
 dtype = "bfloat16"
 seed = 1234
@@ -73,7 +72,7 @@ decay_frac = 0.1
 
 [checkpoint]
 enable = true
-interval = 2500
+interval = 200
 keep_latest_k = 4
 folder = "checkpoint"
 create_seed_checkpoint = false
@@ -81,7 +80,6 @@ initial_load_model_only = true
 initial_load_in_hf = true
 initial_load_path = "base_paths:qwen3_0.6b_base_model"
 last_save_in_hf = false
-save_hf_per_checkpoint = false
 async_mode = "async"
 
 [metrics]

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import json
 import re
 import secrets
 from dataclasses import dataclass
@@ -22,6 +21,10 @@ from safetensors.torch import load_file as load_safetensor, save_file as save_sa
 import shutil
 
 from molgen3D.config import paths
+from molgen3D.training.pretraining.torchtitan_model.qwen3_custom import (
+    QWEN3_BASE_VOCAB,
+    QWEN3_PADDED_VOCAB,
+)
 from molgen3D.training.pretraining.config.custom_job_config import MolGenRunConfig
 from molgen3D.training.pretraining.helpers.wsds_scheduler import set_active_job_config
 from molgen3D.training.pretraining.dataprocessing.dataloader import (
@@ -45,7 +48,6 @@ def _log_rank(msg: str, *args) -> None:
 class QwenPretrainRunConfig:
     run_desc: str
     train_toml: str = "src/molgen3D/config/pretrain/qwen3_06b.toml"
-    export_hf_checkpoints: bool = False
     wandb_project: Optional[str] = None
     wandb_entity: Optional[str] = None
     wandb_group: Optional[str] = None
@@ -67,6 +69,7 @@ class TokenizerDetails:
     vocab_size: int
     added_tokens: int
     base_vocab_size: int
+    padded_vocab_size: int
 
 
 def _sanitize_description(description: str) -> str:
@@ -165,14 +168,6 @@ def _plan_run_layout(
 
 
 def _load_tokenizer_details(tokenizer_path: Path) -> TokenizerDetails:
-    metadata = {}
-    meta_file = tokenizer_path / "metadata.json"
-    if meta_file.exists():
-        try:
-            metadata = json.loads(meta_file.read_text())
-        except Exception:
-            _log_rank("Failed to read tokenizer metadata at %s; falling back to heuristic.", meta_file)
-
     tokenizer = AutoTokenizer.from_pretrained(
         str(tokenizer_path),
         use_fast=True,
@@ -180,28 +175,25 @@ def _load_tokenizer_details(tokenizer_path: Path) -> TokenizerDetails:
     )
     ensure_tokenizer_pad_token(tokenizer)
     vocab_size = len(tokenizer)
-    base_vocab = metadata.get("orig_vocab_size")
-    if base_vocab is not None:
-        try:
-            base_vocab = int(base_vocab)
-        except (TypeError, ValueError):
-            base_vocab = None
-    if base_vocab is None:
-        added_from_tokenizer = len(tokenizer.get_added_vocab())
-        base_vocab = max(0, vocab_size - added_from_tokenizer)
-    added_tokens = metadata.get("num_added")
-    if added_tokens is not None:
-        try:
-            added_tokens = int(added_tokens)
-        except (TypeError, ValueError):
-            added_tokens = None
-    if added_tokens is None:
-        added_tokens = max(0, vocab_size - int(base_vocab))
+    base_vocab = QWEN3_BASE_VOCAB
+    added_tokens = vocab_size - base_vocab
+    if added_tokens < 0:
+        raise ValueError(
+            f"Tokenizer vocab smaller than Qwen3 base: {vocab_size} < {base_vocab}"
+        )
+    if vocab_size > QWEN3_PADDED_VOCAB:
+        raise ValueError(
+            f"Tokenizer vocab ({vocab_size}) exceeds Qwen3 padded vocab "
+            f"({QWEN3_PADDED_VOCAB})."
+        )
+    padded_vocab = QWEN3_PADDED_VOCAB
+
     return TokenizerDetails(
         path=tokenizer_path,
         vocab_size=vocab_size,
         added_tokens=int(added_tokens),
         base_vocab_size=int(base_vocab),
+        padded_vocab_size=int(padded_vocab),
     )
 
 
@@ -335,15 +327,42 @@ def _prepare_job_config(
         "tokenizer_base_vocab_size",
         tokenizer_info.base_vocab_size,
     )
+    setattr(
+        job_config.model,
+        "padded_vocab_size",
+        tokenizer_info.padded_vocab_size,
+    )
+
+    tokenizer_cfg = getattr(job_config, "tokenizer", None)
+    if tokenizer_cfg is None:
+
+        class _JobTokenizerConfig:
+            def __init__(self):
+                self.base_vocab_size: int = 0
+                self.added_tokens: int = 0
+                self.padded_vocab_size: int = 0
+                self.total_vocab_size: int = 0
+                self.num_new_tokens: int = 0
+                self.path: str = ""
+
+        tokenizer_cfg = _JobTokenizerConfig()
+        job_config.tokenizer = tokenizer_cfg
+
+    tokenizer_cfg.base_vocab_size = QWEN3_BASE_VOCAB
+    tokenizer_cfg.added_tokens = tokenizer_info.added_tokens
+    tokenizer_cfg.padded_vocab_size = QWEN3_PADDED_VOCAB
+    tokenizer_cfg.total_vocab_size = tokenizer_info.vocab_size
+    tokenizer_cfg.num_new_tokens = tokenizer_info.added_tokens
+    tokenizer_cfg.path = str(tokenizer_path)
+
+    if tokenizer_cfg.total_vocab_size != QWEN3_BASE_VOCAB + tokenizer_cfg.added_tokens:
+        raise ValueError(
+            "Tokenizer total vocab inconsistent: "
+            f"{tokenizer_cfg.total_vocab_size} != {QWEN3_BASE_VOCAB} + {tokenizer_cfg.added_tokens}"
+        )
 
     _normalize_job_config_paths(job_config)
     _configure_initial_load(job_config, run_settings)
-
-    if cfg.export_hf_checkpoints:
-        job_config.checkpoint.save_hf_per_checkpoint = True
-
-    if not job_config.checkpoint.save_hf_per_checkpoint:
-        job_config.checkpoint.last_save_in_hf = False
 
     _log_rank(
         "MolGen run '%s': model=%s flavor=%s seq_len=%d batch(local)=%d dtype=%s",
@@ -470,10 +489,6 @@ def launch_qwen3_pretrain(cfg: QwenPretrainRunConfig) -> None:
     trainer: Optional[Trainer] = None
     try:
         trainer = Trainer(job_config)
-        should_export_hf = getattr(job_config.checkpoint, "save_hf_per_checkpoint", False)
-        if (cfg.export_hf_checkpoints or should_export_hf) and trainer.checkpointer:
-            setattr(trainer.checkpointer, "_molgen_save_hf", True)
-            setattr(trainer.checkpointer, "_molgen_tokenizer", trainer.tokenizer)
 
         if job_config.checkpoint.create_seed_checkpoint:
             if int(os.environ.get("WORLD_SIZE", "1")) != 1:

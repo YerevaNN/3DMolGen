@@ -117,11 +117,6 @@ class MolGenRunConfig:
 
 
 @dataclass
-class MolGenCheckpointConfig(TorchTitanCheckpoint):
-    save_hf_per_checkpoint: bool = False
-
-
-@dataclass
 class JobConfig(TorchTitanJobConfig):
     """
     Custom JobConfig that surfaces MolGen-specific dataloader settings and WSDS
@@ -131,7 +126,6 @@ class JobConfig(TorchTitanJobConfig):
     molgen_data: MolGenDataConfig = field(default_factory=MolGenDataConfig)
     molgen_run: MolGenRunConfig = field(default_factory=MolGenRunConfig)
     wsds_scheduler: WSDSSchedulerConfig = field(default_factory=WSDSSchedulerConfig)
-    checkpoint: MolGenCheckpointConfig = field(default_factory=MolGenCheckpointConfig)
 
     def __post_init__(self) -> None:  # pragma: no cover - simple wiring
         if self.wsds_scheduler.enable:
