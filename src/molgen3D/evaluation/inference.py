@@ -69,7 +69,7 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id)
         outputs = model.generate(
             input_ids=tokenized_prompts["input_ids"], 
             attention_mask=tokenized_prompts["attention_mask"],
-            max_new_tokens=2000,
+            max_new_tokens=4000,
             eos_token_id=eos_token_id, 
             generation_config=gen_config,
             use_cache=True,
