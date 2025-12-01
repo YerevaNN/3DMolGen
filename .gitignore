@@ -19,6 +19,7 @@ data/
 outputs/
 notebooks/
 wandb/
+wandb_runs/
 # tests/
 *.egg-info/
 # Log files
