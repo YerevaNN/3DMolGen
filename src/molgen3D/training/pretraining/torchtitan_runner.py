@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -394,6 +395,20 @@ def _prepare_job_config(
     train_path = getattr(job_config.training, "dataset_path", None)
     if train_path:
         _log_rank("Training dataset: %s", train_path)
+
+    config_payload = json.dumps(job_config.to_dict(), indent=2, sort_keys=True)
+
+    config_snapshot = logs_dir / "job_config.json"
+    try:
+        config_snapshot.write_text(config_payload)
+    except Exception as exc:  # pragma: no cover - diagnostic only
+        _log_rank("Failed to write config snapshot: %s", exc)
+
+    ckpt_config = ckpts_dir / "config.json"
+    try:
+        ckpt_config.write_text(config_payload)
+    except Exception as exc:  # pragma: no cover - diagnostic only
+        _log_rank("Failed to copy config to checkpoint dir: %s", exc)
 
     return wandb_dir
 
