@@ -144,6 +144,11 @@ def run_inference(inference_config: dict):
         for geom_smiles, data in test_data.items():
             for sub_smiles, count in data["sub_smiles_counts"].items():
                 mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * count * 2)
+    elif test_set == "qm9":
+        logger.info("Processing as qm9 dataset")
+        for geom_smiles, data in test_data.items():
+            for sub_smiles, count in data["sub_smiles_counts"].items():
+                mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * count * 2)
     logger.info(f"mols_list length: {len(mols_list)}, mols_list_distinct: {len(set(mols_list))}, mols_list: {mols_list[:10]}")
 
     mols_list.sort(key=lambda x: len(x[0]))
@@ -165,14 +170,15 @@ def run_inference(inference_config: dict):
     return generations_all, stats
 
 
-def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:str = None, xl:bool = False) -> None:
+def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:str = None, xl:bool = False, qm9:bool = False) -> None:
     # Determine which test sets to run
     test_sets_to_run = []
     if test_set:
         test_sets_to_run.append(test_set)
     if xl:
         test_sets_to_run.append("xl")
-    
+    if qm9:
+        test_sets_to_run.append("qm9")
     if not test_sets_to_run:
         logger.info("No test sets specified. Skipping inference.")
         return
@@ -226,6 +232,9 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
                         
                         if test_set_name == "xl":
                             grid_config["batch_size"] = 100
+                        
+                        if test_set_name == "qm9":
+                            grid_config["batch_size"] = 100
 
                         grid_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
                         grid_config["test_set"] = test_set_name
@@ -240,6 +249,8 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
                     inference_config = dict(base_inference_config)
                     if test_set_name == "xl":
                         inference_config["batch_size"] = 100
+                    if test_set_name == "qm9":
+                        inference_config["batch_size"] = 100
                     inference_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
                     inference_config["test_set"] = test_set_name
                     inference_config["run_name"] = f"new_data_p1_{test_set_name}"
@@ -250,6 +261,8 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
             for test_set_name in test_sets_to_run:
                 inference_config = dict(base_inference_config)
                 if test_set_name == "xl":
+                    inference_config["batch_size"] = 100
+                if test_set_name == "qm9":
                     inference_config["batch_size"] = 100
                 inference_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
                 inference_config["test_set"] = test_set_name
@@ -265,7 +278,8 @@ if __name__ == "__main__":
     parser.add_argument("--grid_run_inference", action="store_true")
     parser.add_argument("--test_set", type=str, choices=["clean", "distinct", "corrected"], default=None)
     parser.add_argument("--xl", action="store_true")
+    parser.add_argument("--qm9", action="store_true")
     args = parser.parse_args() 
-    launch_inference_from_cli(device=args.device, grid_run_inference=args.grid_run_inference, test_set=args.test_set, xl=args.xl)
+    launch_inference_from_cli(device=args.device, grid_run_inference=args.grid_run_inference, test_set=args.test_set, xl=args.xl, qm9=args.qm9)
 
     

@@ -17,6 +17,7 @@ data:
   clean_smi: "clean_smi.pickle"
   distinct_smi: "distinct_smi.pickle"
   xl_smi: "xl_smi.pickle"
+  qm9_smi: "qm9_smi.pickle"
 
   rdkit_folder: "rdkit_folder"
   test_mols: "geom_processed/test_smiles_corrected.csv"
