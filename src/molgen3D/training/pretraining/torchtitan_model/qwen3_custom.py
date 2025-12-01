@@ -8,7 +8,6 @@ import torch.distributed as dist
 from torch import nn
 
 from torchtitan.components import metrics as titan_metrics
-from torchtitan.components.checkpoint import AsyncMode, CheckpointManager, MODEL
 from torchtitan.models import qwen3 as qwen3_module
 from torchtitan.protocols.train_spec import register_train_spec
 from torchtitan.tools.logging import logger
@@ -21,6 +20,11 @@ from molgen3D.training.pretraining.dataprocessing.dataloader import (
 from molgen3D.training.pretraining.helpers.wsds_scheduler import (
     build_wsds_lr_schedulers,
 )
+
+# NOTE: These are Qwen3-0.6B specific. If you change
+# the base model, update these values.
+QWEN3_BASE_VOCAB = 151_669
+QWEN3_PADDED_VOCAB = 151_936
 
 
 def _is_log_rank() -> bool:
@@ -66,104 +70,87 @@ def _maybe_import_wandb():
     return _WANDB_MODULE
 
 
-def _maybe_extend_embeddings(model, job_config) -> None:
-    target_vocab = getattr(job_config.model, "vocab_size_override", None)
-    if not target_vocab:
-        return
+def _unwrap_module(module: nn.Module) -> nn.Module:
+    return module.module if hasattr(module, "module") else module
 
-    embed = getattr(model, "tok_embeddings", None)
-    output = getattr(model, "output", None)
-    if embed is None or output is None:
-        return
 
-    current = int(embed.num_embeddings)
-    requested = int(target_vocab)
-    base_vocab = getattr(job_config.model, "tokenizer_base_vocab_size", requested)
-    added_tokens = getattr(
-        job_config.model,
-        "tokenizer_added_tokens",
-        max(0, requested - base_vocab),
+def _get_job_tokenizer_config(job_config):
+    tokenizer_cfg = getattr(job_config, "tokenizer", None)
+    if tokenizer_cfg is None:
+        raise ValueError("Job config is missing the tokenizer section.")
+
+    base_vocab = int(getattr(tokenizer_cfg, "base_vocab_size", 0))
+    padded_vocab = int(getattr(tokenizer_cfg, "padded_vocab_size", 0))
+    num_new_tokens = getattr(tokenizer_cfg, "num_new_tokens", None)
+    if num_new_tokens is None:
+        num_new_tokens = getattr(tokenizer_cfg, "added_tokens", 0)
+    num_new_tokens = int(num_new_tokens)
+    total_vocab = int(
+        getattr(tokenizer_cfg, "total_vocab_size", base_vocab + num_new_tokens)
     )
-    desired = max(current, requested)
-    if desired == current:
-        model.model_args.vocab_size = current
-        _log_rank(
-            "Tokenizer vocabulary (%d total | base=%d | added=%d) already matches model embeddings (%d). No resize.",
-            requested,
-            base_vocab,
-            added_tokens,
-            current,
+
+    if base_vocab != QWEN3_BASE_VOCAB:
+        raise ValueError(
+            f"Unexpected base_vocab_size: {base_vocab} != {QWEN3_BASE_VOCAB}"
         )
+    if padded_vocab != QWEN3_PADDED_VOCAB:
+        raise ValueError(
+            f"Unexpected padded_vocab_size: {padded_vocab} != {QWEN3_PADDED_VOCAB}"
+        )
+    if total_vocab != base_vocab + num_new_tokens:
+        raise ValueError(
+            f"Inconsistent vocab sizes: total={total_vocab}, base+new={base_vocab + num_new_tokens}"
+        )
+
+    return base_vocab, padded_vocab, num_new_tokens, total_vocab
+
+
+def _initialize_extra_embeddings(module: nn.Module, base_vocab: int, num_new_tokens: int) -> None:
+    if num_new_tokens <= 0:
         return
 
-    device = embed.weight.device
-    dtype = embed.weight.dtype
-    hidden_dim = embed.embedding_dim
-    new_rows = desired - current
-
-    new_embed = nn.Embedding(
-        desired,
-        hidden_dim,
-        device=device,
-        dtype=dtype,
+    embed = getattr(module, "tok_embeddings", None) or getattr(
+        module, "embed_tokens", None
     )
+    if embed is None or not hasattr(embed, "weight"):
+        return
+
+    start = base_vocab
+    end = base_vocab + num_new_tokens
+
     with torch.no_grad():
-        new_embed.weight[:current].copy_(embed.weight)
-        nn.init.trunc_normal_(
-            new_embed.weight[current:],
-            mean=0.0,
-            std=model.model_args.dim ** -0.5,
-        )
-    model.tok_embeddings = new_embed
-    model.model_args.vocab_size = desired
+        init_std = embed.embedding_dim ** -0.5
+        torch.nn.init.normal_(embed.weight[start:end], mean=0.0, std=init_std)
 
-    new_output = nn.Linear(
-        output.in_features,
-        desired,
-        bias=False,
-        device=device,
-        dtype=dtype,
+
+def _tie_lm_head(module: nn.Module) -> None:
+    embed = getattr(module, "tok_embeddings", None) or getattr(
+        module, "embed_tokens", None
     )
-    with torch.no_grad():
-        new_output.weight[:current].copy_(output.weight)
-        if not model.model_args.enable_weight_tying:
-            final_out_std = model.model_args.dim ** -0.5
-            nn.init.trunc_normal_(
-                new_output.weight[current:],
-                mean=0.0,
-                std=final_out_std,
-            )
+    head = getattr(module, "lm_head", None) or getattr(module, "output", None)
+    if embed is None or head is None or not hasattr(head, "weight"):
+        return
+    if head.weight is not embed.weight:
+        head.weight = embed.weight
 
-    if model.model_args.enable_weight_tying:
-        new_output.weight = model.tok_embeddings.weight
 
-    model.output = new_output
-    _log_rank(
-        "Tokenizer vocabulary expanded from %d -> %d tokens (base=%d, added=%d, hidden=%d, tied=%s). "
-        "Initialized %d new rows using truncated normal.",
-        current,
-        desired,
-        base_vocab,
-        added_tokens,
-        hidden_dim,
-        model.model_args.enable_weight_tying,
-        new_rows,
+def _parallelize_with_molgen(model, parallel_dims, job_config):
+    base_vocab, padded_vocab, num_new_tokens, total_vocab = _get_job_tokenizer_config(
+        job_config
     )
 
-
-def _parallelize_with_resize(model, parallel_dims, job_config):
-    _maybe_extend_embeddings(model, job_config)
     if _is_log_rank():
-        embed_rows = int(getattr(model.tok_embeddings, "num_embeddings", -1))
-        hidden_dim = int(getattr(model.tok_embeddings, "embedding_dim", -1))
+        embed = getattr(model, "tok_embeddings", None)
+        embed_rows = int(getattr(embed, "num_embeddings", -1)) if embed is not None else -1
+        hidden_dim = int(getattr(embed, "embedding_dim", -1)) if embed is not None else -1
         _log_rank(
             "Tokenizer ready: total=%d | base=%d | added=%d | embedding rows=%d | hidden=%d | tied=%s",
-            getattr(job_config.model, "vocab_size_override", embed_rows),
-            getattr(job_config.model, "tokenizer_base_vocab_size", embed_rows),
-            getattr(job_config.model, "tokenizer_added_tokens", 0),
+            total_vocab,
+            base_vocab,
+            num_new_tokens,
             embed_rows,
             hidden_dim,
-            model.model_args.enable_weight_tying,
+            getattr(model.model_args, "enable_weight_tying", False),
         )
         total_params, _ = model.model_args.get_nparams_and_flops(
             model, job_config.training.seq_len
@@ -177,7 +164,49 @@ def _parallelize_with_resize(model, parallel_dims, job_config):
             job_config.training.seq_len,
             job_config.training.dtype,
         )
-    return qwen3_module.parallelize_qwen3(model, parallel_dims, job_config)
+
+    trained_model = qwen3_module.parallelize_qwen3(model, parallel_dims, job_config)
+    underlying = _unwrap_module(trained_model)
+
+    run_cfg = getattr(job_config, "molgen_run", None)
+    init_mode = getattr(run_cfg, "init_mode", "scratch") if run_cfg is not None else "scratch"
+    if init_mode in ("scratch", "hf_pretrain"):
+        _initialize_extra_embeddings(underlying, base_vocab, num_new_tokens)
+    _tie_lm_head(underlying)
+
+    if _is_log_rank():
+        embed = getattr(underlying, "tok_embeddings", None) or getattr(
+            underlying, "embed_tokens", None
+        )
+        if embed is not None:
+            rows = int(getattr(embed, "num_embeddings", embed.weight.shape[0]))
+            _log_rank(
+                "MolGen Qwen3 embeddings: rows=%d base=%d new=%d padded=%d",
+                rows,
+                base_vocab,
+                num_new_tokens,
+                padded_vocab,
+            )
+            if padded_vocab > 0 and rows != padded_vocab:
+                _log_rank(
+                    "MolGen WARN: embedding rows (%d) differ from padded_vocab_size (%d)",
+                    rows,
+                    padded_vocab,
+                )
+
+            head = getattr(underlying, "lm_head", None) or getattr(
+                underlying, "output", None
+            )
+            if (
+                head is not None
+                and hasattr(head, "weight")
+                and head.weight.data_ptr() != embed.weight.data_ptr()
+            ):
+                _log_rank(
+                    "MolGen WARN: LM head and embeddings do not share weights."
+                )
+
+    return trained_model
 
 
 def _patch_metric_logging() -> None:
@@ -186,28 +215,22 @@ def _patch_metric_logging() -> None:
 
     def _build_metric_logger(job_config, parallel_dims, tag=None):
         metrics_config = job_config.metrics
-        has_logging = (
-            metrics_config.enable_tensorboard or metrics_config.enable_wandb
-        )
-        should_log = has_logging
-        if has_logging and not metrics_config.save_for_all_ranks:
-            metrics_rank = titan_metrics._get_metrics_rank(
-                parallel_dims, job_config
-            )
-            should_log = torch.distributed.get_rank() == metrics_rank
+        has_logging = metrics_config.enable_tensorboard or metrics_config.enable_wandb
 
-        if not should_log:
+        if not has_logging:
             return titan_metrics.BaseLogger()
 
+        if not metrics_config.save_for_all_ranks:
+            metrics_rank = titan_metrics._get_metrics_rank(parallel_dims, job_config)
+            if torch.distributed.get_rank() != metrics_rank:
+                return titan_metrics.BaseLogger()
+
         dump_dir = job_config.job.dump_folder
-        base_log_dir = os.path.join(
-            dump_dir, metrics_config.save_tb_folder or "tb"
-        )
+        base_log_dir = os.path.join(dump_dir, metrics_config.save_tb_folder or "tb")
 
         if job_config.fault_tolerance.enable:
             base_log_dir = os.path.join(
-                base_log_dir,
-                f"replica_{job_config.fault_tolerance.replica_id}",
+                base_log_dir, f"replica_{job_config.fault_tolerance.replica_id}"
             )
 
         if metrics_config.save_for_all_ranks:
@@ -218,20 +241,15 @@ def _patch_metric_logging() -> None:
         logger_container = titan_metrics.LoggerContainer()
 
         if metrics_config.enable_wandb:
-            if _maybe_import_wandb() is not None:
-                wandb_logger = titan_metrics.WandBLogger(
-                    base_log_dir, job_config, tag
-                )
+            wandb_mod = _maybe_import_wandb()
+            if wandb_mod is not None:
+                wandb_logger = titan_metrics.WandBLogger(base_log_dir, job_config, tag)
                 logger_container.add_logger(wandb_logger)
             else:
-                _log_rank(
-                    "Skipping W&B logger because wandb is unavailable in this environment."
-                )
+                _log_rank("Skipping W&B logger because wandb is unavailable.")
 
         if metrics_config.enable_tensorboard:
-            tensorboard_logger = titan_metrics.TensorBoardLogger(
-                base_log_dir, tag
-            )
+            tensorboard_logger = titan_metrics.TensorBoardLogger(base_log_dir, tag)
             logger_container.add_logger(tensorboard_logger)
 
         return logger_container
@@ -269,54 +287,7 @@ def _patch_metric_logging() -> None:
     titan_metrics._molgen_logger_patched = True
 
 
-_PATCHED_CHECKPOINTER = False
-
-
-def _patch_checkpoint_manager() -> None:
-    global _PATCHED_CHECKPOINTER
-    if _PATCHED_CHECKPOINTER:
-        return
-
-    original_save = CheckpointManager.save
-
-    def _save(self, curr_step: int, last_step: bool = False):
-        should_export = getattr(self, "_molgen_save_hf", False) and self._should_save(
-            curr_step, last_step
-        )
-        original_save(self, curr_step, last_step)
-        if should_export:
-            self._molgen_export_hf(curr_step)
-
-    def _export_hf(self, curr_step: int):
-        if self.sd_adapter is None:
-            logger.warning(
-                "save_hf_per_checkpoint enabled but no state dict adapter provided."
-            )
-            return
-
-        checkpoint_id = self._create_checkpoint_id(curr_step)
-        export_dir = f"{checkpoint_id}_hf"
-        states = self.states[MODEL].state_dict()
-
-        self.dcp_save(
-            states,
-            checkpoint_id=export_dir,
-            async_mode=AsyncMode.DISABLED,
-            enable_garbage_collection=True,
-            to_hf=True,
-        )
-
-        tokenizer = getattr(self, "_molgen_tokenizer", None)
-        if tokenizer is not None and hasattr(tokenizer, "save_pretrained"):
-            tokenizer.save_pretrained(export_dir)
-
-    CheckpointManager.save = _save
-    CheckpointManager._molgen_export_hf = _export_hf  # type: ignore[attr-defined]
-    _PATCHED_CHECKPOINTER = True
-
-
 _patch_metric_logging()
-_patch_checkpoint_manager()
 
 _BASE_SPEC = qwen3_module.get_train_spec()
 
@@ -327,7 +298,7 @@ register_train_spec(
         build_dataloader_fn=build_molgen_dataloader,
         build_validator_fn=build_molgen_validator,
         build_lr_schedulers_fn=build_wsds_lr_schedulers,
-        parallelize_fn=_parallelize_with_resize,
+        parallelize_fn=_parallelize_with_molgen,
         state_dict_adapter=MolGenQwen3StateDictAdapter,
     ),
 )

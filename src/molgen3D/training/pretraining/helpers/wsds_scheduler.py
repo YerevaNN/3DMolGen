@@ -12,7 +12,7 @@ class WSDSSchedulerConfig:
     enable: bool = False
     warmup_steps: int = 0
     checkpoints: List[int] = field(default_factory=list)
-    lr_max: float = 0.0
+    lr_max: Optional[float] = None
     lr_min: float = 0.0
     decay_frac: Optional[float] = 0.1
     decay_steps: Optional[int] = None
@@ -28,7 +28,7 @@ class WSDSSchedulerConfig:
             raise ValueError("decay_frac must be within [0, 1]")
         if self.warmup_steps < 0:
             raise ValueError("warmup_steps must be non-negative")
-        if self.lr_max <= 0:
+        if self.lr_max is None or self.lr_max <= 0:
             raise ValueError("lr_max must be positive")
         if self.lr_min < 0 or self.lr_min > self.lr_max:
             raise ValueError("lr_min must be between 0 and lr_max")
@@ -133,6 +133,11 @@ def build_wsds_lr_schedulers(optimizers, lr_scheduler_config, training_steps):
         return tt_lr_scheduler.build_lr_schedulers(
             optimizers, lr_scheduler_config, training_steps
         )
+    opt_lr = float(optimizers.optimizers[0].param_groups[0]["lr"])
+    if cfg.lr_max is None or cfg.lr_max <= 0:
+        cfg.lr_max = opt_lr
+    if cfg.base_lr is None or cfg.base_lr <= 0:
+        cfg.base_lr = opt_lr
     checkpoints = cfg.validate()
     scheduler = WSDSSchedule(
         optimizers.optimizers[0],
@@ -147,5 +152,3 @@ def build_wsds_lr_schedulers(optimizers, lr_scheduler_config, training_steps):
     return tt_lr_scheduler.LRSchedulersContainer(
         optimizers, scheduler.lr_lambda
     )
-
-

@@ -49,7 +49,7 @@ This section controls initialization mode and tokenizer selection.
 
 ### `[optimizer]`
 - `name = "AdamW"` *(recommended)*.
-- `lr` *(required)* – keep this synchronized with `[wsds_scheduler].lr_max` and the scheduler warmup steps.
+- `lr` *(optional, defaults to WSDS base_lr when omitted)* – if you leave it unset, `custom_job_config` copies the effective LR into `wsds_scheduler.base_lr` / `lr_max`. Set it explicitly only when you need a non-default learning rate.
 - `beta1`, `beta2`, `eps`, `weight_decay` *(optional)* – standard defaults.
 
 ### `[lr_scheduler]`
@@ -62,8 +62,9 @@ Controls the custom warmup/stable/decay schedule.
 - `enable = true` *(recommended)* – turn off only if you want to rely solely on Titan’s scheduler.
 - `warmup_steps` *(required)* – typically 500.
 - `checkpoints` *(optional)* – cosmetic markers for when you expect stage transitions. Adjust when `training.steps` changes.
-- `lr_max`, `lr_min` *(required)* – top/bottom LR bounds; `lr_max` normally matches `optimizer.lr`.
-- `decay_frac` *(optional)* – fraction of total steps allocated to the decay phase.
+- `lr_max` *(optional)* – if omitted, we automatically copy `[optimizer].lr`, so the optimizer stays the source of truth. Override only when you intentionally want WSDS to run at a different peak LR.
+- `lr_min` *(required)* – lowest LR after decay.
+- `decay_frac` *(optional)* – fraction of total steps allocated to the decay phase (or use `decay_steps` for an absolute value).
 
 ### `[checkpoint]`
 - `enable = true` *(required)*.
@@ -71,7 +72,7 @@ Controls the custom warmup/stable/decay schedule.
 - `keep_latest_k` *(recommended)* – set to 3–4 to limit storage.
 - `folder = "checkpoint"` *(required)* – directory under `<run-name>` where Titan saves DCPs.
 - `initial_load_path`, `initial_load_model_only`, `initial_load_in_hf` *(see `[molgen_run]`)* – these fields are overwritten automatically by `launch_qwen3_pretrain` depending on `init_mode`.
-- `last_save_in_hf`, `save_hf_per_checkpoint` *(optional)* – set to `true` to emit Hugging Face safetensors when saving DCPs.
+// NOTE: HF export per checkpoint is no longer supported in the MolGen Qwen3 integration.
 - `async_mode = "async"` *(optional)* – leave `async` for faster checkpointing; switch to `sync` when network contention causes issues.
 
 ### `[metrics]`

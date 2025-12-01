@@ -1,12 +1,13 @@
 [job]
-description = "qwen3_06b_wsds_frompretrained"
+description = "qwen3_06b_fromscratch"
 dump_folder = "pretrain_runs"
 print_config = true
 custom_config_module = "molgen3D.training.pretraining.config.custom_job_config"
 
 [molgen_run]
-init_mode = "hf_pretrain" # scratch | hf_pretrain | resume
-tokenizer_tag = "tokenizers:qwen3_0.6b_custom"
+init_mode = "scratch" # scratch | hf_pretrain | resume
+# tokenizer_tag = "tokenizers:qwen3_0.6b_custom"
+run_desc = "qwen3_06b_fromscratch"
 base_model_tag = "base_paths:qwen3_0.6b_base_model"
 # resume_run_path_tag = "ckpts:qwen3_0.6b_previous_run"
 
@@ -18,19 +19,29 @@ hf_assets_path = "base_paths:qwen3_0.6b_base_model"
 [experimental]
 custom_import = "molgen3D.training.pretraining.torchtitan_model.qwen3_custom"
 
+[training]
+seq_len = 2048
+local_batch_size = 12
+global_batch_size = -1
+steps = 3000
+dtype = "bfloat16"
+seed = 1234
+dataset = "molgen_jsonl"
+dataset_path = "data:conformers_train"
+
 [validation]
 enable = true
 dataset = "molgen_jsonl"
 dataset_path = "data:conformers_valid"
-local_batch_size = 12
+local_batch_size = 4
 seq_len = 2048
-freq = 500
-steps = -1
+freq = 100
+steps = 100
 
 [molgen_data]
 train_path_key = "conformers_train"
 tokenizer_key = "qwen3_0.6b_origin"
-min_emb_len = 16
+min_emb_len = 0
 shuffle_lines = true
 infinite = true
 seed = 2025
@@ -40,16 +51,6 @@ drop_last = true
 persistent_workers = true
 prefetch_factor = 2
 lookahead_limit = 100
-
-[training]
-seq_len = 2048
-local_batch_size = 12
-global_batch_size = -1
-steps = 126000
-dtype = "bfloat16"
-seed = 1234
-dataset = "molgen_jsonl"
-dataset_path = "data:conformers_train"
 
 [optimizer]
 name = "AdamW"
@@ -66,14 +67,13 @@ weight_decay = 0.1
 [wsds_scheduler]
 enable = true
 warmup_steps = 500
-checkpoints = [31500, 63000, 94500, 126000]
-lr_max = 2e-4
+checkpoints = [1000, 2000, 3000]
 lr_min = 0
 decay_frac = 0.1
 
 [checkpoint]
 enable = true
-interval = 2500
+interval = 1000
 keep_latest_k = 4
 folder = "checkpoint"
 create_seed_checkpoint = false
@@ -81,7 +81,6 @@ initial_load_model_only = true
 initial_load_in_hf = true
 initial_load_path = "base_paths:qwen3_0.6b_base_model"
 last_save_in_hf = false
-save_hf_per_checkpoint = false
 async_mode = "async"
 
 [metrics]
@@ -95,4 +94,3 @@ data_parallel_replicate_degree = 1
 data_parallel_shard_degree = -1
 tensor_parallel_degree = 1
 fsdp_reshard_after_forward = "default"
-

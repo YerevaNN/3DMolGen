@@ -84,6 +84,7 @@ def _make_dataset(
     world_size: int = 1,
     rank: int = 0,
     infinite: bool = False,
+    **overrides,
 ):
     return JsonlTaggedPackedDataset(
         train_path=str(data_file),
@@ -96,6 +97,7 @@ def _make_dataset(
         world_size=world_size,
         rank=rank,
         lookahead_limit=4,
+        **overrides,
     )
 
 
@@ -176,6 +178,49 @@ def test_chunk_packer_emits_shifted_pairs():
     assert blocks, "Expected packer to emit at least one block"
     for inp, target in blocks:
         assert torch.equal(target[:-1], inp[1:])
+
+
+def test_dataloader_truncates_monster_units(tmp_path):
+    """Units longer than seq_len - 1 should be truncated instead of dropped."""
+    data_file = tmp_path / "train.jsonl"
+    canonical = "C"
+    embedded = "[H]" + "C" * 5000
+    with data_file.open("w", encoding="utf-8") as fp:
+        json.dump({"canonical_smiles": canonical, "embedded_smiles": embedded}, fp)
+        fp.write("\n")
+    seq_len = 64
+    ds = _make_dataset(data_file, seq_len=seq_len)
+    ds._ensure_tokenizer_ready()
+    fps = [open(str(data_file), "rb")]
+    try:
+        unit = ds._read_unit_from_pair(fps, (0, 0))
+    finally:
+        for f in fps:
+            f.close()
+    assert unit is not None
+    full_unit = build_unit(canonical, embedded)
+    tokens = ds.tk.encode(full_unit, add_special_tokens=False)
+    assert len(tokens) > ds.max_unit_tokens
+    assert unit.tokens == tokens[: ds.max_unit_tokens]
+
+
+def test_dataloader_can_disable_truncation(tmp_path):
+    """Truncation behavior can be disabled for strict filtering."""
+    data_file = tmp_path / "train.jsonl"
+    canonical = "C"
+    embedded = "[H]" + "C" * 5000
+    with data_file.open("w", encoding="utf-8") as fp:
+        json.dump({"canonical_smiles": canonical, "embedded_smiles": embedded}, fp)
+        fp.write("\n")
+    ds = _make_dataset(data_file, seq_len=64, truncate_overflow_units=False)
+    ds._ensure_tokenizer_ready()
+    fps = [open(str(data_file), "rb")]
+    try:
+        unit = ds._read_unit_from_pair(fps, (0, 0))
+    finally:
+        for f in fps:
+            f.close()
+    assert unit is None
 def _extract_smiles(tensor: torch.Tensor, tokenizer: _DummyTokenizer) -> List[str]:
     decoded = tokenizer.decode(tensor.tolist(), skip_special_tokens=False)
     return [match.strip() for match in SMILES_PATTERN.findall(decoded)]

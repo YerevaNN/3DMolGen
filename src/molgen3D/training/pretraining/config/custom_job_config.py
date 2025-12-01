@@ -74,7 +74,7 @@ class MolGenDataConfig:
     drop_last: bool = True
     persistent_workers: Optional[bool] = None
     prefetch_factor: Optional[int] = None
-    lookahead_limit: int = 100
+    lookahead_limit: Optional[int] = None
 
     def __post_init__(self) -> None:
         """
@@ -97,6 +97,8 @@ class MolGenDataConfig:
             )
         )
         self.tokenizer_override = tokenizer_override
+        if self.lookahead_limit is None:
+            self.lookahead_limit = 100
 
 
 @dataclass
@@ -112,11 +114,7 @@ class MolGenRunConfig:
     base_model_tag: Optional[str] = "base_paths:qwen3_0.6b_base_model"
     resume_run_path_tag: Optional[str] = None
     run_name: Optional[str] = None
-
-
-@dataclass
-class MolGenCheckpointConfig(TorchTitanCheckpoint):
-    save_hf_per_checkpoint: bool = False
+    run_desc: Optional[str] = None
 
 
 @dataclass
@@ -129,8 +127,15 @@ class JobConfig(TorchTitanJobConfig):
     molgen_data: MolGenDataConfig = field(default_factory=MolGenDataConfig)
     molgen_run: MolGenRunConfig = field(default_factory=MolGenRunConfig)
     wsds_scheduler: WSDSSchedulerConfig = field(default_factory=WSDSSchedulerConfig)
-    checkpoint: MolGenCheckpointConfig = field(default_factory=MolGenCheckpointConfig)
 
     def __post_init__(self) -> None:  # pragma: no cover - simple wiring
-        if self.wsds_scheduler.enable and self.wsds_scheduler.base_lr is None:
-            self.wsds_scheduler.base_lr = self.optimizer.lr
+        if self.wsds_scheduler.enable:
+            lr = getattr(self.optimizer, "lr", None)
+            if lr is None:
+                raise ValueError("optimizer.lr must be set when WSDS scheduler is enabled.")
+            if self.wsds_scheduler.base_lr is None:
+                self.wsds_scheduler.base_lr = lr
+            lr_max = getattr(self.wsds_scheduler, "lr_max", None)
+            if lr_max is None or lr_max <= 0:
+                self.wsds_scheduler.lr_max = lr
+        
