@@ -1,0 +1,9 @@
+{
+  "orig_vocab_size": 151669,
+  "num_added": 4,
+  "new_vocab_size": 151673,
+  "orig_embed_shape": [
+    151936,
+    1024
+  ]
+}

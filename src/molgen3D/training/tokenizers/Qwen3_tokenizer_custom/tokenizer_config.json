@@ -1,4 +1,6 @@
 {
+  "add_bos_token": false,
+  "add_prefix_space": false,
   "added_tokens_decoder": {
     "151643": {
       "content": "<|endoftext|>",
@@ -177,6 +179,38 @@
       "special": false
     },
     "151665": {
+      "content": "<tool_response>",
+      "lstrip": false,
+      "normalized": false,
+      "rstrip": false,
+      "single_word": false,
+      "special": false
+    },
+    "151666": {
+      "content": "</tool_response>",
+      "lstrip": false,
+      "normalized": false,
+      "rstrip": false,
+      "single_word": false,
+      "special": false
+    },
+    "151667": {
+      "content": "<think>",
+      "lstrip": false,
+      "normalized": false,
+      "rstrip": false,
+      "single_word": false,
+      "special": false
+    },
+    "151668": {
+      "content": "</think>",
+      "lstrip": false,
+      "normalized": false,
+      "rstrip": false,
+      "single_word": false,
+      "special": false
+    },
+    "151669": {
       "content": "[SMILES]",
       "lstrip": false,
       "normalized": true,
@@ -184,7 +218,7 @@
       "single_word": false,
       "special": false
     },
-    "151666": {
+    "151670": {
       "content": "[CONFORMERS]",
       "lstrip": false,
       "normalized": true,
@@ -192,7 +226,7 @@
       "single_word": false,
       "special": false
     },
-    "151667": {
+    "151671": {
       "content": "[/SMILES]",
       "lstrip": false,
       "normalized": true,
@@ -200,7 +234,7 @@
       "single_word": false,
       "special": false
     },
-    "151668": {
+    "151672": {
       "content": "[/CONFORMERS]",
       "lstrip": false,
       "normalized": true,
@@ -209,8 +243,29 @@
       "special": false
     }
   },
+  "additional_special_tokens": [
+    "<|im_start|>",
+    "<|im_end|>",
+    "<|object_ref_start|>",
+    "<|object_ref_end|>",
+    "<|box_start|>",
+    "<|box_end|>",
+    "<|quad_start|>",
+    "<|quad_end|>",
+    "<|vision_start|>",
+    "<|vision_end|>",
+    "<|vision_pad|>",
+    "<|image_pad|>",
+    "<|video_pad|>"
+  ],
+  "bos_token": null,
   "clean_up_tokenization_spaces": false,
+  "eos_token": "<|endoftext|>",
+  "errors": "replace",
   "extra_special_tokens": {},
-  "model_max_length": 1000000000000000019884624838656,
-  "tokenizer_class": "PreTrainedTokenizerFast"
+  "model_max_length": 131072,
+  "pad_token": "<|endoftext|>",
+  "split_special_tokens": false,
+  "tokenizer_class": "Qwen2Tokenizer",
+  "unk_token": null
 }
