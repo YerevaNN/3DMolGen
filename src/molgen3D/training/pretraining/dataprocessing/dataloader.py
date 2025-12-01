@@ -743,6 +743,7 @@ def build_molgen_validator(
     # Use fewer workers for validation to reduce memory usage
     # Validation doesn't need as many workers as training since it's not as performance-critical
     val_num_workers = min(data_cfg.num_workers, 2)  # Cap at 2 workers for validation
+    infinite_validation = job_config.validation.steps != -1
     validation_dataloader = build_dataloader(
         train_path=_resolve_validation_path(job_config),
         tokenizer_path=_resolve_tokenizer_path(data_cfg, job_config),
@@ -752,7 +753,10 @@ def build_molgen_validator(
         num_workers=val_num_workers,
         pin_memory=data_cfg.pin_memory,
         shuffle_lines=False,
-        infinite=False,
+        # Mirror TorchTitan’s default: only allow finite validation when the user
+        # explicitly sets steps=-1, otherwise keep the loader infinite so every
+        # rank can always advance to the requested step count.
+        infinite=infinite_validation,
         seed=data_cfg.seed if data_cfg.seed is not None else job_config.training.seed,
         min_emb_len=data_cfg.min_emb_len,
         drop_last=False,
