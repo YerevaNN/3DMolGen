@@ -45,7 +45,7 @@ def _get_ckpt_base_path(root_rel: str, base_paths: dict) -> str:
         return base_paths.get("grpo_outputs_root", ".")
     if root_rel.startswith("2025-"):
         return base_paths.get("grpo_root", base_paths.get("ckpts_root", "."))
-    return base_paths.get("ckpts_root", ".")
+    return base_paths.get("hf_yerevann_root", ".")
 
 
 def load_paths_yaml() -> dict:
