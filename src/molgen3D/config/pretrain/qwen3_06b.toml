@@ -1,5 +1,5 @@
 [job]
-description = "qwen3_06b_fromscratch"
+description = "qwen3_06b_pre_1e-4lr_120effb_8000step"
 dump_folder = "pretrain_runs"
 print_config = true
 custom_config_module = "molgen3D.training.pretraining.config.custom_job_config"
@@ -21,9 +21,9 @@ custom_import = "molgen3D.training.pretraining.torchtitan_model.qwen3_custom"
 
 [training]
 seq_len = 2048
-local_batch_size = 12
-global_batch_size = -1
-steps = 3000
+local_batch_size = 6
+global_batch_size = 120
+steps = 8000
 dtype = "bfloat16"
 seed = 1234
 dataset = "molgen_jsonl"
@@ -35,8 +35,8 @@ dataset = "molgen_jsonl"
 dataset_path = "data:conformers_valid"
 local_batch_size = 4
 seq_len = 2048
-freq = 100
-steps = 100
+freq = 8000
+steps = 200
 
 [molgen_data]
 train_path_key = "conformers_train"
@@ -54,7 +54,7 @@ lookahead_limit = 100
 
 [optimizer]
 name = "AdamW"
-lr = 5e-4
+lr = 1e-4
 beta1 = 0.9
 beta2 = 0.95
 eps = 1e-8
@@ -67,20 +67,20 @@ weight_decay = 0.1
 [wsds_scheduler]
 enable = true
 warmup_steps = 500
-checkpoints = [1000, 2000, 3000]
+checkpoints = [8000]
 lr_min = 0
 decay_frac = 0.1
 
 [checkpoint]
-enable = true
-interval = 1000
+enable = false
+interval = 500
 keep_latest_k = 4
 folder = "checkpoint"
 create_seed_checkpoint = false
 initial_load_model_only = true
 initial_load_in_hf = true
 initial_load_path = "base_paths:qwen3_0.6b_base_model"
-last_save_in_hf = false
+last_save_in_hf = true
 async_mode = "async"
 
 [metrics]
