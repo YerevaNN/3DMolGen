@@ -69,7 +69,7 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id)
         outputs = model.generate(
             input_ids=tokenized_prompts["input_ids"], 
             attention_mask=tokenized_prompts["attention_mask"],
-            max_new_tokens=10000,
+            max_new_tokens=2000,
             eos_token_id=eos_token_id, 
             generation_config=gen_config,
             use_cache=True,
@@ -199,7 +199,7 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         "model_path": get_ckpt("m380_conf_v2","2e"),
         "tokenizer_path": get_tokenizer_path("llama3_chem_v1"),
         "torch_dtype": "bfloat16",
-        "batch_size": 100,
+        "batch_size": 400,
         "num_gens": gen_num_codes["2k_per_conf"],
         "gen_config": sampling_configs["top_p_sampling1"],
         "device": "cuda",
@@ -224,6 +224,9 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
                             grid_config["model_path"] = get_ckpt(model_key)
                             model_key_str = model_key
                         
+                        if test_set_name == "xl":
+                            grid_config["batch_size"] = 100
+
                         grid_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
                         grid_config["test_set"] = test_set_name
                         grid_config["run_name"] = f"{model_key_str}_{test_set_name}"
@@ -235,6 +238,8 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
             with executor.batch():
                 for test_set_name in test_sets_to_run:
                     inference_config = dict(base_inference_config)
+                    if test_set_name == "xl":
+                        inference_config["batch_size"] = 100
                     inference_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
                     inference_config["test_set"] = test_set_name
                     inference_config["run_name"] = f"new_data_p1_{test_set_name}"
@@ -244,6 +249,8 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         else:
             for test_set_name in test_sets_to_run:
                 inference_config = dict(base_inference_config)
+                if test_set_name == "xl":
+                    inference_config["batch_size"] = 100
                 inference_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
                 inference_config["test_set"] = test_set_name
                 inference_config["run_name"] = f"new_data_p1_{test_set_name}"

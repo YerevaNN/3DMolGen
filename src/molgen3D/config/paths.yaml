@@ -38,7 +38,7 @@ models:
   # ---------- BASE MODELS ----------
 
   m380_conf:
-    root: "yerevann/Llama-3.2-380M_conformers"
+    root: "Llama-3.2-380M_conformers"
     steps:
       "1e": "b4707c6bf8b54cba8febe9fc/step-8500"
       "2e": "4291f8157d2f41a3bb9605e8/step-16000"
@@ -54,7 +54,7 @@ models:
       "4e": "step-34800"
       
   b1_conf:
-    root: "yerevann/Llama-3.2-1B_conformers"
+    root: "Llama-3.2-1B_conformers"
     steps:
       "1e": "66bfa548d98247cdb01c4c1c/step-11000"
       "2e": "ee7e78995cc04aea8089aee1/step-21000"
@@ -62,7 +62,7 @@ models:
       "4e": "37cf49f293254a6986b12948/step-40000"
 
   nb1_conf:
-    root: "yerevann/Llama-3.2-1B_conformers/d151bae44e0d4c868475efa9"
+    root: "Llama-3.2-1B_conformers/d151bae44e0d4c868475efa9"
     steps:
       "1e": "step-10000"
       "2e": "step-20000"
@@ -70,7 +70,7 @@ models:
       "4e": "step-40000"
 
   nm380_conf:
-    root: "yerevann/Llama-3.2-380M_conformers/3f3a5585a48c4e13bea8ddb9"
+    root: "Llama-3.2-380M_conformers/3f3a5585a48c4e13bea8ddb9"
     steps:
       "1e": "step-10000"
       "2e": "step-20000"
@@ -78,7 +78,7 @@ models:
       "4e": "step-40000"
 
   nm170_conf:
-    root: "yerevann/Llama-3.2-170M_conformers/b83c55dc0ab94c22b6eabcb7"
+    root: "Llama-3.2-170M_conformers/b83c55dc0ab94c22b6eabcb7"
     steps:
       "1e": "step-10000"
       "2e": "step-20000"
@@ -86,7 +86,7 @@ models:
       "4e": "step-40000"
 
   nm100_conf:
-    root: "yerevann/Llama-3.2-100M_conformers/fddd657b71204823aae093c4"
+    root: "Llama-3.2-100M_conformers/fddd657b71204823aae093c4"
     steps:
       "1e": "step-10000"
       "2e": "step-20000"
@@ -94,7 +94,7 @@ models:
       "4e": "step-40000"
 
   qw600_conf:
-    root: "yerevann/Qwen3-0.6B_hf/05274930efdd48f0a5289a2a"
+    root: "Qwen3-0.6B_hf/05274930efdd48f0a5289a2a"
     steps:
       "1e": "step-14000"
       "2e": "step-28000"
@@ -102,7 +102,7 @@ models:
       "4e": "step-56000"
 
   qw600_pre:
-    root: "yerevann/Qwen3-0.6B/643558083ac449d9b3328bc9"
+    root: "Qwen3-0.6B/643558083ac449d9b3328bc9"
     steps:
       "1e": "step-13000"
       "2e": "step-26000"
@@ -110,7 +110,7 @@ models:
       "4e": "step-52000"
 
   qw600_src:
-    root: "yerevann/Qwen3-0.6B/823a61f69f184d1d888785e4"
+    root: "Qwen3-0.6B/823a61f69f184d1d888785e4"
     steps:
       "1e": "step-13000"
 
