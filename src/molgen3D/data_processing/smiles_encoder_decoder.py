@@ -54,6 +54,7 @@ _ELEMENT_SYMBOLS = {
 _TWO_LETTER_SYMBOLS = {sym for sym in _ELEMENT_SYMBOLS if len(sym) == 2}
 _THREE_LETTER_SYMBOLS = {sym for sym in _ELEMENT_SYMBOLS if len(sym) == 3}
 _AROMATIC_SYMBOLS = set("cnopsb")
+_ORGANIC_SUBSET = {"B", "C", "N", "O", "P", "S", "F", "Cl", "Br", "I", "b", "c", "n", "o", "p", "s"}
 
 def strip_smiles(s: str) -> str:
     """
@@ -79,11 +80,10 @@ def strip_smiles(s: str) -> str:
         if re.fullmatch(r'([Cc])H\d*', inner):
             return inner[0]  # 'C' or 'c'
 
-        # Simple element or aromatic, no modifiers, and not H
-        # e.g. [C], [N], [O], [Cl], [Br], [c], [n], [o], ...
-        if inner != 'H' and (
-            re.fullmatch(r'[A-Z][a-z]?', inner) or   # C, N, O, S, Cl, Br, ...
-            re.fullmatch(r'[cnopsb]', inner)         # c, n, o, p, s, b
+        # Drop brackets around simple organic-subset atoms (no isotopes/charges/H)
+        if (
+            inner in _ORGANIC_SUBSET
+            and inner != "H"
         ):
             return inner  # drop brackets
 
@@ -227,9 +227,11 @@ def _format_atom_descriptor(atom):
     elif chiral == ChiralType.CHI_TETRAHEDRAL_CCW:
         descriptor += "@@"
 
-    hcount = atom.GetTotalNumHs()
-    if hcount > 0:
-        descriptor += "H" if hcount == 1 else f"H{hcount}"
+    # Count only explicit hydrogens that are actual neighbors in this graph
+    explicit_h = sum(1 for nbr in atom.GetNeighbors() if nbr.GetAtomicNum() == 1)
+
+    if "H" not in descriptor and explicit_h > 0:
+        descriptor += "H" if explicit_h == 1 else f"H{explicit_h}"
 
     charge = atom.GetFormalCharge()
     if charge != 0:
@@ -329,9 +331,6 @@ _ENRICHED_TOKEN_PATTERN = re.compile(
     r"(\[[^\]]+\])<([^>]+)>|(%\d{2,})|(=|#|:|\/|\\|-)|(\()|(\))|(\d)|(\.)"
 )
 
-_SIMPLE_LETTER_BRACKET = re.compile(r"^\[[A-Za-z]{1,3}\]$")
-
-
 def tokenize_enriched(enriched):
     """Tokenize the enriched representation back into atoms (with coords) and other tokens."""
     tokens = []
@@ -384,7 +383,12 @@ def decode_cartesian_v2(enriched_string):
     coords = []
     for token in tokens:
         if token["type"] == "atom_with_coords":
-            smiles_parts.append(token["atom_desc"])
+            desc = token["atom_desc"]
+            desc_inner = desc[1:-1]
+            if desc_inner in _ORGANIC_SUBSET:
+                smiles_parts.append(desc_inner)
+            else:
+                smiles_parts.append(desc)
             coords.append(token["coords"])
         else:
             smiles_parts.append(token["text"])
@@ -397,12 +401,6 @@ def decode_cartesian_v2(enriched_string):
         raise ValueError(
             f"Atom count mismatch: mol has {mol.GetNumAtoms()} atoms, coords list has {len(coords)} entries."
         )
-
-    for idx, token in enumerate(t for t in tokens if t["type"] == "atom_with_coords"):
-        atom = mol.GetAtomWithIdx(idx)
-        desc = token["atom_desc"]
-        if atom.GetSymbol() != "H" and _SIMPLE_LETTER_BRACKET.match(desc):
-            atom.SetNoImplicit(False)
 
     Chem.SanitizeMol(mol)
 
