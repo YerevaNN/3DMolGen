@@ -5,8 +5,54 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from collections import Counter
 from pathlib import Path
+
+# Add src to path to import molgen3D modules
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+try:
+    from molgen3D.data_processing.smiles_encoder_decoder import strip_smiles
+    STRIP_SMILES_AVAILABLE = True
+except ImportError:
+    STRIP_SMILES_AVAILABLE = False
+    def strip_smiles(s):
+        """Fallback: just remove <...> blocks."""
+        return re.sub(r'<[^>]*>', '', s)
+
+
+def extract_first_conformer(decoded_text: str) -> str | None:
+    """Extract the first [CONFORMER]...[/CONFORMER] block from decoded text."""
+    match = re.search(r'\[CONFORMER\](.*?)\[/CONFORMER\]', decoded_text, re.DOTALL)
+    if match:
+        return match.group(1)
+    return None
+
+
+def validate_conformer_mapping(
+    prompt_smiles: str,
+    decoded_text: str
+) -> tuple[bool, str]:
+    """
+    Validate that embedded conformer maps back to canonical SMILES.
+
+    Returns: (is_valid, diagnostic_message)
+    """
+    conformer_block = extract_first_conformer(decoded_text)
+    if not conformer_block:
+        return False, "No conformer block found"
+
+    try:
+        # Strip coordinates to get SMILES representation
+        stripped = strip_smiles(conformer_block)
+
+        if stripped == prompt_smiles:
+            return True, "Perfect match"
+        else:
+            return False, f"Mismatch: got '{stripped[:50]}...', expected '{prompt_smiles[:50]}...'"
+    except Exception as e:
+        return False, f"Error: {e}"
 
 
 def analyze_report(report_path: Path) -> None:
@@ -59,6 +105,46 @@ def analyze_report(report_path: Path) -> None:
     coord_patterns = analyze_coordinates(data)
     for pattern, count in coord_patterns.most_common(10):
         print(f"  {pattern:<50} {count:>4}")
+
+    # Conformer mapping validation
+    print(f"\n{'='*70}")
+    print(f"CONFORMER → SMILES MAPPING")
+    print(f"{'='*70}")
+    all_records = data.get("passes", []) + data.get("failures", [])
+    mapping_valid = 0
+    mapping_issues = Counter()
+    for rec in all_records:
+        is_valid, msg = validate_conformer_mapping(
+            rec.get("prompt_smiles", ""),
+            rec.get("decoded_text", "")
+        )
+        if is_valid:
+            mapping_valid += 1
+        else:
+            mapping_issues[msg.split(":")[0]] += 1
+
+    print(f"  Valid mappings:   {mapping_valid}/{total} ({100*mapping_valid/max(total,1):.1f}%)")
+    if mapping_issues:
+        print(f"  Mapping issues:")
+        for issue, count in mapping_issues.most_common(5):
+            print(f"    {issue:<45} {count:>4}")
+
+    # Generation stopping check
+    print(f"\n{'='*70}")
+    print(f"GENERATION STOPPING")
+    print(f"{'='*70}")
+    samples_with_multiple_conformers = 0
+    for rec in all_records:
+        decoded = rec.get("decoded_text", "")
+        conformer_count = decoded.count("[/CONFORMER]")
+        if conformer_count > 1:
+            samples_with_multiple_conformers += 1
+
+    if samples_with_multiple_conformers > 0:
+        print(f"  ⚠️  Samples with >1 [/CONFORMER]: {samples_with_multiple_conformers}/{total}")
+        print(f"      (Generation didn't stop properly)")
+    else:
+        print(f"  ✓ All samples stopped correctly after [/CONFORMER]")
 
     # Special token pollution
     special_token_counts = count_special_tokens(data)
