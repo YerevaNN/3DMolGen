@@ -1,13 +1,13 @@
 [job]
-description = "qwen3_06b_pre_1e-4lr_120effb_8000step"
+description = "qwen3_06b_pre_20k_step_144effb"
 dump_folder = "pretrain_runs"
 print_config = true
 custom_config_module = "molgen3D.training.pretraining.config.custom_job_config"
 
 [molgen_run]
-init_mode = "scratch" # scratch | hf_pretrain | resume
+init_mode = "hf_pretrain" # scratch | hf_pretrain | resume
 # tokenizer_tag = "tokenizers:qwen3_0.6b_custom"
-run_desc = "qwen3_06b_fromscratch"
+run_desc = "qwen3_06b_pre_20k_step_144effb_v3data"
 base_model_tag = "base_paths:qwen3_0.6b_base_model"
 # resume_run_path_tag = "ckpts:qwen3_0.6b_previous_run"
 
@@ -21,9 +21,10 @@ custom_import = "molgen3D.training.pretraining.torchtitan_model.qwen3_custom"
 
 [training]
 seq_len = 2048
-local_batch_size = 6
-global_batch_size = 120
-steps = 8000
+local_batch_size = 12
+global_batch_size = 144
+steps = 20000
+max_norm = 1.0
 dtype = "bfloat16"
 seed = 1234
 dataset = "molgen_jsonl"
@@ -33,9 +34,9 @@ dataset_path = "data:conformers_train"
 enable = true
 dataset = "molgen_jsonl"
 dataset_path = "data:conformers_valid"
-local_batch_size = 4
+local_batch_size = 8
 seq_len = 2048
-freq = 8000
+freq = 500
 steps = 200
 
 [molgen_data]
@@ -67,13 +68,13 @@ weight_decay = 0.1
 [wsds_scheduler]
 enable = true
 warmup_steps = 500
-checkpoints = [8000]
+checkpoints = [20000]
 lr_min = 0
 decay_frac = 0.1
 
 [checkpoint]
-enable = false
-interval = 500
+enable = true
+interval = 20000
 keep_latest_k = 4
 folder = "checkpoint"
 create_seed_checkpoint = false
