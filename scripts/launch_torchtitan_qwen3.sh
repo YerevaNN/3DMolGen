@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=torchtitan-qwen3
 #SBATCH --cpus-per-task=64
-#SBATCH --partition=a100
+#SBATCH --partition=h100
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:4
+#SBATCH --gres=gpu:6
 #SBATCH --mem=200G
 #SBATCH --time=20:00:00
 #SBATCH --output=outputs/slurm_jobs/titan/%j.out
 #SBATCH --error=outputs/slurm_jobs/titan/%j.err
-
-set -euo pipefail
 
 export WANDB_ENTITY=${WANDB_ENTITY:-menuab_team}
 export WANDB_PROJECT=${WANDB_PROJECT:-3dmolgen}
