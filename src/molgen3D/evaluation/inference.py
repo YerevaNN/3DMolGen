@@ -38,11 +38,13 @@ def set_seed(seed=42):
     torch.backends.cudnn.benchmark = False
 
 def load_model_tokenizer(model_path, tokenizer_path, torch_dtype="bfloat16", attention_imp="flash_attention_2", device="auto"):
-    tokenizer  = AutoTokenizer.from_pretrained(tokenizer_path, padding_side='left')
-    model = AutoModelForCausalLM.from_pretrained(model_path, 
-                                                 dtype=getattr(torch, torch_dtype),
+    tokenizer  = AutoTokenizer.from_pretrained(str(tokenizer_path), padding_side='left', local_files_only=True)
+    model = AutoModelForCausalLM.from_pretrained(str(model_path),
+                                                 torch_dtype=getattr(torch, torch_dtype),
                                                  attn_implementation=attention_imp,
-                                                 device_map=device).eval()
+                                                 device_map=device,
+                                                 trust_remote_code=True,
+                                                 local_files_only=True).eval()
     tokenizer.pad_token = tokenizer.eos_token
     model.generation_config.pad_token_id = tokenizer.pad_token_id
     print(f"{model.dtype=}, {model.device=}")
@@ -84,7 +86,7 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id)
         outputs = model.generate(
             input_ids=tokenized_prompts["input_ids"], 
             attention_mask=tokenized_prompts["attention_mask"],
-            max_new_tokens=2000,
+            max_new_tokens=4000,
             eos_token_id=eos_token_id, 
             generation_config=gen_config,
             logits_processor=logits_processor,
@@ -151,6 +153,12 @@ def run_inference(inference_config: dict):
         for geom_smiles, data in test_data.items():
             mols_list.extend([(geom_smiles, f"[SMILES]{data['corrected_smi']}[/SMILES]")] * data["num_confs"] * 2)
     elif test_set == "distinct":
+        logger.info("Processing as distinct dataset")
+        for geom_smiles, data in test_data.items():
+            for sub_smiles, count in data["sub_smiles_counts"].items():
+                mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * count * 2)
+    elif test_set == "xl":
+        logger.info("Processing as xl dataset")
         for geom_smiles, data in test_data.items():
             for sub_smiles, count in data["sub_smiles_counts"].items():
                 mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * count * 2)
@@ -175,7 +183,18 @@ def run_inference(inference_config: dict):
     return generations_all, stats
 
 
-def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:str = None) -> None:
+def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:str = None, xl:bool = False) -> None:
+    # Determine which test sets to run
+    test_sets_to_run = []
+    if test_set:
+        test_sets_to_run.append(test_set)
+    if xl:
+        test_sets_to_run.append("xl")
+    
+    if not test_sets_to_run:
+        logger.info("No test sets specified. Skipping inference.")
+        return
+    
     n_gpus = 1
     node = device if device in ["a100", "h100"] else "local"
     executor = None
@@ -192,10 +211,11 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         cpus_per_task=n_gpus * 4,
         slurm_additional_parameters={"partition": node},
     )
-    inference_config = {
+    
+    # Base configuration template
+    base_inference_config = {
         "model_path": get_ckpt("m380_conf_v2","2e"),
         "tokenizer_path": get_tokenizer_path("llama3_chem_v1"),
-        "test_data_path": get_data_path(f"{test_set}_smi"),
         "torch_dtype": "bfloat16",
         "batch_size": 400,
         "num_gens": gen_num_codes["2k_per_conf"],
@@ -203,7 +223,6 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         "device": "cuda",
         "results_path": get_base_path("gen_results_root"),
         "run_name": "new_data_p1",
-        "test_set": test_set,
     }
     if grid_run_inference:
         param_grid = {
@@ -214,33 +233,57 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         if executor is not None:
             with executor.batch():
                 for model_key in param_grid["model_path"]:
-                    grid_config = dict(inference_config)
-                    if isinstance(model_key, tuple):
-                        grid_config["model_path"] = get_ckpt(model_key[0], model_key[1])
-                        model_key_str = f"{model_key[0]}_{model_key[1]}"
-                    else:
-                        grid_config["model_path"] = get_ckpt(model_key)
-                        model_key_str = model_key
-                    # grid_config["gen_config"] = sampling_configs[gen_config_key]
-                    # grid_config["batch_size"] = 256 if "1b" in model_key_str else 256
-                    # grid_config["test_set"] = test_set_value
-                    # grid_config["test_data_path"] = get_data_path(f"{test_set_value}_smi")
-                    grid_config["run_name"] = f"{model_key_str}"
-                    job = executor.submit(run_inference, inference_config=grid_config)
-                    jobs.append(job)
+                    for test_set_name in test_sets_to_run:
+                        grid_config = dict(base_inference_config)
+                        if isinstance(model_key, tuple):
+                            grid_config["model_path"] = get_ckpt(model_key[0], model_key[1])
+                            model_key_str = f"{model_key[0]}_{model_key[1]}"
+                        else:
+                            grid_config["model_path"] = get_ckpt(model_key)
+                            model_key_str = model_key
+                        
+                        if test_set_name == "xl":
+                            grid_config["batch_size"] = 100
+
+                        grid_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
+                        grid_config["test_set"] = test_set_name
+                        grid_config["run_name"] = f"{model_key_str}_{test_set_name}"
+                        
+                        job = executor.submit(run_inference, inference_config=grid_config)
+                        jobs.append(job)
     else:
         if executor is not None:
-            executor.submit(run_inference, inference_config=inference_config)
+            with executor.batch():
+                for test_set_name in test_sets_to_run:
+                    inference_config = dict(base_inference_config)
+                    if test_set_name == "xl":
+                        inference_config["batch_size"] = 100
+                    inference_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
+                    inference_config["test_set"] = test_set_name
+                    inference_config["run_name"] = f"new_data_p1_{test_set_name}"
+
+                    logger.info(f"Running inference for {test_set_name} with config: {inference_config}")
+                    job = executor.submit(run_inference, inference_config=inference_config)
         else:
-            run_inference(inference_config=inference_config)
+            for test_set_name in test_sets_to_run:
+                inference_config = dict(base_inference_config)
+                if test_set_name == "xl":
+                    inference_config["batch_size"] = 100
+                inference_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
+                inference_config["test_set"] = test_set_name
+                inference_config["run_name"] = f"new_data_p1_{test_set_name}"
+
+                logger.info(f"Running inference for {test_set_name} with config: {inference_config}")
+                run_inference(inference_config=inference_config)
 
 if __name__ == "__main__":
     set_seed(42)
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, choices=["local", "a100", "h100"], required=True)
     parser.add_argument("--grid_run_inference", action="store_true")
-    parser.add_argument("--test_set", type=str, choices=["clean", "distinct", "corrected"], default="distinct")
-    args = parser.parse_args()
-    launch_inference_from_cli(device=args.device, grid_run_inference=args.grid_run_inference, test_set=args.test_set)
+    parser.add_argument("--test_set", type=str, choices=["clean", "distinct", "corrected"], default=None)
+    parser.add_argument("--xl", action="store_true")
+    args = parser.parse_args() 
+    launch_inference_from_cli(device=args.device, grid_run_inference=args.grid_run_inference, test_set=args.test_set, xl=args.xl)
 
     
