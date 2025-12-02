@@ -77,7 +77,7 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id)
     templates = build_templates_for_batch(smiles_list, tokenizer)
     prompt_lengths = [int(mask.sum().item()) for mask in tokenized_prompts["attention_mask"]]
     logits_processor = LogitsProcessorList(
-        [ConformerConstraintLogitsProcessor(templates, prompt_lengths)]
+        [ConformerConstraintLogitsProcessor(templates, prompt_lengths, tokenizer=tokenizer)]
     )
 
     with torch.inference_mode():

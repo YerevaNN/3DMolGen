@@ -23,12 +23,19 @@ class DummyTokenizer:
             "=": 3,
             "1": 4,
             ">": 6,
+            "<": 7,
+            "[SMILES]": 8,
+            "X": 9,
+            "8": 10,
         }
 
     def encode(self, text, add_special_tokens=False):
         if text not in self.vocab:
             raise ValueError(f"Unknown token in dummy tokenizer: {text}")
         return [self.vocab[text]]
+
+    def get_vocab(self):
+        return self.vocab
 
 
 def test_template_builds_atoms_and_coords():
@@ -54,9 +61,13 @@ def test_logits_processor_masks_fixed_tokens_and_skips_coords():
     tmpl = build_sequence_template("CC", tok)
 
     prompt_len = 2  # pretend prompt already has two tokens
-    proc = ConformerConstraintLogitsProcessor([tmpl], [prompt_len])
+    proc = ConformerConstraintLogitsProcessor([tmpl], [prompt_len], tokenizer=tok)
 
-    vocab_size = 10
+    vocab_size = max(tok.vocab.values()) + 1
+    lt_id = tok.encode("<", add_special_tokens=False)[0]
+    smi_id = tok.encode("[SMILES]", add_special_tokens=False)[0]
+    free_id = tok.encode("X", add_special_tokens=False)[0]
+    digit_id = tok.encode("8", add_special_tokens=False)[0]
 
     def call_with_ids(ids):
         input_ids = torch.tensor([ids], dtype=torch.long)
@@ -75,16 +86,24 @@ def test_logits_processor_masks_fixed_tokens_and_skips_coords():
     assert masked[0, 2] == 0
     assert torch.isinf(masked).sum() == vocab_size - 1
 
-    # Step 2: emit atom and enter coord block (free logits)
+    # Step 2: emit atom and enter coord block -> force '<'
     masked = call_with_ids([99, 99, 1, 2])
-    # Inside coord -> nothing masked
-    assert torch.isinf(masked).sum() == 0
+    assert torch.isinf(masked).sum() == vocab_size - 1
+    assert masked[0, lt_id] == 0
 
-    # Step 3: still inside coord until '>' arrives
-    masked = call_with_ids([99, 99, 1, 2, 7, 8])
-    assert torch.isinf(masked).sum() == 0
+    # Step 3: emit '<' then coords are limited to numeric-ish tokens and '>'
+    masked = call_with_ids([99, 99, 1, 2, lt_id])
+    # allowed set contains digits and '>'
+    assert masked[0, digit_id] == 0
 
-    # Step 4: close coord with '>' (id=6); expect next atom masked
-    masked = call_with_ids([99, 99, 1, 2, 7, 8, 6])
+    # Step 4: still inside coord until '>' arrives
+    masked = call_with_ids([99, 99, 1, 2, lt_id, digit_id])
+    # forbidden token masked, allowed digit remains
+    assert masked[0, smi_id] == -torch.inf
+    assert masked[0, free_id] == -torch.inf  # non-numeric token masked
+    assert masked[0, digit_id] == 0
+
+    # Step 5: close coord with '>' (id=6); expect next atom masked
+    masked = call_with_ids([99, 99, 1, 2, lt_id, digit_id, 6])
     assert masked[0, 2] == 0  # second [C]
     assert torch.isinf(masked).sum() == vocab_size - 1
