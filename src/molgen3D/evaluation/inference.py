@@ -21,6 +21,7 @@ from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2,
 from molgen3D.evaluation.utils import extract_between, same_molecular_graph
 from molgen3D.config.paths import get_ckpt, get_tokenizer_path, get_data_path, get_base_path
 from molgen3D.config.sampling_config import sampling_configs, gen_num_codes
+from molgen3D.training.grpo.rewards import tag_pattern
 
 torch.backends.cudnn.benchmark = True
 
@@ -82,7 +83,7 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id)
         geom_smiles = geom_smiles_list[i]
         
         if generated_conformer:
-            # generated_smiles = tag_pattern.sub('', generated_conformer)     
+            generated_smiles = tag_pattern.sub('', generated_conformer)     
             generated_smiles = strip_smiles(generated_conformer)
             if not same_molecular_graph(canonical_smiles, generated_smiles):
                 logger.info(f"smiles mismatch: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
@@ -153,6 +154,9 @@ def run_inference(inference_config: dict):
 
     mols_list.sort(key=lambda x: len(x[0]))
     
+    if inference_config.get("limit"):
+        mols_list = mols_list[:inference_config["limit"]]
+
     stats = Counter({"smiles_mismatch":0, "mol_parse_fail" :0, "no_eos":0})
     batch_size = int(inference_config["batch_size"])
     generations_all = defaultdict(list)
@@ -170,7 +174,7 @@ def run_inference(inference_config: dict):
     return generations_all, stats
 
 
-def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:str = None, xl:bool = False, qm9:bool = False) -> None:
+def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:str = None, xl:bool = False, qm9:bool = False, limit: int = None) -> None:
     # Determine which test sets to run
     test_sets_to_run = []
     if test_set:
@@ -212,9 +216,12 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         "results_path": get_base_path("gen_results_root"),
         "run_name": "new_data_p1",
     }
+    if limit:
+        base_inference_config["limit"] = limit
+
     if grid_run_inference:
         param_grid = {
-            "model_path": [("m380_conf_v2", "1e"), ("m380_conf_v2", "2e"), ("m380_conf_v2", "3e"), ("m380_conf_v2", "4e")],
+            "model_path": [("m380_conf_v2", "4e")],
             # "model_path": [("m380_conf_v2", "1e")],
         }
         jobs = []
@@ -279,7 +286,8 @@ if __name__ == "__main__":
     parser.add_argument("--test_set", type=str, choices=["clean", "distinct", "corrected"], default=None)
     parser.add_argument("--xl", action="store_true")
     parser.add_argument("--qm9", action="store_true")
+    parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args() 
-    launch_inference_from_cli(device=args.device, grid_run_inference=args.grid_run_inference, test_set=args.test_set, xl=args.xl, qm9=args.qm9)
+    launch_inference_from_cli(device=args.device, grid_run_inference=args.grid_run_inference, test_set=args.test_set, xl=args.xl, qm9=args.qm9, limit=args.limit)
 
     
