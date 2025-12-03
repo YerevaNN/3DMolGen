@@ -210,7 +210,7 @@ def tokenize_smiles(smiles_str, expected_atom_tokens=None):
     return tokens
 
 
-def _format_atom_descriptor(atom):
+def _format_atom_descriptor(atom, *, allow_chirality: bool = True):
     """Return a bracketed atom descriptor that preserves valence information."""
     symbol = atom.GetSymbol()
     aromatic = atom.GetIsAromatic()
@@ -222,16 +222,21 @@ def _format_atom_descriptor(atom):
     descriptor = symbol_text
 
     chiral = atom.GetChiralTag()
-    if chiral == ChiralType.CHI_TETRAHEDRAL_CW:
-        descriptor += "@"
-    elif chiral == ChiralType.CHI_TETRAHEDRAL_CCW:
-        descriptor += "@@"
+    total_h = atom.GetTotalNumHs()
 
-    # Count only explicit hydrogens that are actual neighbors in this graph
-    explicit_h = sum(1 for nbr in atom.GetNeighbors() if nbr.GetAtomicNum() == 1)
+    if allow_chirality:
+        if chiral == ChiralType.CHI_TETRAHEDRAL_CW:
+            descriptor += "@"
+        elif chiral == ChiralType.CHI_TETRAHEDRAL_CCW:
+            descriptor += "@@"
 
-    if "H" not in descriptor and explicit_h > 0:
-        descriptor += "H" if explicit_h == 1 else f"H{explicit_h}"
+    if (
+        allow_chirality
+        and not atom.GetIsAromatic()
+        and "H" not in descriptor
+        and total_h > 0
+    ):
+        descriptor += "H" if total_h == 1 else f"H{total_h}"
 
     charge = atom.GetFormalCharge()
     if charge != 0:
@@ -300,17 +305,19 @@ def encode_cartesian_v2(mol, precision=4):
             if atom_idx_in_smiles >= len(atom_order):
                 raise ValueError("SMILES atom tokens exceed atom order mapping.")
 
-            atom_descriptor = token["text"]
-            if atom_descriptor[0] != "[":
-                rd_idx = atom_order[atom_idx_in_smiles]
-                atom_descriptor = _format_atom_descriptor(mol_no_h.GetAtomWithIdx(rd_idx))
+            rd_idx = atom_order[atom_idx_in_smiles]
+            atom_text = token["text"]
+            if atom_text.startswith("["):
+                atom_descriptor = atom_text
             else:
-                rd_idx = atom_order[atom_idx_in_smiles]
-
-            atom_descriptor = _normalize_atom_descriptor(atom_descriptor)
+                atom_descriptor = f"[{atom_text}]"
 
             pos = conformer.GetAtomPosition(rd_idx)
-            coords = (truncate(pos.x, precision), truncate(pos.y, precision), truncate(pos.z, precision))
+            coords = (
+                truncate(pos.x, precision),
+                truncate(pos.y, precision),
+                truncate(pos.z, precision),
+            )
 
             out_parts.append(f"{atom_descriptor}<{','.join(coords)}>")
             atom_idx_in_smiles += 1

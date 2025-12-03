@@ -97,9 +97,48 @@ def _assert_roundtrip(smiles: str, precision: int = PRECISION) -> Tuple[str, Che
     truncated_mol = _truncate_mol_coords(mol, precision)
     rmsd_truncated = coords_rmsd(truncated_mol, mol_rt)
     assert rmsd_direct < 1e-5 or rmsd_truncated < 1e-8
-    canonical_no_h = Chem.MolToSmiles(Chem.RemoveHs(mol, sanitize=False), canonical=True, isomericSmiles=True)
+    mol_no_h = Chem.RemoveHs(mol, sanitize=False)
+    canonical_no_h = Chem.MolToSmiles(mol_no_h, canonical=True, isomericSmiles=True)
+    assert canonical == canonical_no_h
+    assert strip_coords_and_normalize(enriched) == strip_coords_and_normalize(canonical_no_h)
     assert strip_smiles(enriched) == strip_smiles(canonical_no_h)
     return enriched, mol, mol_rt
+
+
+def _canonical_atom_descriptors(smiles: str) -> list[str]:
+    """Return the exact atom tokens RDKit emitted in a canonical SMILES."""
+    descriptors = []
+    for token in tokenize_smiles(smiles):
+        if token["type"] != "atom":
+            continue
+        text = token["text"]
+        descriptors.append(text if text.startswith("[") else f"[{text}]")
+    return descriptors
+
+
+def _enriched_atom_descriptors(enriched: str) -> list[str]:
+    """Extract atom descriptors from the enriched string (without coords)."""
+    return [
+        token["atom_desc"]
+        for token in tokenize_enriched(enriched)
+        if token["type"] == "atom_with_coords"
+    ]
+
+
+_SIMPLE_BRACKET_RE = re.compile(r"^(?:[A-Z][a-z]?|[cnopsb])$")
+
+
+def strip_coords_and_normalize(text: str) -> str:
+    """Remove coordinate blocks and drop brackets for simple atoms."""
+    without_coords = re.sub(r"<[^>]*>", "", text)
+
+    def repl(match: re.Match) -> str:
+        inner = match.group(1)
+        if _SIMPLE_BRACKET_RE.fullmatch(inner):
+            return inner
+        return match.group(0)
+
+    return re.sub(r"\[([^\]]+)\]", repl, without_coords)
 
 
 def _assert_stripped_equal(smiles: str) -> None:
@@ -166,13 +205,49 @@ def test_roundtrip_stereochemistry(smiles: str):
     _assert_roundtrip(smiles)
 
 
+def test_enriched_atom_descriptors_match_canonical():
+    smiles = "Cc1ccc([C@@]2(O)C[C@@H](C)N(C)C[C@@H]2C)cc1"
+    mol = _embed(Chem.MolFromSmiles(smiles))
+    enriched, canonical = encode_cartesian_v2(mol, precision=PRECISION)
+    assert _enriched_atom_descriptors(enriched) == _canonical_atom_descriptors(canonical)
+
+
 @pytest.mark.parametrize(
     "smiles",
-    ["C[C@H](O)N", "C[C@@H](Br)Cl", "F[C@](Br)(Cl)I"],
+    ["F[C@](Br)(Cl)I", "Cl[C@@](F)(Br)I", "F[C@](Cl)(Br)C"],
 )
 def test_chirality_descriptors_present(smiles: str):
     enriched, _, _ = _assert_roundtrip(smiles)
     assert "@" in enriched
+
+
+def test_encoder_does_not_invent_chirality():
+    smiles = "CC(Cl)Br"
+    mol = _embed(Chem.MolFromSmiles(smiles))
+    enriched, canonical = encode_cartesian_v2(mol, precision=PRECISION)
+    assert "@" not in canonical
+    assert "@" not in enriched
+
+
+def test_implicit_h_chirality_preserved():
+    smiles = "C[C@H](Cl)Br"
+    mol = _embed(Chem.MolFromSmiles(smiles))
+    enriched, canonical = encode_cartesian_v2(mol, precision=PRECISION)
+    assert strip_coords_and_normalize(enriched) == strip_coords_and_normalize(canonical)
+
+
+def test_explicit_h_chirality_preserved():
+    smiles = "F[C@](Cl)(Br)[2H]"
+    mol = _embed(Chem.MolFromSmiles(smiles))
+    enriched, canonical = encode_cartesian_v2(mol, precision=PRECISION)
+    assert strip_coords_and_normalize(enriched) == strip_coords_and_normalize(canonical)
+
+
+def test_steroid_like_example_preserves_implicit_h_tags():
+    smiles = "C/C(=C/CC[C@@H](C)[C@H]1CC[C@@]2(C)C3=C(CC[C@]12C)[C@@]1(C)CCC(=O)C(C)(C)[C@@H]1CC3)C(=O)O"
+    mol = _embed(Chem.MolFromSmiles(smiles))
+    enriched, canonical = encode_cartesian_v2(mol, precision=PRECISION)
+    assert strip_coords_and_normalize(enriched) == strip_coords_and_normalize(canonical)
 
 
 @pytest.mark.parametrize(
@@ -364,11 +439,27 @@ def test_format_atom_descriptor_aromatic_lowercase():
     assert descriptor == "[c]"
 
 
-def test_format_atom_descriptor_chiral():
+def test_format_atom_descriptor_keeps_implicit_h_chirality():
     mol = Chem.MolFromSmiles("C[C@H](O)N")
     mol = _embed(mol)
     descriptor = _format_atom_descriptor(mol.GetAtomWithIdx(1))
-    assert descriptor.startswith("[C@")
+    assert descriptor.startswith("[C@") or descriptor.startswith("[C@@")
+
+
+def test_format_atom_descriptor_can_disable_chirality():
+    mol = Chem.MolFromSmiles("C[C@H](O)N")
+    mol = _embed(mol)
+    descriptor = _format_atom_descriptor(mol.GetAtomWithIdx(1), allow_chirality=False)
+    assert "@" not in descriptor
+
+
+def test_format_atom_descriptor_retains_explicit_h_chirality():
+    mol = Chem.MolFromSmiles("F[C@](Cl)(Br)[2H]")
+    mol = _embed(mol)
+    carbon = next(atom for atom in mol.GetAtoms() if atom.GetSymbol() == "C")
+    descriptor = _format_atom_descriptor(carbon)
+    assert descriptor.startswith("[C@") or descriptor.startswith("[C@@")
+    assert "H" not in descriptor
 
 
 def test_coords_rmsd_zero_and_positive():
