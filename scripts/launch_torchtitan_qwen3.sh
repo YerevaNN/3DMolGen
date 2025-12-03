@@ -1,30 +1,55 @@
 #!/usr/bin/env bash
-set -euo pipefail
+#SBATCH --job-name=torchtitan-qwen3
+#SBATCH --cpus-per-task=64
+#SBATCH --partition=h100
+#SBATCH --nodes=1
+#SBATCH --gres=gpu:6
+#SBATCH --mem=200G
+#SBATCH --time=20:00:00
+#SBATCH --output=outputs/slurm_jobs/titan/%j.out
+#SBATCH --error=outputs/slurm_jobs/titan/%j.err
 
-TOML_PATH="src/molgen3D/config/pretrain/qwen3_06b.toml"
+export WANDB_ENTITY=${WANDB_ENTITY:-menuab_team}
+export WANDB_PROJECT=${WANDB_PROJECT:-3dmolgen}
+export WANDB_GROUP=${WANDB_GROUP:-pretrain}
+export WANDB_JOB_TYPE=${WANDB_JOB_TYPE:-pretrain}
+export WANDB_CONFIG=${WANDB_CONFIG:-'{"run_type": "pretrain"}'}
+export TORCH_COMPILE=${TORCH_COMPILE:-0}
 
-# Read run_desc from TOML (fallback to qwen3_06b if missing)
-RUN_DESC=$(python3 - <<'PY' "$TOML_PATH"
+TRAIN_TOML=${TRAIN_TOML:-src/molgen3D/config/pretrain/qwen3_06b.toml}
+
+_DEFAULT_RUN_DESC=$(python3 - <<'PY' "$TRAIN_TOML"
 import pathlib, re, sys
 toml_path = pathlib.Path(sys.argv[1])
 text = toml_path.read_text()
 match = re.search(r'^\s*run_desc\s*=\s*"([^"]+)"', text, re.MULTILINE)
-print(match.group(1) if match else "qwen3_06b", end="")
+print(match.group(1) if match else toml_path.stem, end="")
 PY
 )
-
+RUN_DESC=${RUN_DESC:-${_DEFAULT_RUN_DESC}}
 echo "Using run_desc: ${RUN_DESC}"
 
-# Build YYMMDD-HHMM prefix + random 4-hex hash
-STAMP=$(date +%y%m%d-%H%M)
-HASH=$(python3 - <<'PY'
+if [[ -z "${RUN_NAME:-}" ]]; then
+  STAMP=$(date +%y%m%d-%H%M)
+  HASH=$(python3 - <<'PY'
 import secrets
 print(secrets.token_hex(2), end="")
 PY
 )
-RUN_NAME="${STAMP}-${HASH}-${RUN_DESC}"
-
+  RUN_NAME="${STAMP}-${HASH}-${RUN_DESC}"
+fi
 echo "Run name: ${RUN_NAME}"
+
+MASTER_ADDR=${MASTER_ADDR:-$(hostname)}
+MASTER_PORT=${MASTER_PORT:-$(( (RANDOM % 20000) + 20000 ))}
+if [[ -z "${SLURM_GPUS_ON_NODE:-}" ]]; then
+    echo "SLURM_GPUS_ON_NODE is unset; please request GPUs via --gres."
+    exit 1
+fi
+NGPU_PER_NODE=${SLURM_GPUS_ON_NODE}
+NNODES=${SLURM_NNODES:-1}
+NODE_RANK=${SLURM_NODEID:-0}
+export MASTER_ADDR MASTER_PORT
 
 TMP_TOML=$(mktemp /tmp/qwen3_runXXXXXX.toml)
 cleanup() {
@@ -32,8 +57,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Copy base TOML and inject run_name under [molgen_run]
-python3 - <<'PY' "$TOML_PATH" "$TMP_TOML" "$RUN_NAME"
+python3 - <<'PY' "$TRAIN_TOML" "$TMP_TOML" "$RUN_NAME"
 import pathlib
 import sys
 
@@ -61,7 +85,11 @@ if in_block and not inserted:
 dst.write_text("\n".join(out_lines) + "\n")
 PY
 
-torchrun --nproc_per_node="${WORLD_SIZE:-4}" --master_port="${MASTER_PORT:-29501}" \
+exec torchrun \
+  --nproc_per_node="${NGPU_PER_NODE}" \
+  --master_port="${MASTER_PORT}" \
+  --nnodes="${NNODES}" \
+  --node_rank="${NODE_RANK}" \
   -m molgen3D.training.pretraining.torchtitan_runner \
   --run-desc "${RUN_DESC}" \
   --train-toml "${TMP_TOML}"
