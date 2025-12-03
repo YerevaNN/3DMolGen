@@ -54,8 +54,8 @@ class _SeqState:
     """Mutable tracking of generation progress for one sequence."""
     prompt_len: int  # number of non-pad tokens in the prompt
     prev_len: int | None = None  # total length seen last call (including padding)
-    seg_idx: int = 0  # which segment we are in
-    seg_offset: int = 0  # index within the current fixed segment
+    seg_idx: int = 0  # which 
+    seg_offset: int = 0  # index within the current fixed 
     coord_window: deque | None = None  # rolling window to detect '>' in coord blocks
     coord_prefix_offset: int = 0  # number of '<' tokens already matched in coord block
     done: bool = False  # template fully consumed
@@ -134,7 +134,8 @@ def build_sequence_template(
     Build the ordered constraint segments for a given SMILES.
 
     - Every SMILES token (atoms, bonds, branches, ring digits) is emitted as a fixed segment.
-    - After each atom, a coordinate block segment is inserted where logits are UNCONSTRAINED
+    - After each atom, a coordinate block 
+      is inserted where logits are UNCONSTRAINED
       (except for blocked special tokens).
     - By default we also prepend `[CONFORMER]` and append `[/CONFORMER]` as fixed segments.
     """
@@ -345,13 +346,18 @@ class ConformerConstraintLogitsProcessorV1_1(LogitsProcessor):
 
             seg = template.segments[state.seg_idx]
             if seg.kind == "fixed":
-                # Fixed segment: force exact token
+                # Fixed 
+                # 
+                # 
+                # 
+                # 
+                #  : force exact token
                 # (100% probability for correct, 0% for all others)
                 expected = seg.tokens[state.seg_offset]
                 scores[b, :] = -torch.inf
                 scores[b, expected] = 0.0
             else:
-                # Coordinate segment
+                # Coordinate 
                 prefix = template.start_coord_tokens
                 suffix = template.end_coord_tokens
                 if state.coord_prefix_offset < len(prefix):

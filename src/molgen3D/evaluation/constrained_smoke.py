@@ -204,10 +204,10 @@ def validate_smoke_outputs(
                 record.issues.append("missing [CONFORMER] block")
         else:
             stripped = strip_smiles(conformer_block)
-            if stripped != prompt_smi:
+            # Use same_molecular_graph for comparison - handles implicit/explicit H differences
+            # (e.g., "CCNC" vs "[NH]" notation)
+            if not same_molecular_graph(prompt_smi, stripped):
                 record.issues.append("conformer SMILES mismatch")
-            elif not same_molecular_graph(prompt_smi, stripped):
-                record.issues.append("different molecular graph")
 
             if ">" not in conformer_block:
                 record.issues.append("coordinate block never closed")

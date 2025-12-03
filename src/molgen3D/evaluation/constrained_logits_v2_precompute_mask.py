@@ -1,0 +1,271 @@
+"""
+Constrained Conformer Generation - v2 Pre-computed Mask (Simple)
+
+Simple position-based pre-computed mask per the original spec:
+1. Build reference skeleton with placeholder coordinates
+2. Tokenize once to get ref_ids
+3. Derive is_free mask (True for tokens inside <...>)
+4. Position-based lookup: if is_free[pos], allow free; else force ref_ids[pos]
+
+This is the simplest implementation of the spec without state machine complexity.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import List, Sequence
+
+import torch
+from rdkit import Chem
+from transformers import LogitsProcessor, PreTrainedTokenizer
+
+from molgen3D.data_processing.smiles_encoder_decoder import (
+    _expected_plain_token,
+    _format_atom_descriptor,
+    _normalize_atom_descriptor,
+    tokenize_smiles,
+)
+
+
+# Placeholder coordinate string (4 decimal places per spec)
+COORD_PLACEHOLDER = "0.0000,0.0000,0.0000"
+
+
+@dataclass
+class PrecomputedTemplate:
+    """Pre-computed mask for position-based constraint enforcement."""
+    ref_ids: torch.LongTensor       # [seq_len] - reference token IDs
+    is_free: torch.BoolTensor       # [seq_len] - True=FREE, False=COPY
+    seq_len: int                    # expected sequence length
+
+
+# Cache for blocked token IDs
+_BLOCKED_TOKEN_IDS_CACHE: dict = {}
+
+
+def _get_blocked_token_ids(tokenizer: PreTrainedTokenizer) -> set:
+    """Get token IDs that should be blocked in FREE positions.
+
+    Blocks:
+    - All tokens containing '<' or '>' (to prevent premature coordinate closing)
+    - Special tags like [CONFORMER], [/CONFORMER], etc.
+    - BOS, EOS, PAD tokens
+    """
+    cache_key = id(tokenizer)
+    if cache_key in _BLOCKED_TOKEN_IDS_CACHE:
+        return _BLOCKED_TOKEN_IDS_CACHE[cache_key]
+
+    blocked_ids = set()
+
+    # Block ALL tokens containing '<' or '>' to prevent coordinate bracket leakage
+    # This is critical: tokens like '>(' (2284), '>[' (31868), etc. would corrupt structure
+    vocab = tokenizer.get_vocab()
+    for token_str, token_id in vocab.items():
+        if '<' in token_str or '>' in token_str:
+            blocked_ids.add(token_id)
+
+    # Also block special tags (some may already be covered by above)
+    special_tags = [
+        "[CONFORMER]", "[/CONFORMER]",
+        "[SMILES]", "[/SMILES]",
+    ]
+    for tag in special_tags:
+        try:
+            tokens = tokenizer.encode(tag, add_special_tokens=False)
+            blocked_ids.update(tokens)
+        except:
+            pass
+
+    if tokenizer.eos_token_id is not None:
+        blocked_ids.add(tokenizer.eos_token_id)
+    if tokenizer.bos_token_id is not None:
+        blocked_ids.add(tokenizer.bos_token_id)
+    if tokenizer.pad_token_id is not None:
+        blocked_ids.add(tokenizer.pad_token_id)
+
+    _BLOCKED_TOKEN_IDS_CACHE[cache_key] = blocked_ids
+    return blocked_ids
+
+
+def _build_blocked_mask(blocked_ids: set, vocab_size: int, device: torch.device) -> torch.BoolTensor:
+    """Build boolean mask from blocked token IDs."""
+    blocked_mask = torch.zeros(vocab_size, dtype=torch.bool, device=device)
+    for tok_id in blocked_ids:
+        if 0 <= tok_id < vocab_size:
+            blocked_mask[tok_id] = True
+    return blocked_mask
+
+
+def _canonicalize_smiles(smiles: str) -> tuple[str, Chem.Mol, list[int]]:
+    """Return canonical smiles, mol, and atom order."""
+    import ast
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        raise ValueError(f"Could not parse SMILES: {smiles}")
+    mol_no_h = Chem.RemoveHs(mol)
+    smiles_can = Chem.MolToSmiles(
+        mol_no_h, canonical=True, isomericSmiles=True,
+        allHsExplicit=False, allBondsExplicit=False,
+    )
+    if not mol_no_h.HasProp("_smilesAtomOutputOrder"):
+        raise ValueError("Mol missing _smilesAtomOutputOrder")
+    atom_order = list(map(int, ast.literal_eval(mol_no_h.GetProp("_smilesAtomOutputOrder"))))
+    return smiles_can, mol_no_h, atom_order
+
+
+def build_reference_skeleton(smiles: str) -> str:
+    """Build enriched skeleton with placeholder coordinates."""
+    smiles_can, mol_no_h, atom_order = _canonicalize_smiles(smiles)
+    expected_atom_tokens = [
+        _expected_plain_token(mol_no_h.GetAtomWithIdx(idx)) for idx in atom_order
+    ]
+    tokens = tokenize_smiles(smiles_can, expected_atom_tokens=expected_atom_tokens)
+
+    out_parts = []
+    atom_idx = 0
+    for tok in tokens:
+        if tok["type"] == "atom":
+            rd_idx = atom_order[atom_idx]
+            atom_descriptor = tok["text"]
+            if atom_descriptor[0] != "[":
+                atom_descriptor = _format_atom_descriptor(mol_no_h.GetAtomWithIdx(rd_idx))
+            atom_descriptor = _normalize_atom_descriptor(atom_descriptor)
+            out_parts.append(f"{atom_descriptor}<{COORD_PLACEHOLDER}>")
+            atom_idx += 1
+        else:
+            out_parts.append(tok["text"])
+    return "".join(out_parts)
+
+
+def build_precomputed_template(
+    smiles: str,
+    tokenizer: PreTrainedTokenizer,
+    *,
+    include_tags: bool = True,
+) -> PrecomputedTemplate:
+    """
+    Build pre-computed template per spec:
+    1. Build reference skeleton
+    2. Tokenize to get ref_ids
+    3. Derive is_free mask using character positions
+    """
+    skeleton = build_reference_skeleton(smiles)
+    ref_str = f"[CONFORMER]{skeleton}[/CONFORMER]" if include_tags else skeleton
+
+    # Tokenize with offset mapping
+    encoding = tokenizer.encode_plus(
+        ref_str,
+        add_special_tokens=False,
+        return_offsets_mapping=True,
+    )
+    ref_ids = encoding["input_ids"]
+    offset_mapping = encoding["offset_mapping"]
+
+    # Build character-level mask
+    char_is_free = []
+    in_coord = False
+    for char in ref_str:
+        if char == '<':
+            char_is_free.append(False)
+            in_coord = True
+        elif char == '>':
+            char_is_free.append(False)
+            in_coord = False
+        else:
+            char_is_free.append(in_coord)
+
+    # Convert to token-level: token is FREE only if ALL its chars are FREE
+    is_free = []
+    for start_char, end_char in offset_mapping:
+        if start_char >= end_char:
+            is_free.append(False)
+        else:
+            token_chars = char_is_free[start_char:end_char]
+            is_free.append(all(token_chars))
+
+    return PrecomputedTemplate(
+        ref_ids=torch.tensor(ref_ids, dtype=torch.long),
+        is_free=torch.tensor(is_free, dtype=torch.bool),
+        seq_len=len(ref_ids),
+    )
+
+
+class ConformerConstraintLogitsProcessorV2PrecomputeMask(LogitsProcessor):
+    """
+    Simple position-based pre-computed mask per spec.
+
+    At each position:
+    - If is_free[pos]: allow free generation (block only special tokens)
+    - Else: force ref_ids[pos]
+    """
+
+    VERSION = "v2_precompute_mask_simple_v2"
+    CONFIG = {
+        "approach": "pure_position_based",
+        "coord_placeholder": COORD_PLACEHOLDER,
+        "description": "Position-based COPY/FREE mask with angle bracket blocking",
+    }
+
+    def __init__(
+        self,
+        templates: Sequence[PrecomputedTemplate],
+        prompt_lengths: Sequence[int],
+        *,
+        tokenizer: PreTrainedTokenizer,
+        eos_token_id: int | None = None,
+    ):
+        if len(templates) != len(prompt_lengths):
+            raise ValueError("templates and prompt_lengths must match")
+
+        self.templates = templates
+        self.prompt_lengths = list(prompt_lengths)
+        self.eos_token_id = eos_token_id
+        self.blocked_ids = _get_blocked_token_ids(tokenizer)
+        self.blocked_mask = None
+        self._device = None
+        self._prev_lens: List[int | None] = [None] * len(templates)
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
+        batch_size, cur_len = input_ids.shape
+        device = scores.device
+        vocab_size = scores.shape[1]
+
+        # Build blocked mask lazily with correct vocab size
+        if self.blocked_mask is None or self._device != device:
+            self.blocked_mask = _build_blocked_mask(self.blocked_ids, vocab_size, device)
+            for template in self.templates:
+                template.ref_ids = template.ref_ids.to(device)
+                template.is_free = template.is_free.to(device)
+            self._device = device
+
+        for b in range(batch_size):
+            template = self.templates[b]
+
+            # Initialize prev_len on first call (handles padding)
+            if self._prev_lens[b] is None:
+                self._prev_lens[b] = cur_len
+
+            # Position = number of tokens generated so far
+            pos = cur_len - self._prev_lens[b]
+
+            if pos >= template.seq_len:
+                # Done - force EOS
+                if self.eos_token_id is not None:
+                    scores[b, :] = float('-inf')
+                    scores[b, self.eos_token_id] = 0.0
+            elif template.is_free[pos]:
+                # FREE position - block only special tokens
+                scores[b, self.blocked_mask] = float('-inf')
+            else:
+                # COPY position - force exact token
+                scores[b, :] = float('-inf')
+                scores[b, template.ref_ids[pos]] = 0.0
+
+        return scores
+
+
+def build_templates_for_batch(
+    smiles_list: Sequence[str],
+    tokenizer: PreTrainedTokenizer,
+) -> List[PrecomputedTemplate]:
+    """Build templates for a batch of SMILES strings."""
+    return [build_precomputed_template(smi, tokenizer) for smi in smiles_list]
