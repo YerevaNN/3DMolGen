@@ -379,8 +379,8 @@ def print_validation_report(summary: Optional[Dict[str, Any]]) -> None:
         if stats.get("samples", 0) == 0:
             print("    no samples processed")
             continue
-        print(f"    samples: {stats['samples']:,}, batches: {stats['batches']:,}")
-        print(f"    tokens total: {stats['token_count']:,}, pad tokens: {stats['pad_count']:,}")
+        print(f"    samples: {stats['samples']:,}")
+        print(f"    tokens: {stats['token_count']:,}, pad tokens: {stats['pad_count']:,}")
         print(f"    effective tokens: {stats['effective_tokens']:,} ({stats['utilization']:.2f}% utilization)")
         print(f"    pad/sep id: {stats.get('pad_id')} / {stats.get('sep_id')}")
         if stats.get("first_sample_text"):
@@ -418,7 +418,7 @@ def print_overall_summary(
                 print(f"  {alias}: no samples processed")
                 continue
             print(
-                f"  {alias}: samples={stats['samples']:,}, batches={stats['batches']:,}, "
+                f"  {alias}: samples={stats['samples']:,}, "
                 f"tokens={stats['token_count']:,}, pad={stats['pad_count']:,}, "
                 f"effective={stats['effective_tokens']:,} ({stats['utilization']:.2f}%)"
             )
