@@ -192,7 +192,7 @@ def run_inference(inference_config: dict):
     return generations_all, stats
 
 
-def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:str = None, xl:bool = False, use_logit_processor: bool = False, attention_impl: str = "flash_attention_2") -> None:
+def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:str = None, xl:bool = False, use_logit_processor: bool = False, attention_impl: str = "flash_attention_2", batch_size: int = 400, sampling_config: str = "top_p_sampling1") -> None:
     # Determine which test sets to run
     test_sets_to_run = []
     if test_set:
@@ -227,9 +227,9 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         "tokenizer_path": get_tokenizer_path("llama3_chem_v1"),
         "torch_dtype": "bfloat16",
         "attention_impl": attention_impl,
-        "batch_size": 400,
+        "batch_size": batch_size,
         "num_gens": gen_num_codes["2k_per_conf"],
-        "gen_config": sampling_configs["top_p_sampling1"],
+        "gen_config": sampling_configs[sampling_config],
         "device": "cuda",
         "results_path": get_base_path("gen_results_root"),
         "run_name": "new_data_p1",
@@ -299,6 +299,11 @@ if __name__ == "__main__":
     parser.add_argument("--attention", type=str, default="flash_attention_2",
                         choices=["flash_attention_2", "sdpa", "sdpa_paged", "eager"],
                         help="Attention implementation (default: flash_attention_2)")
+    parser.add_argument("--batch-size", type=int, default=400,
+                        help="Batch size for generation (default: 400, xl uses 100 if not specified)")
+    parser.add_argument("--sampling-config", type=str, default="top_p_sampling1",
+                        choices=list(sampling_configs.keys()),
+                        help="Sampling configuration (default: top_p_sampling1)")
     args = parser.parse_args()
     launch_inference_from_cli(
         device=args.device,
@@ -307,6 +312,8 @@ if __name__ == "__main__":
         xl=args.xl,
         use_logit_processor=getattr(args, 'logit_processor', False),
         attention_impl=args.attention,
+        batch_size=args.batch_size,
+        sampling_config=args.sampling_config,
     )
 
     

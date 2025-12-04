@@ -184,10 +184,11 @@ outputs = model.generate(
 
 ## Running the smoke test (for v2 pre-computed mask)
 Run the following commands to test the pre-computed mask processor:
+Check `config/sampling_config.py` for the sampling configurations.
 
 ### Clean dataset
 ```bash
-python scripts/run_constrained_smoke_v2_precompute.py \
+python scripts/logit_processor/run_logit_processor_smoke.py \
   --dataset clean \
   --sample-size 931 \
   --batch-size 128 \
@@ -197,33 +198,43 @@ python scripts/run_constrained_smoke_v2_precompute.py \
 
 ### Distinct dataset
 ```bash
-python scripts/run_logit_processor_smoke.py \
+python scripts/logit_processor/run_logit_processor_smoke.py \
   --dataset distinct \
   --sample-size 1000 \
   --batch-size 128 \
-  --sampling-config greedy \
+  --sampling-config top \
   --json-report outputs/smoke/v2_precompute_simple_v2_distinct.json
 ```
 
 # small sample of clean
 ```bash
-python scripts/run_logit_processor_smoke.py \
+python scripts/logit_processor/run_logit_processor_smoke.py \
   --dataset clean \
-  --sample-size 64 \
-  --batch-size 32 \
+  --sample-size 32 \
+  --batch-size 16 \
   --sampling-config greedy \
   --json-report outputs/smoke/v2_precompute_simple_v2_small.json
 ```
 
 # small sample of clean with no logit processor
 ```bash
-python scripts/run_logit_processor_smoke.py \
+python scripts/logit_processor/run_logit_processor_smoke.py \
   --dataset clean \
   --sample-size 64 \
   --batch-size 32 \
   --sampling-config greedy \
   --no-logit-processor \
   --json-report outputs/smoke/v2_precompute_simple_v2_small_no_processor.json
+```
+
+# small sample of clean with top_p_sampling4
+```bash
+python scripts/logit_processor/run_logit_processor_smoke.py \
+  --dataset distinct \
+  --sample-size 1000 \
+  --batch-size 128 \
+  --sampling-config top_p_sampling4 \
+  --json-report outputs/smoke/v2_precompute_simple_v2_distinct_top_p_sampling4.json
 ```
 
 ## Limitations and Future Work

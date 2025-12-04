@@ -29,7 +29,7 @@ from molgen3D.evaluation.constraint_logit_processor import (
 from molgen3D.config.paths import get_data_path
 from molgen3D.evaluation.inference import load_model_tokenizer
 from molgen3D.evaluation.utils import extract_between, same_molecular_graph
-from molgen3D.data_processing.smiles_encoder_decoder import strip_smiles
+from molgen3D.data_processing.smiles_encoder_decoder import strip_smiles, decode_cartesian_v2
 
 
 SmokeDataset = Literal["clean", "distinct"]
@@ -48,6 +48,8 @@ class SmokeRecord:
     canonical_smiles: str | None = None
     conformer_block: str | None = None
     issues: list[str] = field(default_factory=list)
+    mol_obj: object = None  # RDKit Mol object if parsing succeeded
+    parse_error: str | None = None  # Error message if decode_cartesian_v2 failed
 
     @property
     def passed(self) -> bool:
@@ -145,6 +147,15 @@ def validate_smoke_outputs(
             if ">" not in conformer_block:
                 record.issues.append("coordinate block never closed")
 
+            # Try to parse with decode_cartesian_v2 (mimics inference.py behavior)
+            # This catches malformed coordinate blocks that pass SMILES matching
+            if not record.issues:  # Only try parsing if no other issues
+                try:
+                    record.mol_obj = decode_cartesian_v2(conformer_block)
+                except Exception as e:
+                    record.parse_error = str(e)
+                    record.issues.append(f"decode_cartesian_v2 failed: {e}")
+
         records.append(record)
 
     return SmokeValidationResult(records=records)
@@ -230,6 +241,7 @@ def _build_pass_record(rec) -> dict:
         "generated_smiles": gen_smiles,
         "smiles_exact_match": gen_smiles == rec.prompt_smiles if gen_smiles else None,
         "has_real_coordinates": _has_real_coordinates(rec.decoded_text),
+        "parse_success": rec.mol_obj is not None,  # decode_cartesian_v2 succeeded
         "decoded_text": rec.decoded_text,
     }
 
@@ -241,6 +253,9 @@ def _build_failure_record(rec) -> dict:
         "issues": rec.issues,
         "decoded_text": rec.decoded_text,
     }
+    # Include parse_error if present (from decode_cartesian_v2 failure)
+    if rec.parse_error:
+        record["parse_error"] = rec.parse_error
     conformer = _extract_between(rec.decoded_text, "[CONFORMER]", "[/CONFORMER]")
     if not conformer:
         record["generated_smiles_from_conformer"] = "NO_CONFORMER_BLOCK"
@@ -336,6 +351,8 @@ def main():
         # Compute summary stats for verification
         exact_matches = sum(1 for r in pass_records if r.get("smiles_exact_match"))
         has_real_coords = sum(1 for r in pass_records if r.get("has_real_coordinates"))
+        # Count parse failures (decode_cartesian_v2 errors) - mimics inference.py's "mol_parse_fail" stat
+        parse_failures = sum(1 for r in result.failures if r.parse_error is not None)
 
         payload = {
             "metadata": {
@@ -353,6 +370,7 @@ def main():
                 "smiles_exact_matches": exact_matches,
                 "has_real_coordinates": has_real_coords,
                 "total_passes": len(pass_records),
+                "parse_failures": parse_failures,  # decode_cartesian_v2 failures (like inference.py's mol_parse_fail)
             },
             "passes": pass_records,
             "failures": [_build_failure_record(r) for r in result.failures],
