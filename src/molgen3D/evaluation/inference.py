@@ -60,10 +60,10 @@ def save_results(results_path, generations, stats):
     with open(os.path.join(results_path, "generation_results.txt"), 'w') as results_file_txt:
         results_file_txt.write(f"{stats=}")
 
-def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id):
+def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id, use_logit_processor: bool = False):
     generations = defaultdict(list)
     stats = {"smiles_mismatch":0, "mol_parse_fail" :0, "no_eos":0}
-    
+
     # Extract prompts and geom_smiles from batch
     prompts = [item[1] for item in batch]
     geom_smiles_list = [item[0] for item in batch]
@@ -73,24 +73,25 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id)
         if smi is None:
             raise ValueError(f"Prompt is missing SMILES tags: {p}")
         smiles_list.append(smi)
-    
+
     tokenized_prompts = tokenizer(prompts, return_tensors="pt", padding=True)
     tokenized_prompts = {k: v.to(model.device, non_blocking=True) for k, v in tokenized_prompts.items()}
 
-    # Build per-sequence constraint templates and prompt lengths
-    templates = build_templates_for_batch(smiles_list, tokenizer)
-    prompt_lengths = [int(mask.sum().item()) for mask in tokenized_prompts["attention_mask"]]
-    logits_processor = LogitsProcessorList(
-        # TODO: Replace with final processor here once implemented
-        [ConformerConstraintLogitsProcessor(templates, prompt_lengths, tokenizer=tokenizer)]
-    )
+    # Optionally build logits processor for constrained generation
+    logits_processor = None
+    if use_logit_processor:
+        templates = build_templates_for_batch(smiles_list, tokenizer)
+        prompt_lengths = [int(mask.sum().item()) for mask in tokenized_prompts["attention_mask"]]
+        logits_processor = LogitsProcessorList(
+            [ConformerConstraintLogitsProcessor(templates, prompt_lengths, tokenizer=tokenizer, eos_token_id=eos_token_id)]
+        )
 
     with torch.inference_mode():
         outputs = model.generate(
-            input_ids=tokenized_prompts["input_ids"], 
+            input_ids=tokenized_prompts["input_ids"],
             attention_mask=tokenized_prompts["attention_mask"],
             max_new_tokens=4000,
-            eos_token_id=eos_token_id, 
+            eos_token_id=eos_token_id,
             generation_config=gen_config,
             logits_processor=logits_processor,
             use_cache=True,
@@ -144,6 +145,7 @@ def run_inference(inference_config: dict):
     model, tokenizer = load_model_tokenizer(model_path=inference_config["model_path"],
                                             tokenizer_path=inference_config["tokenizer_path"],
                                             torch_dtype=inference_config["torch_dtype"],
+                                            attention_imp=inference_config.get("attention_impl", "flash_attention_2"),
                                             device=inference_config["device"])
     logger.info(f"model loaded: {model.dtype=}, {model.device=}")
     
@@ -174,10 +176,13 @@ def run_inference(inference_config: dict):
     batch_size = int(inference_config["batch_size"])
     generations_all = defaultdict(list)
 
+    use_logit_processor = inference_config.get("use_logit_processor", False)
+    logger.info(f"Logit processor enabled: {use_logit_processor}")
+
     for start in tqdm(range(0, len(mols_list), batch_size), desc="generating"):
         batch = mols_list[start:start + batch_size]
         for sub_batch in split_batch_on_geom_size(batch, max_geom_len=80):
-            outputs, stats_ = process_batch(model, tokenizer, sub_batch, inference_config["gen_config"], eos_token_id)
+            outputs, stats_ = process_batch(model, tokenizer, sub_batch, inference_config["gen_config"], eos_token_id, use_logit_processor)
             stats.update(stats_)
             for k, v in outputs.items():
                 generations_all[k].extend(v)
@@ -187,7 +192,7 @@ def run_inference(inference_config: dict):
     return generations_all, stats
 
 
-def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:str = None, xl:bool = False) -> None:
+def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:str = None, xl:bool = False, use_logit_processor: bool = False, attention_impl: str = "flash_attention_2") -> None:
     # Determine which test sets to run
     test_sets_to_run = []
     if test_set:
@@ -221,12 +226,14 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         "model_path": get_ckpt("m380_conf_v2","2e"),
         "tokenizer_path": get_tokenizer_path("llama3_chem_v1"),
         "torch_dtype": "bfloat16",
+        "attention_impl": attention_impl,
         "batch_size": 400,
         "num_gens": gen_num_codes["2k_per_conf"],
         "gen_config": sampling_configs["top_p_sampling1"],
         "device": "cuda",
         "results_path": get_base_path("gen_results_root"),
         "run_name": "new_data_p1",
+        "use_logit_processor": use_logit_processor,
     }
     if grid_run_inference:
         param_grid = {
@@ -287,7 +294,19 @@ if __name__ == "__main__":
     parser.add_argument("--grid_run_inference", action="store_true")
     parser.add_argument("--test_set", type=str, choices=["clean", "distinct", "corrected"], default=None)
     parser.add_argument("--xl", action="store_true")
-    args = parser.parse_args() 
-    launch_inference_from_cli(device=args.device, grid_run_inference=args.grid_run_inference, test_set=args.test_set, xl=args.xl)
+    parser.add_argument("--logit-processor", action="store_true",
+                        help="Enable constrained logit processor for SMILES structure enforcement")
+    parser.add_argument("--attention", type=str, default="flash_attention_2",
+                        choices=["flash_attention_2", "sdpa", "sdpa_paged", "eager"],
+                        help="Attention implementation (default: flash_attention_2)")
+    args = parser.parse_args()
+    launch_inference_from_cli(
+        device=args.device,
+        grid_run_inference=args.grid_run_inference,
+        test_set=args.test_set,
+        xl=args.xl,
+        use_logit_processor=getattr(args, 'logit_processor', False),
+        attention_impl=args.attention,
+    )
 
     

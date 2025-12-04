@@ -197,7 +197,7 @@ python scripts/run_constrained_smoke_v2_precompute.py \
 
 ### Distinct dataset
 ```bash
-python scripts/run_constrained_smoke_v2_precompute.py \
+python scripts/run_logit_processor_smoke.py \
   --dataset distinct \
   --sample-size 1000 \
   --batch-size 128 \
@@ -207,7 +207,7 @@ python scripts/run_constrained_smoke_v2_precompute.py \
 
 # small sample of clean
 ```bash
-python scripts/run_constrained_smoke_v2_precompute.py \
+python scripts/run_logit_processor_smoke.py \
   --dataset clean \
   --sample-size 64 \
   --batch-size 32 \
@@ -217,7 +217,7 @@ python scripts/run_constrained_smoke_v2_precompute.py \
 
 # small sample of clean with no logit processor
 ```bash
-python scripts/run_constrained_smoke_v2_precompute.py \
+python scripts/run_logit_processor_smoke.py \
   --dataset clean \
   --sample-size 64 \
   --batch-size 32 \
