@@ -37,6 +37,22 @@ def _ensure_dataset_tokenizer(dataset) -> None:
         _ = dataset.tk
 
 
+def _extract_inputs(batch):
+    """
+    Normalize dataloader output into a tensor of input_ids.
+
+    Supports:
+      - inputs
+      - (inputs, target)
+      - {"input": tensor, ...}
+    """
+    if isinstance(batch, (tuple, list)):
+        inputs = batch[0]
+    else:
+        inputs = batch
+    return inputs["input"] if isinstance(inputs, dict) else inputs
+
+
 def count_lines_and_bytes(files: List[Path]) -> Tuple[int, int]:
     total_lines = 0
     total_bytes = 0
@@ -89,7 +105,6 @@ def sample_dataloader(
         min_emb_len=0,
         drop_last=False,
         persistent_workers=False,
-        prefetch_factor=None,
         world_size=1,
         rank=0,
     )
@@ -104,19 +119,24 @@ def sample_dataloader(
     sep_id = getattr(dataset, "sep_id", None)
     if pad_id is None or sep_id is None:
         raise RuntimeError("MolGen dataset missing pad/sep token IDs.")
+    # This script assumes pad tokens only appear at the end and that pad_id == sep_id,
+    # so it interprets "sep_count minus trailing pads" as the number of items.
+    if pad_id != sep_id:
+        raise RuntimeError(
+            f"This token counting script assumes pad_id == sep_id, "
+            f"but got pad_id={pad_id}, sep_id={sep_id}. "
+            "Update the counting logic before using it with distinct pad/sep tokens."
+        )
 
     items = 0
     samples = 0
     batches = 0
     pad_total = 0
-    tokens_produced = 0
 
     for batch in loader:
         batches += 1
-        inputs = batch[0]
-        inputs = inputs["input"] if isinstance(inputs, dict) else inputs
+        inputs = _extract_inputs(batch)
         bsz = inputs.size(0)
-        tokens_produced += bsz * seq_len
 
         for idx in range(bsz):
             sample = inputs[idx]
@@ -126,8 +146,9 @@ def sample_dataloader(
                     pad_count += 1
                 else:
                     break
-            sep_count = int((sample == sep_id).sum().item()) - pad_count
-            sep_count = max(sep_count, 0)
+            sep_total = int((sample == sep_id).sum().item())
+            # Given pad_id == sep_id, trailing pad tokens are also counted as seps; subtract them.
+            sep_count = max(sep_total - pad_count, 0)
 
             items += sep_count
             pad_total += pad_count
@@ -141,6 +162,7 @@ def sample_dataloader(
     if samples == 0:
         return None
 
+    tokens_produced = samples * seq_len
     avg_items_per_sample = items / samples
     avg_pad_per_sample = pad_total / samples
     effective_tokens = tokens_produced - pad_total
@@ -275,7 +297,14 @@ def print_train_report(summary: Optional[Dict[str, Any]]) -> None:
         print(f"    estimated total samples: {stats.get('estimated_samples', 0):,}, batches: {stats.get('estimated_batches', 0):,}")
         print(f"    estimated tokens: {stats.get('estimated_tokens', 0):,}, pad tokens: {stats.get('estimated_pad', 0):,}, effective: {stats.get('estimated_effective', 0):,}")
         if verification:
-            print(f"    verification: expected bytes {verification['expected_bytes']:,}, actual {verification['actual_bytes']:,}, diff {verification['difference']:.0f} ({verification['difference_pct']:.2f}%)")
+            expected_bytes = int(round(verification["expected_bytes"]))
+            actual_bytes = int(round(verification["actual_bytes"]))
+            diff = int(round(verification["difference"]))
+            diff_pct = verification["difference_pct"]
+            print(
+                f"    verification: expected bytes {expected_bytes:,}, "
+                f"actual {actual_bytes:,}, diff {diff:,} ({diff_pct:.2f}%)"
+            )
         else:
             print("    verification: insufficient byte data")
 
@@ -302,6 +331,8 @@ def exhaust_validation_dataset(
 
     for alias in tokenizer_aliases:
         tokenizer_path, tokenizer = tokenizer_map[alias]
+        # For PyTorch DataLoader compatibility: prefetch_factor must be an int when workers > 0.
+        prefetch_factor = None if num_workers == 0 else 2
         loader = build_dataloader(
             train_path=directory,
             tokenizer_path=tokenizer_path,
@@ -316,7 +347,7 @@ def exhaust_validation_dataset(
             min_emb_len=0,
             drop_last=False,
             persistent_workers=False,
-            prefetch_factor=None,
+            prefetch_factor=prefetch_factor,
             world_size=1,
             rank=0,
         )
@@ -331,8 +362,8 @@ def exhaust_validation_dataset(
         token_count = 0
         pad_total = 0
 
-        for inputs, _ in loader:
-            input_ids = inputs["input"] if isinstance(inputs, dict) else inputs
+        for batch in loader:
+            input_ids = _extract_inputs(batch)
             if input_ids.numel() == 0:
                 continue
             if first_sample_text is None:
