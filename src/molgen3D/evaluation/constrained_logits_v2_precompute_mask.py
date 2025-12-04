@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Sequence
 
+from loguru import logger
 import torch
 from rdkit import Chem
 from transformers import LogitsProcessor, PreTrainedTokenizer
@@ -41,9 +42,13 @@ class PrecomputedTemplate:
 # Cache for blocked token IDs
 _BLOCKED_TOKEN_IDS_CACHE: dict = {}
 
-
 def _get_blocked_token_ids(tokenizer: PreTrainedTokenizer) -> set:
-    """Get token IDs that should be blocked in FREE positions.
+    """Get token IDs that should be blocked in FREE positions. (Recall that FREE positions are the ones inside <...>)
+
+    Why block some tokens in FREE positions?
+    - Some tokens containing '<' or '>' (to prevent premature coordinate closing)
+    - Special tags like [CONFORMER], [/CONFORMER], etc.
+    - BOS, EOS, PAD tokens
 
     Blocks:
     - All tokens containing '<' or '>' (to prevent premature coordinate closing)
@@ -57,13 +62,14 @@ def _get_blocked_token_ids(tokenizer: PreTrainedTokenizer) -> set:
     blocked_ids = set()
 
     # Block ALL tokens containing '<' or '>' to prevent coordinate bracket leakage
+    # We define "coordinate bracket leagage" as the situation where a token containing '>' is generated inside a <...> block.
     # This is critical: tokens like '>(' (2284), '>[' (31868), etc. would corrupt structure
     vocab = tokenizer.get_vocab()
     for token_str, token_id in vocab.items():
         if '<' in token_str or '>' in token_str:
             blocked_ids.add(token_id)
 
-    # Also block special tags (some may already be covered by above)
+    # Also block other special tags (of which some may already be covered by above)
     special_tags = [
         "[CONFORMER]", "[/CONFORMER]",
         "[SMILES]", "[/SMILES]",
@@ -73,8 +79,10 @@ def _get_blocked_token_ids(tokenizer: PreTrainedTokenizer) -> set:
             tokens = tokenizer.encode(tag, add_special_tokens=False)
             blocked_ids.update(tokens)
         except:
+            logger.warning(f"LogitProcessorV2PrecomputeMask: Could not encode special tag {tag}")
             pass
 
+    # Also block EOS, BOS, PAD tokens if they exist
     if tokenizer.eos_token_id is not None:
         blocked_ids.add(tokenizer.eos_token_id)
     if tokenizer.bos_token_id is not None:
@@ -87,7 +95,13 @@ def _get_blocked_token_ids(tokenizer: PreTrainedTokenizer) -> set:
 
 
 def _build_blocked_mask(blocked_ids: set, vocab_size: int, device: torch.device) -> torch.BoolTensor:
-    """Build boolean mask from blocked token IDs."""
+    """Build boolean mask (like a bitmap/bitmask) from blocked token IDs.
+    Why build a boolean mask?
+    - It is more efficient to block a set of tokens than to iterate through a set of tokens
+
+    Returns:
+        blocked_mask: torch.BoolTensor of [vocab_size] such that True=BLOCKED, False=ALLOWED
+    """
     blocked_mask = torch.zeros(vocab_size, dtype=torch.bool, device=device)
     for tok_id in blocked_ids:
         if 0 <= tok_id < vocab_size:
@@ -100,14 +114,14 @@ def _canonicalize_smiles(smiles: str) -> tuple[str, Chem.Mol, list[int]]:
     import ast
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
-        raise ValueError(f"Could not parse SMILES: {smiles}")
+        raise ValueError(f"LogitProcessorV2PrecomputeMask: Could not parse SMILES: {smiles}")
     mol_no_h = Chem.RemoveHs(mol)
     smiles_can = Chem.MolToSmiles(
         mol_no_h, canonical=True, isomericSmiles=True,
         allHsExplicit=False, allBondsExplicit=False,
     )
     if not mol_no_h.HasProp("_smilesAtomOutputOrder"):
-        raise ValueError("Mol missing _smilesAtomOutputOrder")
+        raise ValueError("LogitProcessorV2PrecomputeMask: Mol missing _smilesAtomOutputOrder")
     atom_order = list(map(int, ast.literal_eval(mol_no_h.GetProp("_smilesAtomOutputOrder"))))
     return smiles_can, mol_no_h, atom_order
 
@@ -120,7 +134,9 @@ def build_reference_skeleton(smiles: str) -> str:
     ]
     tokens = tokenize_smiles(smiles_can, expected_atom_tokens=expected_atom_tokens)
 
-    out_parts = []
+
+    # iterate through tokens and build the skeleton string that is in order of the atoms in the SMILES string
+    out_parts = []  # list of strings (atom descriptors and coordinate placeholders)
     atom_idx = 0
     for tok in tokens:
         if tok["type"] == "atom":
@@ -148,19 +164,22 @@ def build_precomputed_template(
     2. Tokenize to get ref_ids
     3. Derive is_free mask using character positions
     """
+    # skeleton looks like this: "[C]<0.0000,0.0000,0.0000>[C]<0.0000,0.0000,0.0000>=[O]<0.0000,0.0000,0.0000>"
     skeleton = build_reference_skeleton(smiles)
     ref_str = f"[CONFORMER]{skeleton}[/CONFORMER]" if include_tags else skeleton
 
     # Tokenize with offset mapping
     encoding = tokenizer.encode_plus(
         ref_str,
-        add_special_tokens=False,
+        add_special_tokens=False,  # what are special tokens? they are the ones that are not part of the vocabulary, such as [CONFORMER], [SMILES], ..., etc.
         return_offsets_mapping=True,
     )
-    ref_ids = encoding["input_ids"]
-    offset_mapping = encoding["offset_mapping"]
 
-    # Build character-level mask
+    # TODO: explore unused variable `ref_ids` if we can just reference `encoding["input_ids"]` in function return block
+    ref_ids = encoding["input_ids"] # list of token IDs for the reference string
+    offset_mapping = encoding["offset_mapping"] # list of (start_char, end_char) pairs for each token in the reference string
+
+    # Build character-level mask (array of booleans) (not token-level because we want to know if the entire token is FREE or not)
     char_is_free = []
     in_coord = False
     for char in ref_str:
@@ -175,15 +194,16 @@ def build_precomputed_template(
 
     # Convert to token-level: token is FREE only if ALL its chars are FREE
     is_free = []
-    for start_char, end_char in offset_mapping:
-        if start_char >= end_char:
+    for start_char, end_char in offset_mapping: # iterate through the offset mapping and build the is_free array
+        if start_char >= end_char: # empty token range - treat as COPY
             is_free.append(False)
-        else:
+        else: # non-empty token range - check if all characters are FREE
             token_chars = char_is_free[start_char:end_char]
             is_free.append(all(token_chars))
 
     return PrecomputedTemplate(
-        ref_ids=torch.tensor(ref_ids, dtype=torch.long),
+        # TODO: Look into replacing `ref_ids` with `encoding["input_ids"]` in function return block and removing the unused variable above
+        ref_ids=torch.tensor(ref_ids, dtype=torch.long), # list of token IDs for the reference string
         is_free=torch.tensor(is_free, dtype=torch.bool),
         seq_len=len(ref_ids),
     )
@@ -214,7 +234,7 @@ class ConformerConstraintLogitsProcessorV2PrecomputeMask(LogitsProcessor):
         eos_token_id: int | None = None,
     ):
         if len(templates) != len(prompt_lengths):
-            raise ValueError("templates and prompt_lengths must match")
+            raise ValueError("LogitProcessorV2PrecomputeMask: templates and prompt_lengths must match")
 
         self.templates = templates
         self.prompt_lengths = list(prompt_lengths)

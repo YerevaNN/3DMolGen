@@ -25,6 +25,8 @@ from molgen3D.evaluation.constrained_logits import (
 from molgen3D.config.paths import get_ckpt, get_tokenizer_path, get_data_path, get_base_path
 from molgen3D.config.sampling_config import sampling_configs, gen_num_codes
 
+
+
 torch.backends.cudnn.benchmark = True
 
 def set_seed(seed=42):
@@ -101,7 +103,8 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id)
         geom_smiles = geom_smiles_list[i]
         
         if generated_conformer:
-            # generated_smiles = tag_pattern.sub('', generated_conformer)     
+            tag_pattern = re.compile(r'<[^>]*>')
+            generated_smiles = tag_pattern.sub('', generated_conformer)     
             generated_smiles = strip_smiles(generated_conformer)
             if not same_molecular_graph(canonical_smiles, generated_smiles):
                 logger.info(f"smiles mismatch: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
