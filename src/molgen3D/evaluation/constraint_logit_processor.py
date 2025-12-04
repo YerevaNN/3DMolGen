@@ -10,13 +10,12 @@ Simple position-based pre-computed mask per the original spec:
 This is the simplest implementation of the spec without state machine complexity.
 """
 from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import List, Sequence
 
 from loguru import logger
-import torch
 from rdkit import Chem
+import torch
 from transformers import LogitsProcessor, PreTrainedTokenizer
 
 from molgen3D.data_processing.smiles_encoder_decoder import (
@@ -209,7 +208,7 @@ def build_precomputed_template(
     )
 
 
-class ConformerConstraintLogitsProcessorV2PrecomputeMask(LogitsProcessor):
+class ConformerConstraintLogitsProcessor(LogitsProcessor):
     """
     Simple position-based pre-computed mask per spec.
 

@@ -18,7 +18,7 @@ torch.set_grad_enabled(False)
 # from utils import parse_molecule_with_coordinates
 from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2, strip_smiles
 from molgen3D.evaluation.utils import extract_between, same_molecular_graph
-from molgen3D.evaluation.constrained_logits import (
+from molgen3D.evaluation.constraint_logit_processor import (
     ConformerConstraintLogitsProcessor,
     build_templates_for_batch,
 )

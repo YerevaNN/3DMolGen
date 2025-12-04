@@ -13,7 +13,7 @@ from pathlib import Path
 from collections import Counter
 
 from molgen3D.config.paths import get_tokenizer_path
-from molgen3D.evaluation.constrained_logits_v2_precompute_mask import (
+from molgen3D.evaluation.constraint_logit_processor import (
     COORD_PLACEHOLDER,
     build_reference_skeleton,
     build_precomputed_template,

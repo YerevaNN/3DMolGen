@@ -22,8 +22,8 @@ from dataclasses import dataclass, field
 
 from molgen3D.config.paths import get_ckpt, get_tokenizer_path
 from molgen3D.config.sampling_config import sampling_configs
-from molgen3D.evaluation.constrained_logits_v2_precompute_mask import (
-    ConformerConstraintLogitsProcessorV2PrecomputeMask,
+from molgen3D.evaluation.constraint_logit_processor import (
+    ConformerConstraintLogitsProcessor,
     build_templates_for_batch,
 )
 from molgen3D.config.paths import get_data_path
@@ -278,7 +278,7 @@ def _generate(model, tokenizer, smiles_list, gen_config, batch_size, max_new_tok
             if use_logit_processor:
                 templates = build_templates_for_batch(smiles_chunk, tokenizer)
                 prompt_lengths = [int(m.sum().item()) for m in tokenized["attention_mask"]]
-                processor = ConformerConstraintLogitsProcessorV2PrecomputeMask(
+                processor = ConformerConstraintLogitsProcessor(
                     templates, prompt_lengths,
                     tokenizer=tokenizer,
                     eos_token_id=eos_token_id,
@@ -339,7 +339,7 @@ def main():
 
         payload = {
             "metadata": {
-                "version": ConformerConstraintLogitsProcessorV2PrecomputeMask.VERSION,
+                "version": ConformerConstraintLogitsProcessor.VERSION,
                 "timestamp": datetime.now().isoformat(),
                 "logit_processor_enabled": use_lp,
                 "sampling": args.sampling_config,
