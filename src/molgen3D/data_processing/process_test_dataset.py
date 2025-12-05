@@ -131,7 +131,7 @@ def process_dataset(dataset: str, process_type: str, base_path: Path) -> dict:
                 "geom_smiles_c": geom_smiles_corrected,
                 "confs": true_confs,
                 "num_confs": num_confs,
-                "pickle_path": None,
+                "pickle_path": f"{folder_name.lower()}/{geom_smiles.replace('/', '_')}.pickle",
                 "sub_smiles_counts": gn_count,
                 "corrected_smi": corrected_smi,
             }
