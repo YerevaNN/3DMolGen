@@ -81,6 +81,163 @@ else:
     force_token(template.ref_ids[pos])
 ```
 
+## Code Walkthrough: Core Implementation Details
+
+This section explains the non-trivial parts of the implementation in `constraint_logit_processor.py`.
+
+### Building the COPY/FREE Mask from Character Positions
+
+The key challenge: we need a **token-level** mask (FREE or COPY per token), but coordinates are defined at the **character level** (everything between `<` and `>`). The solution uses HuggingFace's `offset_mapping` to bridge these two levels.
+
+#### What `return_offsets_mapping=True` does
+
+When tokenizing, this option returns `(start_char, end_char)` indices for each token, pointing back into the original string:
+
+```python
+encoding = tokenizer.encode_plus(
+    ref_str,
+    add_special_tokens=False,
+    return_offsets_mapping=True,  # Returns character spans for each token
+)
+ref_ids = encoding["input_ids"]           # Token IDs
+offset_mapping = encoding["offset_mapping"]  # [(start, end), ...] per token
+```
+
+**Example** for `ref_str = "[C]<1,2,3>[O]<4,5,6>"`:
+
+| Token | Offset | Characters |
+|-------|--------|------------|
+| `[C]` | (0, 3) | chars 0-2 |
+| `<` | (3, 4) | char 3 |
+| `1` | (4, 5) | char 4 |
+| `,` | (5, 6) | char 5 |
+| `2` | (6, 7) | char 6 |
+| `,` | (7, 8) | char 7 |
+| `3` | (8, 9) | char 8 |
+| `>` | (9, 10) | char 9 |
+| `[O]` | (10, 13) | chars 10-12 |
+| ... | ... | ... |
+
+#### Step 1: Build character-level mask
+
+First, we mark each character as FREE (inside coordinates) or not:
+
+```python
+char_is_free = []
+in_coord = False
+for char in ref_str:
+    if char == '<':
+        char_is_free.append(False)  # '<' itself is COPY
+        in_coord = True
+    elif char == '>':
+        char_is_free.append(False)  # '>' itself is COPY
+        in_coord = False
+    else:
+        char_is_free.append(in_coord)  # True only if inside <...>
+```
+
+**Result for `"[C]<1,2,3>[O]<4,5,6>"`:**
+
+| Index | Char | `char_is_free` |
+|-------|------|----------------|
+| 0 | `[` | False |
+| 1 | `C` | False |
+| 2 | `]` | False |
+| 3 | `<` | False |
+| 4 | `1` | **True** |
+| 5 | `,` | **True** |
+| 6 | `2` | **True** |
+| 7 | `,` | **True** |
+| 8 | `3` | **True** |
+| 9 | `>` | False |
+| 10 | `[` | False |
+| ... | ... | ... |
+
+#### Step 2: Lift to token-level mask
+
+Now we convert character-level to token-level. A token is FREE **only if ALL its characters are FREE**:
+
+```python
+is_free = []
+for start_char, end_char in offset_mapping:
+    if start_char >= end_char:
+        # Empty span (e.g., some special tokens) → COPY
+        is_free.append(False)
+    else:
+        # Slice the character mask for this token's span
+        token_chars = char_is_free[start_char:end_char]
+        # Token is FREE only if every character in span is FREE
+        is_free.append(all(token_chars))
+```
+
+**Why `all()`?** If a token spans both coordinate content AND a bracket (e.g., a hypothetical `3>` token covering chars 8-10), we must mark it COPY to preserve structure. Only tokens entirely within `<...>` get FREE status.
+
+**Final result:**
+
+| Token | Span | Characters' Freedom | `is_free` |
+|-------|------|---------------------|-----------|
+| `[C]` | (0,3) | F, F, F | **False** |
+| `<` | (3,4) | F | **False** |
+| `1` | (4,5) | T | **True** |
+| `,` | (5,6) | T | **True** |
+| `2` | (6,7) | T | **True** |
+| `,` | (7,8) | T | **True** |
+| `3` | (8,9) | T | **True** |
+| `>` | (9,10) | F | **False** |
+| `[O]` | (10,13) | F, F, F | **False** |
+
+### The `__call__` Method: Runtime Logit Processing
+
+At each generation step, the processor modifies logits based on position:
+
+```python
+def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
+    batch_size, cur_len = input_ids.shape
+
+    for b in range(batch_size):
+        template = self.templates[b]
+
+        # First call: record starting length (handles variable prompt padding)
+        if self._prev_lens[b] is None:
+            self._prev_lens[b] = cur_len
+
+        # Position = how many tokens generated so far (0-indexed)
+        pos = cur_len - self._prev_lens[b]
+
+        if pos >= template.seq_len:
+            # Past expected length → force EOS
+            scores[b, :] = float('-inf')
+            scores[b, self.eos_token_id] = 0.0
+
+        elif template.is_free[pos]:
+            # FREE position → block only dangerous tokens (angle brackets, special tags)
+            scores[b, self.blocked_mask] = float('-inf')
+
+        else:
+            # COPY position → force exact reference token
+            scores[b, :] = float('-inf')
+            scores[b, template.ref_ids[pos]] = 0.0
+
+    return scores
+```
+
+**Key insight:** The position `pos` indexes into the pre-computed `is_free` and `ref_ids` arrays. No per-token parsing or state machine needed at runtime - just array lookups.
+
+### Why `_prev_lens` Tracks Starting Length
+
+Different sequences in a batch may have different prompt lengths due to padding. By recording `cur_len` on the first call for each sequence, we correctly compute `pos` as the number of **generated** tokens (not total tokens).
+
+```
+Sequence A: [PAD][PAD][PROMPT...]  → _prev_lens[0] = 50
+Sequence B: [PROMPT............]  → _prev_lens[1] = 48
+
+After generating 5 tokens:
+  Sequence A: cur_len=55, pos = 55-50 = 5
+  Sequence B: cur_len=53, pos = 53-48 = 5
+```
+
+Both sequences are at generation position 5, despite different total lengths.
+
 ## Critical Fix: Angle Bracket Blocking
 
 ### The Bug
@@ -152,14 +309,14 @@ Total: ~1,403 blocked tokens out of ~152k vocabulary.
 
 ## Files
 
-- `src/molgen3D/evaluation/constrained_logits_v2_precompute_mask.py` - Implementation
-- `scripts/run_constrained_smoke_v2_precompute.py` - Smoke test runner
+- `src/molgen3D/evaluation/constraint_logit_processor.py` - Implementation
+- `scripts/logit_processor/run_logit_processor_smoke.py` - Smoke test runner
 
 ## Usage
 
 ```python
-from molgen3D.evaluation.constrained_logits_v2_precompute_mask import (
-    ConformerConstraintLogitsProcessorV2PrecomputeMask,
+from molgen3D.evaluation.constraint_logit_processor import (
+    ConformerConstraintLogitsProcessor,
     build_templates_for_batch,
 )
 
@@ -168,7 +325,7 @@ templates = build_templates_for_batch(smiles_list, tokenizer)
 prompt_lengths = [len(tokenizer.encode(f"[SMILES]{s}[/SMILES]")) for s in smiles_list]
 
 # Create processor
-processor = ConformerConstraintLogitsProcessorV2PrecomputeMask(
+processor = ConformerConstraintLogitsProcessor(
     templates, prompt_lengths,
     tokenizer=tokenizer,
     eos_token_id=tokenizer.eos_token_id,
@@ -237,6 +394,70 @@ python scripts/logit_processor/run_logit_processor_smoke.py \
   --json-report outputs/smoke/v2_precompute_simple_v2_distinct_top_p_sampling4.json
 ```
 
+## Edge Cases with Non-Greedy Sampling
+
+### Empirical Results
+
+Testing on 1,000 distinct SMILES with `top_p_sampling4` (top_p=0.4):
+
+| Metric | Value |
+|--------|-------|
+| Total samples | 1,000 |
+| Pass (SMILES exact match + real coords) | 985 (98.5%) |
+| Parse failures (`decode_cartesian_v2`) | 15 (1.5%) |
+
+Full report: `outputs/smoke/v2_precompute_simple_v2_distinct_top_p_sampling4.json`
+
+### Failure Pattern Analysis
+
+The 15 failures fall into distinct categories:
+
+| Pattern | Count | Example | Root Cause |
+|---------|-------|---------|------------|
+| Trailing comma | 12 | `1.094,1.2358,-1.0388,` | Extra `,` before `>` |
+| Missing comma (decimal confusion) | 2 | `0.3014.7184,1.3211` | `.` generated instead of `,` |
+| Trailing dash + atom leak | 1 | `1.1782,-` with `cc` | `-` and atom tokens in coords |
+
+### Why These Failures Occur
+
+In FREE positions, the logit processor blocks:
+- All tokens containing `<` or `>` (angle brackets)
+- Special tags (`[CONFORMER]`, `[SMILES]`, etc.)
+- Control tokens (BOS, EOS, PAD)
+
+However, it does NOT block:
+- `,` (comma) - needed for coordinate separators
+- `.` (decimal point) - needed for coordinate values
+- `-` (minus sign) - needed for negative coordinates
+- Digit tokens - needed for coordinate values
+
+With **greedy sampling** (temperature=0), the model always picks the highest-probability token, which is well-trained to produce valid coordinate syntax. Result: 100% structural validity.
+
+With **top_p sampling**, lower-probability tokens can be sampled in FREE positions:
+- Extra `,` at end of coordinate block (before the forced `>`)
+- `.` sampled where `,` was expected (decimal confusion)
+- Rarely: atom tokens like `c` can appear if they're in the vocabulary
+
+### Greedy vs Non-Greedy Trade-offs
+
+| Sampling | Structural Validity | Coordinate Diversity | Use Case |
+|----------|--------------------|--------------------|----------|
+| Greedy | 100% | Deterministic | Production, validation |
+| top_p=0.4 | ~98.5% | Higher variance | Exploration, multiple conformers |
+| top_p=0.9 | Lower (untested) | Maximum variance | Research only |
+
+### Potential Improvements (Future Work)
+
+1. **Block comma at position N-1 within `<...>`**: If we know the coordinate block is about to end (template position approaching `>`), block `,` to prevent trailing commas.
+
+2. **Syntactic state tracking**: Track whether we're expecting a digit, decimal, comma, or sign within the coordinate block. Block tokens that violate expected syntax.
+
+3. **Post-processing cleanup**: Strip trailing `,` or `-` from coordinate blocks before parsing.
+
+4. **Constrained character set**: In FREE positions, only allow: digits `0-9`, `.`, `,`, `-`. Block all alphabetic tokens.
+
+Note: These improvements would add complexity to the logit processor. The current 98.5% pass rate with top_p=0.4 may be acceptable for many use cases.
+
 ## Limitations and Future Work
 
 1. **Variable coordinate lengths:** If coordinates tokenize to fewer tokens than placeholder, model generates "filler" digits. This is benign but may produce slightly longer coordinates.
@@ -244,3 +465,5 @@ python scripts/logit_processor/run_logit_processor_smoke.py \
 2. **Assumption:** Placeholder `0.0000,0.0000,0.0000` tokenizes similarly to actual coordinates. Data shows ~80% exact match, ~20% 1-3 fewer tokens.
 
 3. **Future v2.1:** Could loosen `<` and `>` constraints if needed, or implement hybrid state machine + pre-computed mask for robustness.
+
+4. **Non-greedy sampling edge cases:** See "Edge Cases with Non-Greedy Sampling" section above for detailed analysis of the ~1.5% failure rate with top_p sampling.
