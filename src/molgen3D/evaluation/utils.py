@@ -68,13 +68,11 @@ def find_generation_pickles_path(directory_path: str) -> str:
 def same_molecular_graph(gt: str, gen: str) -> bool:
     m1 = Chem.MolFromSmiles(gt)
     m2 = Chem.MolFromSmiles(gen)
-    if m2 is None:
+    if m1 is None or m2 is None:
         return False
-    else:
-        # isomericSmiles=False => ignore stereochemistry in the canonical string
-        c1 = Chem.MolToSmiles(m1, canonical=True, isomericSmiles=False)
-        c2 = Chem.MolToSmiles(m2, canonical=True, isomericSmiles=False)
-        return c1 == c2
+    c1 = Chem.MolToSmiles(Chem.RemoveHs(m1), canonical=True, isomericSmiles=False)
+    c2 = Chem.MolToSmiles(Chem.RemoveHs(m2), canonical=True, isomericSmiles=False)
+    return c1 == c2
 
 def format_float(value: Optional[float], decimals: int = 4) -> str:
     """Format float to specified decimal places (truncated, not rounded)."""

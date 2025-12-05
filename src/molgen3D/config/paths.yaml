@@ -26,15 +26,18 @@ data:
   test_mols_xl: "geom_processed/test_smiles_corrected_xl.csv"
   drugs_summary: "rdkit_folder/summary_drugs.json"
 
-  conformers_train: "geom_processed/geom_cartesian_v2/processed_strings/train"
-  conformers_valid: "geom_processed/geom_cartesian_v2/processed_strings/valid"
-  conformers_test: "geom_processed/geom_cartesian_v2/processed_strings/test"
+  # conformers_train: "geom_processed/geom_cartesian_v2/processed_strings/train"
+  # conformers_valid: "geom_processed/geom_cartesian_v2/processed_strings/valid"
+  # conformers_test: "geom_processed/geom_cartesian_v2/processed_strings/test"
 
   GEOM:
     drugs: "DRUGS"
     qm9: "QM9"
     xl: "XL"
 
+  conformers_train: "geom_processed/geom_cartesian_v3/processed_strings/train"
+  conformers_valid: "geom_processed/geom_cartesian_v3/processed_strings/valid"
+  conformers_test: "geom_processed/geom_cartesian_v3/processed_strings/test"
 tokenizers:
   llama3_chem_v1: "src/molgen3D/training/tokenizers/Llama-3.2-chem-1B-v1"
   qwen3_0.6b_conf_v1: "/nfs/np/home/_vover_/models/saved_models/qwen3-0.6b-tokenizer-smiles-conformer"

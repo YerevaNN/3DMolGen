@@ -1,7 +1,6 @@
 import os
 import os.path as osp
 import re
-import ast
 import json
 import pickle
 import random
@@ -9,12 +8,14 @@ import numpy as np
 import cloudpickle
 from collections import defaultdict
 from typing import Dict, Iterable, List, Optional
-from rdkit import Chem
-from rdkit.Geometry import Point3D
 from pathlib import Path
 from rdkit.Chem.rdchem import HybridizationType
 from rdkit.Chem.rdchem import BondType as BT
 from rdkit.Chem.rdchem import ChiralType
+from rdkit import Chem
+from rdkit.Geometry import Point3D
+
+from molgen3D.data_processing.smiles_encoder_decoder import encode_cartesian_v2
 
 dihedral_pattern = Chem.MolFromSmarts('[*]~[*]~[*]~[*]')
 chirality = {ChiralType.CHI_TETRAHEDRAL_CW: -1.,
@@ -29,40 +30,10 @@ drugs_types = {'H': 0, 'Li': 1, 'B': 2, 'C': 3, 'N': 4, 'O': 5, 'F': 6, 'Na': 7,
                'Ga': 21, 'Ge': 22, 'As': 23, 'Se': 24, 'Br': 25, 'Ag': 26, 'In': 27, 'Sb': 28, 'I': 29, 'Gd': 30,
                'Pt': 31, 'Au': 32, 'Hg': 33, 'Bi': 34}
 
-def truncate(x, precision=4):
-    s = repr(x)            # full‑precision repr, e.g. '-0.123456789'
-    if '.' in s:
-        intp, frac = s.split('.', 1)
-        frac = (frac + '000')[:precision]   # pad then cut off
-        return f"{intp}.{frac}"
-    else:
-        return s  # integer
-
 def encode_cartesian_raw(mol, precision=4):
-    mol = Chem.RemoveHs(mol)
-    smiles = Chem.MolToSmiles(mol, canonical=True, isomericSmiles=True)
-    atom_order = list(map(int, ast.literal_eval(mol.GetProp('_smilesAtomOutputOrder'))))
-    # Get the conformer's positions
-    conf = mol.GetConformer()
-    pos = conf.GetPositions()
+    """Legacy compatibility wrapper for the enriched representation."""
 
-    pattern = r'\[[^\[\]]+\]|Br|Cl|Si|[BCNOFPSIcbnosprse]|[0-9]+|=|#|-|\+|/|\\|\(|\)'
-    tokens = re.findall(pattern, smiles)
-
-    out = []
-    atom_idx = 0
-    for tok in tokens:
-        # if it's an atom symbol (including bracket‐atom)
-        if re.fullmatch(r'\[[^\[\]]+\]|Br|Cl|Si|[BCNOFPSIcbnosprse]', tok):
-            ai = atom_order[atom_idx]
-            x,y,z = pos[ai]
-            out.append(f"{tok}<{truncate(x, precision)},{truncate(y, precision)},{truncate(z, precision)}>")
-            atom_idx += 1
-        else:
-            out.append(tok)
-
-    embedded_smiles = "".join(out)
-    return embedded_smiles, smiles
+    return encode_cartesian_v2(mol, precision=precision)
 
 def decode_cartesian_raw(embedded_smiles):
     """

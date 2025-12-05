@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import threading
+import time
 from typing import Optional
 
 import sys
@@ -395,6 +398,18 @@ def _prepare_job_config(
     if train_path:
         _log_rank("Training dataset: %s", train_path)
 
+    config_payload = job_config.to_dict()
+
+    serialized_config = json.dumps(config_payload, indent=2, sort_keys=True)
+
+    config_snapshot = logs_dir / "job_config.json"
+    try:
+        config_snapshot.write_text(serialized_config)
+    except Exception as exc:  # pragma: no cover - diagnostic only
+        _log_rank("Failed to write config snapshot: %s", exc)
+
+    _schedule_checkpoint_config_write(ckpts_dir, serialized_config)
+
     return wandb_dir
 
 
@@ -467,6 +482,34 @@ def _ensure_hf_checkpoint_has_lm_head(hf_dir: Path) -> Path:
         tensors["lm_head.weight"] = embed.clone()
         save_safetensor(tensors, patched_model)
     return patched_dir
+
+
+def _schedule_checkpoint_config_write(ckpt_dir: Path, payload: str) -> None:
+    target = ckpt_dir / "config.json"
+    if target.exists():
+        return
+
+    def _writer():
+        while True:
+            if target.exists():
+                return
+            if ckpt_dir.exists():
+                try:
+                    entries = [
+                        p for p in ckpt_dir.iterdir() if p.is_dir() and p.name.startswith("step-")
+                    ]
+                except FileNotFoundError:
+                    entries = []
+                if entries:
+                    try:
+                        ckpt_dir.mkdir(parents=True, exist_ok=True)
+                        target.write_text(payload)
+                    except Exception as exc:
+                        _log_rank("Failed to write config to checkpoint dir: %s", exc)
+                    return
+            time.sleep(5)
+
+    threading.Thread(target=_writer, daemon=True).start()
 
 
 def launch_qwen3_pretrain(cfg: QwenPretrainRunConfig) -> None:
