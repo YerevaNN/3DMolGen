@@ -1,6 +1,7 @@
 import ast
 import json
 import os
+import re
 
 import pytest
 from rdkit import Chem
@@ -23,6 +24,19 @@ DRUGS_SUMM_PATH = os.environ.get(
 )
 MAX_MOLS = int(os.environ.get("GEOM_MAX_MOLS", "1000"))
 RMSD_TOL = 1e-4
+_SIMPLE_BRACKET_RE = re.compile(r"^(?:[A-Z][a-z]?|[cnopsb])$")
+
+
+def _strip_coords_and_normalize(text: str) -> str:
+    without_coords = re.sub(r"<[^>]*>", "", text)
+
+    def repl(match: re.Match) -> str:
+        inner = match.group(1)
+        if _SIMPLE_BRACKET_RE.fullmatch(inner):
+            return inner
+        return match.group(0)
+
+    return re.sub(r"\[([^\]]+)\]", repl, without_coords)
 
 
 def _iter_drugs_mols_from_summ(drugs_summ_path, max_mols=MAX_MOLS):
@@ -99,10 +113,31 @@ def test_large_scale_drugs_enriched_roundtrip():
             if mol_no_h.GetNumConformers() == 0:
                 continue
 
-            enriched, _ = encode_cartesian_v2(mol_no_h, precision=4)
-            mol_rt = decode_cartesian_v2(enriched)
+            canonical_no_h = Chem.MolToSmiles(
+                mol_no_h,
+                canonical=True,
+                isomericSmiles=True,
+                allHsExplicit=False,
+                allBondsExplicit=False,
+            )
 
-            enriched_again, _ = encode_cartesian_v2(mol_rt, precision=4)
+            enriched, canonical = encode_cartesian_v2(mol_no_h, precision=4)
+            assert canonical == canonical_no_h
+            assert _strip_coords_and_normalize(enriched) == canonical_no_h
+
+            mol_rt = decode_cartesian_v2(enriched)
+            canonical_rt = Chem.MolToSmiles(
+                Chem.RemoveHs(mol_rt),
+                canonical=True,
+                isomericSmiles=True,
+                allHsExplicit=False,
+                allBondsExplicit=False,
+            )
+            assert canonical_rt == canonical_no_h
+
+            enriched_again, canonical_again = encode_cartesian_v2(mol_rt, precision=4)
+            assert canonical_again == canonical_no_h
+            assert _strip_coords_and_normalize(enriched_again) == canonical_no_h
             mol_rt_again = decode_cartesian_v2(enriched_again)
 
             if strip_smiles(enriched_again) != strip_smiles(enriched):

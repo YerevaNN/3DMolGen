@@ -14,12 +14,10 @@ This document describes the text-only molecular representation implemented in [`
 
 1. **Hydrogen suppression** – call `Chem.RemoveHs` on the embedded molecule to obtain a hydrogen-suppressed graph. RDKit removes “normal” hydrogen atoms and keeps chemically required explicit ones (e.g., `[nH]`, `[NH2+]`, `[NH3+]`, isotopic `[2H]`, `[3H]`, etc.).
 2. **Canonical ordering** – generate the canonical isomeric SMILES *with* `_smilesAtomOutputOrder` so that atom indices remain deterministic.
-3. **Atom rewriting** – replace each atom token with a bracketed descriptor that records:
-   - Element symbol (lowercase for aromatic atoms such as `c`, `n`, `o`, `p`, `s`, `b`).
-   - Tetrahedral chirality (`@`, `@@`).
-   - Only explicit hydrogens that remain in the RDKit graph (e.g., `[C@H]`, `[nH]`, `[NH2+]`).
-   - Formal charges (`+`, `-`, `+2`, etc.).
-   - Isotopic masses when present.
+3. **Atom mirroring** – treat the hydrogen-suppressed canonical SMILES as the *sole* source of truth for atom descriptors.
+   - If RDKit already emitted a bracket token (e.g., `[C@@H]`, `[nH]`, `[NH2+]`, `[13CH3]`), reuse it verbatim.
+   - If the token is a bare atom (`C`, `c`, `N`, `Cl`, …), simply wrap it as `[C]`, `[c]`, `[N]`, `[Cl]`, etc.
+   - **Never** invent `@/@@`, `H/Hn`, charges, or isotopes that RDKit did not include.
 4. **Coordinate embedding** – append a `<x,y,z>` block immediately after every descriptor. Coordinates are truncated (not rounded) to the configured precision (default: 4 decimals).
 5. **Topology preservation** – leave all bond symbols, ring indices, branching parentheses, and punctuation untouched. The enriched text is still a valid SMILES string once the `<...>` blocks are stripped.
 
@@ -31,14 +29,11 @@ Example pattern:
 
 ## 3. Atom Descriptor Rules
 
-- **Element & aromaticity** – aromatic atoms use lowercase (`c`, `n`, `o`, `p`, `s`, `b`); all other atoms use the usual atomic symbol (`C`, `N`, `O`, `Cl`, `Br`, etc.).
-- **Chirality** – tetrahedral stereochemistry becomes `@` (clockwise) or `@@` (counterclockwise). Example: `C[C@H](O)N` → `[C][C@H]...`.
-- **Formal charge** – appended verbatim at the end of the descriptor (`[NH2+]`, `[O-]`, `[P+2]`).
-- **Explicit hydrogens only** – replicate only hydrogens that appear as atoms in the RDKit graph:
-  - Keep `[nH]`, `[NH2+]`, `[C@H]`, `[2H]`, etc.
-  - Do **not** introduce `[CH3]`, `[CH2]`, `[CH]`, or neutral `[cH]` — these hydrogens are implicit and must stay implicit.
-- **Isotopes** – isotopic labels remain inside the descriptor (e.g., `[13C@H]`).
-- **Normalization** – decorative neutral carbon descriptors like `[CH3]`, `[CH2]`, `[CH]`, `[cH]` collapse back to `[C]` or `[c]` to avoid redundant tokens. This mirrors the “no explicit implicit-H” rule.
+- **Source of truth** – descriptors are copied directly from `Chem.MolToSmiles(RemoveHs(mol), isomericSmiles=True)`. The encoder never inspects `atom.GetChiralTag()`, `GetTotalNumHs()`, etc. to “fix” tokens.
+- **Bare atoms** – only the minimal wrapping occurs: `C` → `[C]`, `c` → `[c]`, `Cl` → `[Cl]`. These tokens contain *no* `@`, `H`, charge, or isotope suffixes.
+- **Decorated atoms** – RDKit-controlled bracket tokens (e.g., `[C@@H]`, `[nH]`, `[NH2+]`, `[13CH3]`, `[Pt+2]`) are preserved byte-for-byte.
+- **Implicit-H chirality** – if RDKit removed a stereocenter because its configuration depended solely on an implicit hydrogen, the canonical SMILES will not contain `@/@@`, and therefore neither will the enriched string.
+- **Explicit hydrogens** – only explicit hydrogens that survive `RemoveHs` (such as `[nH]`, `[NH2+]`, isotopic `[2H]`) appear, exactly as RDKit printed them.
 
 ## 4. Coordinate Blocks
 
