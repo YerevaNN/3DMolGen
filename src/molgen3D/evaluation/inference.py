@@ -21,9 +21,11 @@ from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2,
 from molgen3D.evaluation.utils import extract_between, same_molecular_graph
 from molgen3D.config.paths import get_ckpt, get_tokenizer_path, get_data_path, get_base_path
 from molgen3D.config.sampling_config import sampling_configs, gen_num_codes
-from molgen3D.training.grpo.rewards import tag_pattern
 
 torch.backends.cudnn.benchmark = True
+
+
+tag_pattern = re.compile(r'<[^>]*>')
 
 def set_seed(seed=42):
     random.seed(seed)  # Python random module
@@ -83,7 +85,6 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id)
         geom_smiles = geom_smiles_list[i]
         
         if generated_conformer:
-            generated_smiles = tag_pattern.sub('', generated_conformer)     
             generated_smiles = strip_smiles(generated_conformer)
             if not same_molecular_graph(canonical_smiles, generated_smiles):
                 logger.info(f"smiles mismatch: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
@@ -154,8 +155,8 @@ def run_inference(inference_config: dict):
 
     mols_list.sort(key=lambda x: len(x[0]))
     
-    if inference_config.get("limit"):
-        mols_list = mols_list[:inference_config["limit"]]
+    limit = inference_config.get("limit")
+    mols_list = mols_list[:limit]
 
     stats = Counter({"smiles_mismatch":0, "mol_parse_fail" :0, "no_eos":0})
     batch_size = int(inference_config["batch_size"])
@@ -215,9 +216,8 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         "device": "cuda",
         "results_path": get_base_path("gen_results_root"),
         "run_name": "new_data_p1",
+        "limit": limit,
     }
-    if limit:
-        base_inference_config["limit"] = limit
 
     if grid_run_inference:
         param_grid = {
