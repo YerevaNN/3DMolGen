@@ -250,8 +250,10 @@ class JsonlTaggedPackedDataset(IterableDataset):
         self.ignore_index = int(ignore_index)
         self.truncate_overflow_units = bool(truncate_overflow_units)
 
+        # Use a shared seed across ranks so that shuffling produces a single
+        # global ordering which is then partitioned deterministically by rank.
         self._epoch = 0
-        self._rng = random.Random(seed + self.rank * 97)
+        self._rng = random.Random(seed)
         self._start_k = 0
         self._pairs_total = 0
         self._pair_cursor = self._start_k
@@ -299,6 +301,12 @@ class JsonlTaggedPackedDataset(IterableDataset):
                 raise RuntimeError(
                     "Provided tokenizer must expose a pad token id or support resolving one."
                 )
+            # Use the caller-provided pad token for both padding and separators.
+            if getattr(tokenizer, "pad_token_id", None) is None:
+                try:
+                    tokenizer.pad_token_id = int(pad_id)  # type: ignore[attr-defined]
+                except Exception:
+                    pass
             self.sep_id = int(pad_id)
             self.pad_id = int(pad_id)
         self._preview = _PreviewLogger(tokenizer, limit=2)
