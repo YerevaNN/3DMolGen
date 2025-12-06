@@ -64,7 +64,6 @@ are derived from SLURM (`hostname`, `SLURM_GPUS_ON_NODE`, etc.) but can be overr
      --nnodes="${NNODES}" \
      --node_rank="${NODE_RANK}" \
      -m molgen3D.training.pretraining.torchtitan_runner \
-     --run-desc "${RUN_DESC}" \
      --train-toml "${TMP_TOML}"
    ```
 

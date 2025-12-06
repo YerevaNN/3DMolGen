@@ -61,9 +61,6 @@ def _log_rank(msg: str, *args) -> None:
 
 @dataclass
 class QwenPretrainRunConfig:
-    # Legacy: run_desc kept for compatibility with older launchers. The primary
-    # source of truth is job.description in the TOML.
-    run_desc: Optional[str] = None
     train_toml: str = "src/molgen3D/config/pretrain/qwen3_06b.toml"
     wandb_project: Optional[str] = None
     wandb_entity: Optional[str] = None
@@ -143,10 +140,10 @@ def _plan_run_layout(
     job_section,
 ) -> RunLayout:
     dump_folder = getattr(job_section, "dump_folder", None) or "pretrain_runs"
-    # Keep Qwen-specific subfolder to avoid collisions with other model families.
-    logs_root = paths.get_pretrain_logs_path(Path(dump_folder) / "qwen3_06b")
-    ckpts_root = paths.get_root_path("ckpts_root", Path(dump_folder) / "qwen3_06b")
-    wandb_root = paths.get_wandb_path(Path(dump_folder) / "qwen3_06b")
+    # Logs should sit directly under the pretrain logs root per run.
+    logs_root = paths.get_pretrain_logs_path(Path())
+    ckpts_root = paths.get_root_path("qwen_yerevann_root", Path("qwen3_06b"))
+    wandb_root = paths.get_wandb_path(Path())
 
     if run_settings.init_mode == "resume":
         ckpts_dir = _resolve_resume_ckpt_dir(run_settings)
@@ -308,18 +305,22 @@ def _prepare_job_config(
     ckpts_dir = layout.ckpts_dir
     wandb_dir = layout.wandb_dir
 
-    _ensure_dirs(logs_dir, wandb_dir)
+    if _is_log_rank():
+        _ensure_dirs(logs_dir, wandb_dir)
 
-    if layout.reuse_existing_dirs:
-        if not ckpts_dir.exists():
-            raise FileNotFoundError(
-                f"Checkpoint directory {ckpts_dir} does not exist for resume."
-            )
-    else:
-        if run_settings.init_mode == "hf_pretrain":
-            ckpts_dir.parent.mkdir(parents=True, exist_ok=True)
+        if layout.reuse_existing_dirs:
+            if not ckpts_dir.exists():
+                raise FileNotFoundError(
+                    f"Checkpoint directory {ckpts_dir} does not exist for resume."
+                )
         else:
-            ckpts_dir.mkdir(parents=True, exist_ok=True)
+            if run_settings.init_mode == "hf_pretrain":
+                ckpts_dir.parent.mkdir(parents=True, exist_ok=True)
+            else:
+                ckpts_dir.mkdir(parents=True, exist_ok=True)
+
+    if dist.is_available() and dist.is_initialized():
+        dist.barrier()
 
     _enable_runtime_log(
         logs_dir,
@@ -327,7 +328,7 @@ def _prepare_job_config(
     )
 
     job_config.job.description = getattr(job_config.job, "description", None) or "run"
-    job_config.job.dump_folder = str(logs_dir.parent)
+    job_config.job.dump_folder = str(logs_dir)
     job_config.checkpoint.folder = str(ckpts_dir)
     if hasattr(job_config.checkpoint, "last_save_in_hf"):
         job_config.checkpoint.last_save_in_hf = False
@@ -539,10 +540,6 @@ def launch_qwen3_pretrain(cfg: QwenPretrainRunConfig) -> None:
         job_config, "molgen_run", MolGenRunConfig()
     )
     description = getattr(job_config.job, "description", None) or "run"
-    if cfg.run_desc:
-        # Backward compat: allow CLI/env to override, but prefer job.description.
-        description = cfg.run_desc
-        job_config.job.description = description
     layout = _plan_run_layout(description, run_settings, job_config.job)
     _prepare_job_config(job_config, cfg, run_settings, layout)
     _apply_run_environment(

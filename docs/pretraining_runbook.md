@@ -16,7 +16,7 @@ The TOML is split into logical sections. Fields marked **(recommended)** are goo
 
 ### `[job]`
 - `description` *(recommended)* – becomes part of the run name (`YYMMDD-HHMM-<hash>-description`). Use short, unique text so logs/checkpoints stay readable.
-- `dump_folder` *(recommended)* – resolved relative to `paths.yaml.base_paths`. Logs live under `pretrain_logs_root/<dump_folder>/qwen3_06b/<run-name>`, checkpoints under `ckpts_root/<dump_folder>/qwen3_06b/<run-name>/checkpoint`, and wandb under `wandb_root/<dump_folder>/qwen3_06b/<run-name>`.
+- `dump_folder` *(recommended)* – resolved relative to `paths.yaml.base_paths`. Logs live under `pretrain_logs_root/<run-name>`, checkpoints under `qwen_yerevann_root/qwen3_06b/<run-name>/checkpoint`, and wandb under `wandb_root/<run-name>`.
 - `print_config` *(optional)* – keep `true` to log the resolved config at startup.
 - `custom_config_module = "molgen3D.training.pretraining.config.custom_job_config"` **(required)** – wires in the MolGen-specific path resolver, WSDS scheduler helper, HF checkpoint patch, and dataloader defaults. Removing it reverts to upstream TorchTitan behavior.
 
@@ -106,7 +106,7 @@ Controls how `JsonlTaggedPackedDataset` behaves.
 - `WANDB_RUN_NAME` – set this when resuming an existing run so logs, checkpoints, and WandB all use the same run folder.
 - `WANDB_PROJECT`, `WANDB_ENTITY`, `WANDB_GROUP` – can be exported in the launch script or per invocation. Defaults are set in `scripts/launch_torchtitan.sh`.
 - `WANDB_DIR` – automatically pointed at `wandb/<run-name>` by `launch_qwen3_pretrain`, but you can override it to stash offline runs elsewhere.
-- `RUN_DESC` (launch script) – environment variable forwarded to `--run-desc`; effectively a friendlier name for the run.
+- `JOB_DESCRIPTION` (launch script) – optional override for `[job].description`; defaults to the description found in the TOML.
 - `MASTER_PORT`, `NGPU_PER_NODE` – configurable via the launcher; necessary when running multiple jobs per node.
 - `export HF_DATASETS_OFFLINE=1` – optional for air‑gapped environments when you already copied tokenizer/model files locally.
 
@@ -118,7 +118,6 @@ Controls how `JsonlTaggedPackedDataset` behaves.
    - Sets Slurm/torchrun variables, defaults `TRAIN_TOML`, exports WandB metadata, and finally invokes `torchrun`. If the launcher does not inject `run_name`, the runner will generate a timestamp+hash name before training starts:
      ```bash
      torchrun ... -m molgen3D.training.pretraining.torchtitan_runner \
-       --run-desc "${RUN_DESC}" \
        --train-toml "${TRAIN_TOML}"
      ```
 
