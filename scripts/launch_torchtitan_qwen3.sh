@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=torchtitan-qwen3
 #SBATCH --cpus-per-task=64
-#SBATCH --partition=h100
+#SBATCH --partition=a100
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:6
+#SBATCH --gres=gpu:2
 #SBATCH --mem=200G
 #SBATCH --time=20:00:00
 #SBATCH --output=outputs/slurm_jobs/titan/%j.out
@@ -18,16 +18,16 @@ export TORCH_COMPILE=${TORCH_COMPILE:-0}
 
 TRAIN_TOML=${TRAIN_TOML:-src/molgen3D/config/pretrain/qwen3_06b.toml}
 
-_DEFAULT_RUN_DESC=$(python3 - <<'PY' "$TRAIN_TOML"
+_DEFAULT_DESCRIPTION=$(python3 - <<'PY' "$TRAIN_TOML"
 import pathlib, re, sys
 toml_path = pathlib.Path(sys.argv[1])
 text = toml_path.read_text()
-match = re.search(r'^\s*run_desc\s*=\s*"([^"]+)"', text, re.MULTILINE)
+match = re.search(r'^\s*description\s*=\s*"([^"]+)"', text, re.MULTILINE)
 print(match.group(1) if match else toml_path.stem, end="")
 PY
 )
-RUN_DESC=${RUN_DESC:-${_DEFAULT_RUN_DESC}}
-echo "Using run_desc: ${RUN_DESC}"
+RUN_DESC=${RUN_DESC:-${_DEFAULT_DESCRIPTION}}
+echo "Using description: ${RUN_DESC}"
 
 if [[ -z "${RUN_NAME:-}" ]]; then
   STAMP=$(date +%y%m%d-%H%M)
@@ -39,6 +39,15 @@ PY
   RUN_NAME="${STAMP}-${HASH}-${RUN_DESC}"
 fi
 echo "Run name: ${RUN_NAME}"
+
+# Refresh the Slurm job name to reflect the run description for easier tracking.
+if [[ -n "${SLURM_JOB_ID:-}" ]]; then
+  JOB_NAME_BASE="torchtitan-${RUN_DESC}"
+  JOB_NAME_SANITIZED=$(echo "${JOB_NAME_BASE}" | tr -cs '[:alnum:]._-' '-')
+  JOB_NAME_TRUNC=${JOB_NAME_SANITIZED:0:128}
+  scontrol update JobId="${SLURM_JOB_ID}" JobName="${JOB_NAME_TRUNC}" >/dev/null 2>&1 || true
+  echo "Updated Slurm job name to: ${JOB_NAME_TRUNC}"
+fi
 
 MASTER_ADDR=${MASTER_ADDR:-$(hostname)}
 MASTER_PORT=${MASTER_PORT:-$(( (RANDOM % 20000) + 20000 ))}
