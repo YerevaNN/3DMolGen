@@ -3,7 +3,7 @@
 #SBATCH --cpus-per-task=64
 #SBATCH --partition=a100
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:4
 #SBATCH --mem=200G
 #SBATCH --time=20:00:00
 #SBATCH --output=outputs/slurm_jobs/titan/%j.out
