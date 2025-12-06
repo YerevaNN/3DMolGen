@@ -54,23 +54,33 @@ _ELEMENT_SYMBOLS = {
 _TWO_LETTER_SYMBOLS = {sym for sym in _ELEMENT_SYMBOLS if len(sym) == 2}
 _THREE_LETTER_SYMBOLS = {sym for sym in _ELEMENT_SYMBOLS if len(sym) == 3}
 _AROMATIC_SYMBOLS = set("cnopsb")
+_BRACKET_COORD_RE = re.compile(r"(\[[^\]]+\])<[^>]*>")
+_COORD_BLOCK_RE = re.compile(r"<[^>]*>")
+_WHITESPACE_RE = re.compile(r"\s+")
 _ORGANIC_SUBSET = {"B", "C", "N", "O", "P", "S", "F", "Cl", "Br", "I", "b", "c", "n", "o", "p", "s"}
 
 def strip_smiles(s: str) -> str:
     """
-    Normalize either:
-      - an enriched string: [C]<...>[NH2+]<...>[C]<...>..., or
-      - a plain SMILES: C[NH2+]Cc1sccc1C
+    Normalize enriched SMILES strings into a 'canonical-ish' comparison form.
 
-    into a 'canonical-ish' comparison string by:
-      - removing all <...> coordinate blocks
-      - collapsing decorative carbon H-counts: [CH3],[CH2],[CH],[cH] -> C/c
-      - dropping brackets around simple atoms: [C]->C, [c]->c, [N]->N, ...
-      - keeping chemically meaningful brackets: [NH2+], [nH], [H], [Pt+2], etc.
+    Supported inputs:
+      - Legacy enriched strings:  C<...>N<...> (atoms without brackets + coords)
+      - Current enriched strings: [C]<...>[N]<...> (atoms wrapped in brackets)
+      - Plain SMILES:            C[NH2+]Cc1...
+
+    Steps:
+      1. Remove every <...> coordinate block (first the bracketed form, then the legacy bare form).
+      2. Collapse decorative carbon H-counts: [CH3],[CH2],[CH],[cH] -> C/c.
+      3. Drop brackets around simple atoms: [C]->C, [c]->c, [N]->N, ...
+      4. Keep chemically meaningful brackets: [NH2+], [nH], [H], [Pt+2], etc.
     """
 
-    # 1) drop all coordinate triplets if present
-    s = re.sub(r'<[^>]*>', '', s)
+    if not s:
+        return ""
+
+    s = _WHITESPACE_RE.sub('', s)
+    s = _BRACKET_COORD_RE.sub(r"\1", s)
+    base_smiles = _COORD_BLOCK_RE.sub('', s)
 
     # 2) normalize bracket atoms
     def repl(m: re.Match) -> str:
@@ -90,7 +100,7 @@ def strip_smiles(s: str) -> str:
         # Everything else: keep bracketed, e.g. [NH2+], [nH], [O-], [H], [Pt+2], [13C]
         return f'[{inner}]'
 
-    return re.sub(r'\[([^\]]+)\]', repl, s)
+    return re.sub(r'\[([^\]]+)\]', repl, base_smiles)
 
 def _expected_plain_token(atom) -> str:
     if atom.GetIsAromatic():

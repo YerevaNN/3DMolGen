@@ -14,7 +14,7 @@ import random
 random.seed(42)
 
 from molgen3D.utils.utils import load_pkl, load_json
-from molgen3D.utils.data_processing_utils import encode_cartesian_raw    
+from molgen3D.data_processing.utils import encode_cartesian_raw    
 
 encoding_func_selector = {
     "cartesian": encode_cartesian_raw,
