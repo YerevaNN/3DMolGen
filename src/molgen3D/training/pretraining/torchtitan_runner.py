@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -60,7 +61,9 @@ def _log_rank(msg: str, *args) -> None:
 
 @dataclass
 class QwenPretrainRunConfig:
-    run_desc: str
+    # Legacy: run_desc kept for compatibility with older launchers. The primary
+    # source of truth is job.description in the TOML.
+    run_desc: Optional[str] = None
     train_toml: str = "src/molgen3D/config/pretrain/qwen3_06b.toml"
     wandb_project: Optional[str] = None
     wandb_entity: Optional[str] = None
@@ -128,17 +131,27 @@ def _resolve_resume_ckpt_dir(run_settings: MolGenRunConfig) -> Path:
     return resume_path
 
 
+def _generate_run_name(description: str) -> str:
+    stamp = datetime.now().strftime("%y%m%d-%H%M")
+    run_hash = secrets.token_hex(2)
+    return f"{stamp}-{run_hash}-{_sanitize_description(description) or 'run'}"
+
+
 def _plan_run_layout(
-    run_desc: str,
+    description: str,
     run_settings: MolGenRunConfig,
+    job_section,
 ) -> RunLayout:
-    logs_root = paths.resolve_tag("base_paths:pretrain_logs_root")
-    ckpts_root = paths.resolve_tag("base_paths:ckpts_root") / "qwen3_06b"
-    wandb_root = paths.resolve_tag("base_paths:wandb_root")
+    dump_folder = getattr(job_section, "dump_folder", None) or "pretrain_runs"
+    # Keep Qwen-specific subfolder to avoid collisions with other model families.
+    logs_root = paths.get_pretrain_logs_path(Path(dump_folder) / "qwen3_06b")
+    ckpts_root = paths.get_root_path("ckpts_root", Path(dump_folder) / "qwen3_06b")
+    wandb_root = paths.get_wandb_path(Path(dump_folder) / "qwen3_06b")
 
     if run_settings.init_mode == "resume":
         ckpts_dir = _resolve_resume_ckpt_dir(run_settings)
         run_name = run_settings.run_name or ckpts_dir.name
+        run_settings.run_name = run_name
         if not run_name:
             raise ValueError(
                 "Unable to derive run_name while resuming; "
@@ -159,7 +172,8 @@ def _plan_run_layout(
     if run_settings.run_name:
         run_name = run_settings.run_name
     else:
-        run_name = _sanitize_description(run_desc) or "run"
+        run_name = _generate_run_name(description)
+        run_settings.run_name = run_name
 
     run_hash = _extract_run_hash_from_name(run_name) or "0000"
     logs_dir = logs_root / run_name
@@ -312,9 +326,11 @@ def _prepare_job_config(
         rotate_existing=layout.reuse_existing_dirs,
     )
 
-    job_config.job.description = cfg.run_desc
-    job_config.job.dump_folder = str(logs_dir)
+    job_config.job.description = getattr(job_config.job, "description", None) or "run"
+    job_config.job.dump_folder = str(logs_dir.parent)
     job_config.checkpoint.folder = str(ckpts_dir)
+    if hasattr(job_config.checkpoint, "last_save_in_hf"):
+        job_config.checkpoint.last_save_in_hf = False
     job_config.metrics.save_for_all_ranks = False
     if not job_config.metrics.save_tb_folder:
         job_config.metrics.save_tb_folder = "tb"
@@ -522,7 +538,12 @@ def launch_qwen3_pretrain(cfg: QwenPretrainRunConfig) -> None:
     run_settings: MolGenRunConfig = getattr(
         job_config, "molgen_run", MolGenRunConfig()
     )
-    layout = _plan_run_layout(cfg.run_desc, run_settings)
+    description = getattr(job_config.job, "description", None) or "run"
+    if cfg.run_desc:
+        # Backward compat: allow CLI/env to override, but prefer job.description.
+        description = cfg.run_desc
+        job_config.job.description = description
+    layout = _plan_run_layout(description, run_settings, job_config.job)
     _prepare_job_config(job_config, cfg, run_settings, layout)
     _apply_run_environment(
         layout.run_name,

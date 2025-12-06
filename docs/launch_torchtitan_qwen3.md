@@ -2,8 +2,8 @@
 
 `scripts/launch_torchtitan_qwen3.sh` is a SLURM-friendly wrapper around
 `molgen3D.training.pretraining.torchtitan_runner`. It sets reasonable defaults for WANDB,
-derives a unique run name, injects it into a temporary TOML, and launches `torchrun` with the proper
-distributed settings pulled from SLURM.
+derives a unique run name from `[job].description`, injects it into a temporary TOML, and launches
+`torchrun` with the proper distributed settings pulled from SLURM.
 
 ## SLURM directives
 
@@ -30,7 +30,7 @@ You can override the following before calling `sbatch`:
 | Variable         | Default                                    | Purpose                                |
 |------------------|--------------------------------------------|----------------------------------------|
 | `TRAIN_TOML`     | `src/molgen3D/config/pretrain/qwen3_06b.toml` | Base config copied per run             |
-| `RUN_DESC`       | extracted from `run_desc` in the TOML or filename stem | Shown in logs/W&B            |
+| `RUN_DESC`       | extracted from `[job].description` in the TOML or filename stem | Shown in logs/W&B            |
 | `RUN_NAME`       | auto-generated `YYMMDD-HHMM-<rand>-<desc>`  | Used for `molgen_run.run_name`         |
 | `WANDB_ENTITY`   | `menuab_team`                              | W&B entity                             |
 | `WANDB_PROJECT`  | `3dmolgen`                                 | W&B project                            |
@@ -45,7 +45,7 @@ are derived from SLURM (`hostname`, `SLURM_GPUS_ON_NODE`, etc.) but can be overr
 ## How the script works
 
 1. **Set defaults**: ensures WANDB env vars and `TORCH_COMPILE` are exported, picks `TRAIN_TOML` and
-   `RUN_DESC`.
+   derives `RUN_DESC` from `[job].description`.
 2. **Generate run name**: unless `RUN_NAME` is set, builds `YYMMDD-HHMM-<4hex>-<RUN_DESC>`.
 3. **Populate distributed settings**:
    * `MASTER_ADDR` defaults to `hostname`.
