@@ -40,14 +40,20 @@ data:
   conformers_test: "geom_processed/geom_cartesian_v3/processed_strings/test"
 tokenizers:
   llama3_chem_v1: "src/molgen3D/training/tokenizers/Llama-3.2-chem-1B-v1"
-  qwen3_0.6b_conf_v1: "/nfs/np/home/_vover_/models/saved_models/qwen3-0.6b-tokenizer-smiles-conformer"
   qwen3_0.6b_custom: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_custom"
   qwen3_0.6b_origin: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_original"
   
 
 models:
   # ---------- BASE MODELS ----------
-
+  m600_qwen:
+    root: "qwen3_06b/251207-1653-7d74-qwen3_06b_pre_80kst_4e_144effb"
+    steps:
+      "1e": "step-20000-hf"
+      "2e": "step-40000-hf"
+      "3e": "step-60000-hf"
+      "4e": "step-80000-hf"
+    
   m380_conf:
     root: "Llama-3.2-380M_conformers"
     steps:
