@@ -170,7 +170,7 @@ for start_char, end_char in offset_mapping:
         is_free.append(all(token_chars))
 ```
 
-**Why `all()`?** If a token spans both coordinate content AND a bracket (e.g., a hypothetical `3>` token covering chars 8-10), we must mark it COPY to preserve structure. Only tokens entirely within `<...>` get FREE status.
+**Why `all()`?** If a token spans both coordinate content AND a bracket (e.g., a hypothetical `3>` token covering chars 8-10), we must mark it COPY to preserve structure. Only tokens entirely within `<...>` get FREE status. This is a design decision, but there may exist other design decisions that are better suited for the problem.
 
 **Final result:**
 
@@ -363,7 +363,7 @@ python scripts/logit_processor/run_logit_processor_smoke.py \
   --json-report outputs/smoke/v2_precompute_simple_v2_distinct.json
 ```
 
-# small sample of clean
+### small sample of clean
 ```bash
 python scripts/logit_processor/run_logit_processor_smoke.py \
   --dataset clean \
@@ -373,7 +373,7 @@ python scripts/logit_processor/run_logit_processor_smoke.py \
   --json-report outputs/smoke/v2_precompute_simple_v2_small.json
 ```
 
-# small sample of clean with no logit processor
+### small sample of clean with no logit processor
 ```bash
 python scripts/logit_processor/run_logit_processor_smoke.py \
   --dataset clean \
@@ -384,7 +384,7 @@ python scripts/logit_processor/run_logit_processor_smoke.py \
   --json-report outputs/smoke/v2_precompute_simple_v2_small_no_processor.json
 ```
 
-# small sample of clean with top_p_sampling4
+### small sample of clean with top_p_sampling4
 ```bash
 python scripts/logit_processor/run_logit_processor_smoke.py \
   --dataset distinct \

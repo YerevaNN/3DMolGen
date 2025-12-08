@@ -81,7 +81,7 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id,
     logits_processor = None
     if use_logit_processor:
         templates = build_templates_for_batch(smiles_list, tokenizer)
-        prompt_lengths = [int(mask.sum().item()) for mask in tokenized_prompts["attention_mask"]]
+        prompt_lengths = [int(mask.sum().item()) for mask in tokenized_prompts["attention_mask"]] # for each prompt, get the number of tokens in the prompt
         logits_processor = LogitsProcessorList(
             [ConformerConstraintLogitsProcessor(templates, prompt_lengths, tokenizer=tokenizer, eos_token_id=eos_token_id)]
         )

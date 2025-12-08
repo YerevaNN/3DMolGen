@@ -33,7 +33,7 @@ COORD_PLACEHOLDER = "0.0000,0.0000,0.0000"
 @dataclass
 class PrecomputedTemplate:
     """Pre-computed mask for position-based constraint enforcement."""
-    ref_ids: torch.LongTensor       # [seq_len] - reference token IDs
+    ref_ids: torch.LongTensor       # [seq_len] - reference token IDs from skeleton
     is_free: torch.BoolTensor       # [seq_len] - True=FREE, False=COPY
     seq_len: int                    # expected sequence length
 
@@ -48,11 +48,6 @@ def _get_blocked_token_ids(tokenizer: PreTrainedTokenizer) -> set:
     - Some tokens containing '<' or '>' (to prevent premature coordinate closing)
     - Special tags like [CONFORMER], [/CONFORMER], etc.
     - BOS, EOS, PAD tokens
-
-    Blocks:
-    - All tokens containing '<' or '>' (to prevent premature coordinate closing)
-    - Special tags like [CONFORMER], [/CONFORMER], etc.
-    - BOS, EOS, PAD tokens
     """
     cache_key = id(tokenizer)
     if cache_key in _BLOCKED_TOKEN_IDS_CACHE:
@@ -60,8 +55,7 @@ def _get_blocked_token_ids(tokenizer: PreTrainedTokenizer) -> set:
 
     blocked_ids = set()
 
-    # Block ALL tokens containing '<' or '>' to prevent coordinate bracket leakage
-    # We define "coordinate bracket leagage" as the situation where a token containing '>' is generated inside a <...> block.
+    # Block tokens that contain '<' or '>' to prevent coordinate bracket leakage.
     # This is critical: tokens like '>(' (2284), '>[' (31868), etc. would corrupt structure
     vocab = tokenizer.get_vocab()
     for token_str, token_id in vocab.items():
@@ -78,7 +72,7 @@ def _get_blocked_token_ids(tokenizer: PreTrainedTokenizer) -> set:
             tokens = tokenizer.encode(tag, add_special_tokens=False)
             blocked_ids.update(tokens)
         except:
-            logger.warning(f"LogitProcessorV2PrecomputeMask: Could not encode special tag {tag}")
+            logger.warning(f"LogitProcessor: Could not encode special tag {tag}")
             pass
 
     # Also block EOS, BOS, PAD tokens if they exist
@@ -96,7 +90,12 @@ def _get_blocked_token_ids(tokenizer: PreTrainedTokenizer) -> set:
 def _build_blocked_mask(blocked_ids: set, vocab_size: int, device: torch.device) -> torch.BoolTensor:
     """Build boolean mask (like a bitmap/bitmask) from blocked token IDs.
     Why build a boolean mask?
-    - It is more efficient to block a set of tokens than to iterate through a set of tokens
+    - It is more efficient to block a via something like a set of tokens than to iterate through a set of tokens.
+    - The dimensions of vocabulary size gives us O(1) lookup time for blocked tokens. 
+    - We also get vectorized write through this, that is why `scores[b, self.blocked_mask] = float('-inf')` is efficient (it happens in 1 kernel).
+    - Vocab size is small too, which makes this approach reasonable.
+    - Should be built once per device as well.
+    - You only pay cost of O (blocked_ids) to build the blocked mask once.
 
     Returns:
         blocked_mask: torch.BoolTensor of [vocab_size] such that True=BLOCKED, False=ALLOWED
@@ -192,19 +191,21 @@ def build_precomputed_template(
             char_is_free.append(in_coord)
 
     # Convert to token-level: token is FREE only if ALL its chars are FREE
-    is_free = []
+    is_free = [] # list of booleans for each *token*, True=FREE, False=COPY
     for start_char, end_char in offset_mapping: # iterate through the offset mapping and build the is_free array
         if start_char >= end_char: # empty token range - treat as COPY
             is_free.append(False)
         else: # non-empty token range - check if all characters are FREE
+            # Slice/Splice the character mask for this token's span
             token_chars = char_is_free[start_char:end_char]
+            # Token is FREE only if every character in span is FREE.
             is_free.append(all(token_chars))
 
     return PrecomputedTemplate(
         # TODO: Look into replacing `ref_ids` with `encoding["input_ids"]` in function return block and removing the unused variable above
-        ref_ids=torch.tensor(ref_ids, dtype=torch.long), # list of token IDs for the reference string
-        is_free=torch.tensor(is_free, dtype=torch.bool),
-        seq_len=len(ref_ids),
+        ref_ids=torch.tensor(ref_ids, dtype=torch.long),  # list of token IDs for the reference string (in order of reference skeleton)
+        is_free=torch.tensor(is_free, dtype=torch.bool),  # list of booleans for each *token*, True=FREE, False=COPY
+        seq_len=len(ref_ids)  # expected sequence length (number of tokens in the reference string)
     )
 
 
@@ -217,7 +218,7 @@ class ConformerConstraintLogitsProcessor(LogitsProcessor):
     - Else: force ref_ids[pos]
     """
 
-    VERSION = "v2_precompute_mask_simple_v2"
+    VERSION = "v2_precompute_mask"
     CONFIG = {
         "approach": "pure_position_based",
         "coord_placeholder": COORD_PLACEHOLDER,
@@ -233,7 +234,7 @@ class ConformerConstraintLogitsProcessor(LogitsProcessor):
         eos_token_id: int | None = None,
     ):
         if len(templates) != len(prompt_lengths):
-            raise ValueError("LogitProcessorV2PrecomputeMask: templates and prompt_lengths must match")
+            raise ValueError("LogitProcessor: templates and prompt_lengths must match")
 
         self.templates = templates
         self.prompt_lengths = list(prompt_lengths)
@@ -243,19 +244,30 @@ class ConformerConstraintLogitsProcessor(LogitsProcessor):
         self._device = None
         self._prev_lens: List[int | None] = [None] * len(templates)
 
+    # This is the main function that is called by the model to apply the constraints.
+    # it is invoked once per decoding step by huggingface `generate` loop (via LogitsProcessor hooks).
+    # for each step, it processes every batch element :
+    # compute current position `pos` relative to initial prompt length.
+    # apply corresponding masking to that row of `scores` tensor.
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
-        batch_size, cur_len = input_ids.shape
+        batch_size, cur_len = input_ids.shape 
         device = scores.device
-        vocab_size = scores.shape[1]
+        vocab_size = scores.shape[1] 
 
         # Build blocked mask lazily with correct vocab size
+        # If no mask exists or the device has changed, build the mask.
         if self.blocked_mask is None or self._device != device:
             self.blocked_mask = _build_blocked_mask(self.blocked_ids, vocab_size, device)
+            # Move templates to correct device because;
+            # - They are built on the CPU and we want to move them to the GPU.
+            # - Indexing becomes GPU-local (torch tensor of booleans, etc).
             for template in self.templates:
                 template.ref_ids = template.ref_ids.to(device)
                 template.is_free = template.is_free.to(device)
             self._device = device
 
+        # Iterate through the batch and apply the constraints.
+        # Each item has a separate instance of the template (because the input prompt lengths are different).
         for b in range(batch_size):
             template = self.templates[b]
 
@@ -273,9 +285,11 @@ class ConformerConstraintLogitsProcessor(LogitsProcessor):
                     scores[b, self.eos_token_id] = 0.0
             elif template.is_free[pos]:
                 # FREE position - block only special tokens
+                # We are in a coordinate block, so we need to block all tokens that are not part of the coordinate block.
                 scores[b, self.blocked_mask] = float('-inf')
             else:
                 # COPY position - force exact token
+                # Core SMILES structure is preserved.
                 scores[b, :] = float('-inf')
                 scores[b, template.ref_ids[pos]] = 0.0
 
