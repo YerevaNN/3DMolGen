@@ -359,7 +359,7 @@ python scripts/logit_processor/run_logit_processor_smoke.py \
   --dataset distinct \
   --sample-size 1000 \
   --batch-size 128 \
-  --sampling-config top \
+  --sampling-config top_p_sampling4 \
   --json-report outputs/smoke/v2_precompute_simple_v2_distinct.json
 ```
 
@@ -418,25 +418,73 @@ The 15 failures fall into distinct categories:
 | Missing comma (decimal confusion) | 2 | `0.3014.7184,1.3211` | `.` generated instead of `,` |
 | Trailing dash + atom leak | 1 | `1.1782,-` with `cc` | `-` and atom tokens in coords |
 
-### Why These Failures Occur
+### Root Cause: Token Count Mismatch ("Drift")
 
-In FREE positions, the logit processor blocks:
+**Investigation notebook:** `outputs/smoke/investigate_coordinateparse_topp.ipynb`
+
+The failure mechanism was traced by token-by-token alignment analysis:
+
+#### The Setup
+
+The template uses placeholder coordinates `<0.0000,0.0000,0.0000>` which tokenize to **22 tokens**:
+```
+['<', '0', '.', '0', '0', '0', '0', ',', '0', '.', '0', '0', '0', '0', ',',
+ '0', '.', '0', '0', '0', '0', '>']
+```
+
+This creates **20 FREE positions** (the content between `<` and `>`).
+
+#### The Problem
+
+Actual generated coordinates often tokenize to **fewer tokens** (e.g., 21 instead of 22):
+
+| Coordinate Block | Token Count | Difference |
+|-----------------|-------------|------------|
+| `<0.0000,0.0000,0.0000>` (placeholder) | 22 | baseline |
+| `<1.094,1.2358,-1.0388>` (actual) | 21 | -1 |
+| `<0.4974,3.621,-0.7159>` (actual) | 21 | -1 |
+
+**Why fewer tokens?**
+- `,-` tokenizes as a **single token** (not two separate tokens)
+- 3-decimal coordinates like `3.621` use fewer digit tokens
+
+#### The Failure Sequence
+
+When actual coords need only 19 FREE tokens but template has 20:
+
+```
+Position 0-18:  Model generates valid coordinate content
+Position 19:    Still FREE (template expects more content)
+                → With top_p, model generates "filler" like `,`
+Position 20:    COPY position → template FORCES `>`
+Result:         `,>` pattern
+```
+
+**Evidence from token-level trace:**
+```
+pos 254: FREE | actual='8'           ← last digit of coordinate
+pos 255: FREE | actual=','           ← EXTRA comma (filler in leftover FREE position)
+pos 256: COPY | actual='>('          ← template forces this
+```
+
+#### Why Greedy Works
+
+With **greedy sampling** (temperature=0), the model always picks the highest-probability token. Even in "extra" FREE positions, it generates well-formed content (like additional precision digits), not punctuation.
+
+With **top_p sampling**, lower-probability tokens like extra `,` can be sampled in these leftover FREE positions.
+
+### What the Logit Processor Does Block
+
+In FREE positions, the processor blocks:
 - All tokens containing `<` or `>` (angle brackets)
 - Special tags (`[CONFORMER]`, `[SMILES]`, etc.)
 - Control tokens (BOS, EOS, PAD)
 
-However, it does NOT block:
-- `,` (comma) - needed for coordinate separators
-- `.` (decimal point) - needed for coordinate values
-- `-` (minus sign) - needed for negative coordinates
-- Digit tokens - needed for coordinate values
-
-With **greedy sampling** (temperature=0), the model always picks the highest-probability token, which is well-trained to produce valid coordinate syntax. Result: 100% structural validity.
-
-With **top_p sampling**, lower-probability tokens can be sampled in FREE positions:
-- Extra `,` at end of coordinate block (before the forced `>`)
-- `.` sampled where `,` was expected (decimal confusion)
-- Rarely: atom tokens like `c` can appear if they're in the vocabulary
+However, it does NOT block (because they're needed for valid coordinates):
+- `,` (comma) - coordinate separators
+- `.` (decimal point) - coordinate values
+- `-` (minus sign) - negative coordinates
+- Digit tokens - coordinate values
 
 ### Greedy vs Non-Greedy Trade-offs
 
@@ -446,21 +494,62 @@ With **top_p sampling**, lower-probability tokens can be sampled in FREE positio
 | top_p=0.4 | ~98.5% | Higher variance | Exploration, multiple conformers |
 | top_p=0.9 | Lower (untested) | Maximum variance | Research only |
 
-### Potential Improvements (Future Work)
+### Fix Implemented: Look-ahead Blocking (v2.1)
 
-1. **Block comma at position N-1 within `<...>`**: If we know the coordinate block is about to end (template position approaching `>`), block `,` to prevent trailing commas.
+**Version:** `v2.1_precompute_mask_lookahead`
 
-2. **Syntactic state tracking**: Track whether we're expecting a digit, decimal, comma, or sign within the coordinate block. Block tokens that violate expected syntax.
+The look-ahead blocking fix has been implemented in `constraint_logit_processor.py`:
 
-3. **Post-processing cleanup**: Strip trailing `,` or `-` from coordinate blocks before parsing.
+```python
+# In build_precomputed_template():
+# Build look-ahead blocking mask: block comma/dash when NEXT position is COPY and contains '>'
+block_comma_dash = []
+for pos in range(len(is_free)):
+    should_block = False
+    if is_free[pos]:  # Current position is FREE
+        if pos + 1 < len(is_free) and not is_free[pos + 1]:
+            next_token_str = tokenizer.decode([ref_ids[pos + 1]])
+            if '>' in next_token_str:
+                should_block = True
+    block_comma_dash.append(should_block)
 
-4. **Constrained character set**: In FREE positions, only allow: digits `0-9`, `.`, `,`, `-`. Block all alphabetic tokens.
+# In __call__():
+elif template.is_free[pos]:
+    scores[b, self.blocked_mask] = float('-inf')
+    # Look-ahead blocking: if next position is COPY '>', also block comma/dash
+    if template.block_comma_dash is not None and template.block_comma_dash[pos]:
+        scores[b, self.comma_dash_mask] = float('-inf')
+```
 
-Note: These improvements would add complexity to the logit processor. The current 98.5% pass rate with top_p=0.4 may be acceptable for many use cases.
+**What it blocks:**
+- Tokens consisting only of `,` and/or `-` characters (e.g., `,`, `-`, `,-`, `--`, `,,`)
+- 34 such tokens found in the Qwen3 vocabulary
+
+**When it blocks:**
+- Only at the last FREE position before a COPY `>` token
+- For a 3-atom molecule like `CC=O`, this is 3 positions out of 72 total tokens
+
+**Expected impact:**
+- Should eliminate the 12 `,>` failures from the top_p test
+- Should eliminate the 1 `->` failure
+- Minimal performance impact (just one additional mask operation at specific positions)
+
+### Other Potential Improvements (Future Work)
+
+1. **Syntactic state tracking**: Track whether we're expecting a digit, decimal, comma, or sign within the coordinate block. Block tokens that violate expected syntax.
+
+2. **Post-processing cleanup**: Strip trailing `,` or `-` from coordinate blocks before parsing. Simple regex: `s/<([^>]+),>/<\1>/g`
+
+3. **Constrained character set**: In FREE positions, only allow: digits `0-9`, `.`, `,`, `-`. Block all alphabetic tokens.
 
 ## Limitations and Future Work
 
 1. **Variable coordinate lengths:** If coordinates tokenize to fewer tokens than placeholder, model generates "filler" digits. This is benign but may produce slightly longer coordinates.
+The pre-computed mask assumes placeholder coords "0.0000,0.0000,0.0000" tokenize to ~14 tokens. If actual generated coords tokenize to FEWER tokens (e.g., 3 decimal places, or smaller numbers), the model:
+   1. Finishes coordinate content "early"
+   2. Is still in FREE positions (template expects more tokens)
+   3. Generates filler (`,`, `-`, etc.) in remaining FREE positions
+   4. Template finally forces `>` at the COPY position
 
 2. **Assumption:** Placeholder `0.0000,0.0000,0.0000` tokenizes similarly to actual coordinates. Data shows ~80% exact match, ~20% 1-3 fewer tokens.
 

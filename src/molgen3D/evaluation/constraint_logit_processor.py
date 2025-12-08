@@ -36,10 +36,14 @@ class PrecomputedTemplate:
     ref_ids: torch.LongTensor       # [seq_len] - reference token IDs from skeleton
     is_free: torch.BoolTensor       # [seq_len] - True=FREE, False=COPY
     seq_len: int                    # expected sequence length
+    block_comma_dash: torch.BoolTensor | None = None  # [seq_len] - True if comma/dash should be blocked (look-ahead)
 
 
 # Cache for blocked token IDs
 _BLOCKED_TOKEN_IDS_CACHE: dict = {}
+
+# Cache for comma/dash token IDs (for look-ahead blocking)
+_COMMA_DASH_TOKEN_IDS_CACHE: dict = {}
 
 def _get_blocked_token_ids(tokenizer: PreTrainedTokenizer) -> set:
     """Get token IDs that should be blocked in FREE positions. (Recall that FREE positions are the ones inside <...>)
@@ -85,6 +89,32 @@ def _get_blocked_token_ids(tokenizer: PreTrainedTokenizer) -> set:
 
     _BLOCKED_TOKEN_IDS_CACHE[cache_key] = blocked_ids
     return blocked_ids
+
+
+def _get_comma_dash_token_ids(tokenizer: PreTrainedTokenizer) -> set:
+    """Get token IDs for comma and dash tokens (for look-ahead blocking).
+
+    These are blocked in the last FREE position before a COPY `>` to prevent
+    trailing punctuation patterns like `,>` or `->`.
+    """
+    cache_key = id(tokenizer)
+    if cache_key in _COMMA_DASH_TOKEN_IDS_CACHE:
+        return _COMMA_DASH_TOKEN_IDS_CACHE[cache_key]
+
+    comma_dash_ids = set()
+    vocab = tokenizer.get_vocab()
+
+    # Find all tokens that are ONLY comma, dash, or combinations thereof
+    # We want to block: `,`, `-`, `,-`, `--`, etc.
+    # But NOT: `1,` or `-1` (those contain digits and are valid coord content)
+    for token_str, token_id in vocab.items():
+        # Token consists only of comma and/or dash characters
+        if token_str and all(c in ',-' for c in token_str):
+            comma_dash_ids.add(token_id)
+
+    logger.debug(f"LogitProcessor: Found {len(comma_dash_ids)} comma/dash tokens for look-ahead blocking")
+    _COMMA_DASH_TOKEN_IDS_CACHE[cache_key] = comma_dash_ids
+    return comma_dash_ids
 
 
 def _build_blocked_mask(blocked_ids: set, vocab_size: int, device: torch.device) -> torch.BoolTensor:
@@ -201,11 +231,26 @@ def build_precomputed_template(
             # Token is FREE only if every character in span is FREE.
             is_free.append(all(token_chars))
 
+    # Build look-ahead blocking mask: block comma/dash when NEXT position is COPY and contains '>'
+    # This prevents trailing punctuation patterns like `,>` or `->`
+    block_comma_dash = []
+    for pos in range(len(is_free)):
+        should_block = False
+        if is_free[pos]:  # Current position is FREE
+            # Check if next position is COPY and contains '>'
+            if pos + 1 < len(is_free) and not is_free[pos + 1]:
+                # Decode the next token to check if it contains '>'
+                next_token_str = tokenizer.decode([ref_ids[pos + 1]])
+                if '>' in next_token_str:
+                    should_block = True
+        block_comma_dash.append(should_block)
+
     return PrecomputedTemplate(
         # TODO: Look into replacing `ref_ids` with `encoding["input_ids"]` in function return block and removing the unused variable above
         ref_ids=torch.tensor(ref_ids, dtype=torch.long),  # list of token IDs for the reference string (in order of reference skeleton)
         is_free=torch.tensor(is_free, dtype=torch.bool),  # list of booleans for each *token*, True=FREE, False=COPY
-        seq_len=len(ref_ids)  # expected sequence length (number of tokens in the reference string)
+        seq_len=len(ref_ids),  # expected sequence length (number of tokens in the reference string)
+        block_comma_dash=torch.tensor(block_comma_dash, dtype=torch.bool),  # look-ahead blocking mask
     )
 
 
@@ -218,11 +263,11 @@ class ConformerConstraintLogitsProcessor(LogitsProcessor):
     - Else: force ref_ids[pos]
     """
 
-    VERSION = "v2_precompute_mask"
+    VERSION = "v2.1_precompute_mask_lookahead"
     CONFIG = {
-        "approach": "pure_position_based",
+        "approach": "pure_position_based_with_lookahead",
         "coord_placeholder": COORD_PLACEHOLDER,
-        "description": "Position-based COPY/FREE mask with angle bracket blocking",
+        "description": "Position-based COPY/FREE mask with angle bracket blocking and look-ahead comma/dash blocking",
     }
 
     def __init__(
@@ -240,7 +285,9 @@ class ConformerConstraintLogitsProcessor(LogitsProcessor):
         self.prompt_lengths = list(prompt_lengths)
         self.eos_token_id = eos_token_id
         self.blocked_ids = _get_blocked_token_ids(tokenizer)
+        self.comma_dash_ids = _get_comma_dash_token_ids(tokenizer)
         self.blocked_mask = None
+        self.comma_dash_mask = None  # Look-ahead blocking mask for comma/dash tokens
         self._device = None
         self._prev_lens: List[int | None] = [None] * len(templates)
 
@@ -258,12 +305,15 @@ class ConformerConstraintLogitsProcessor(LogitsProcessor):
         # If no mask exists or the device has changed, build the mask.
         if self.blocked_mask is None or self._device != device:
             self.blocked_mask = _build_blocked_mask(self.blocked_ids, vocab_size, device)
+            self.comma_dash_mask = _build_blocked_mask(self.comma_dash_ids, vocab_size, device)
             # Move templates to correct device because;
             # - They are built on the CPU and we want to move them to the GPU.
             # - Indexing becomes GPU-local (torch tensor of booleans, etc).
             for template in self.templates:
                 template.ref_ids = template.ref_ids.to(device)
                 template.is_free = template.is_free.to(device)
+                if template.block_comma_dash is not None:
+                    template.block_comma_dash = template.block_comma_dash.to(device)
             self._device = device
 
         # Iterate through the batch and apply the constraints.
@@ -287,6 +337,10 @@ class ConformerConstraintLogitsProcessor(LogitsProcessor):
                 # FREE position - block only special tokens
                 # We are in a coordinate block, so we need to block all tokens that are not part of the coordinate block.
                 scores[b, self.blocked_mask] = float('-inf')
+                # Look-ahead blocking: if next position is COPY '>', also block comma/dash
+                # This prevents trailing punctuation patterns like `,>` or `->`
+                if template.block_comma_dash is not None and template.block_comma_dash[pos]:
+                    scores[b, self.comma_dash_mask] = float('-inf')
             else:
                 # COPY position - force exact token
                 # Core SMILES structure is preserved.
