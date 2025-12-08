@@ -20,6 +20,8 @@ from transformers import AutoTokenizer
 from molgen3D.config.paths import get_data_path, get_tokenizer_path
 from molgen3D.training.pretraining.dataprocessing.dataloader import build_dataloader
 
+SUMMARY_PATH = Path(__file__).resolve().parent / "qwen_data_summary.txt"
+
 
 def list_jsonl_files(directory: str) -> List[Path]:
     root = Path(directory)
@@ -145,6 +147,7 @@ def sample_dataloader(
 
         for idx in range(bsz):
             sample = inputs[idx]
+
             pad_count = 0
             for token in reversed(sample.tolist()):
                 if token == pad_id:
@@ -199,6 +202,82 @@ def verify_bytes(sample_bytes: Optional[int], sample_lines: int, total_lines: in
         "difference": diff,
         "difference_pct": diff_pct,
     }
+
+
+def _print_one_time_sample(
+    dataset_path: str,
+    tokenizer_aliases: List[str],
+    tokenizer_map: Dict[str, Tuple[str, AutoTokenizer]],
+    seq_len: int,
+    seed: int,
+    limit: int = 1000,
+) -> None:
+    """
+    After previews have run, load a single sample with a custom tokenizer and
+    print a decoded/encoded mapping (pads removed) once.
+    """
+    # Prefer the custom tokenizer if present, otherwise fall back to the first.
+    target_alias = "qwen3_0.6b_custom" if "qwen3_0.6b_custom" in tokenizer_aliases else tokenizer_aliases[0]
+    tok_path, tokenizer = tokenizer_map[target_alias]
+
+    files = list_jsonl_files(dataset_path)
+    if not files:
+        return
+    first_file = files[0]
+
+    loader = build_dataloader(
+        train_path=str(first_file),
+        tokenizer_path=tok_path,
+        tokenizer=tokenizer,
+        seq_len=seq_len,
+        batch_size=1,
+        num_workers=0,
+        pin_memory=False,
+        shuffle_lines=False,
+        infinite=False,
+        seed=seed,
+        min_emb_len=0,
+        drop_last=False,
+        persistent_workers=False,
+        world_size=1,
+        rank=0,
+    )
+
+    dataset = getattr(loader, "dataset", None)
+    if dataset is None:
+        return
+    _ensure_dataset_tokenizer(dataset)
+    pad_id = getattr(dataset, "pad_id", None)
+
+    for batch in loader:
+        inputs = _extract_inputs(batch)
+        sample = inputs[0]
+        token_ids = sample.tolist()
+        non_pad_ids = [tid for tid in token_ids if pad_id is None or tid != pad_id][:limit]
+        token_strs = tokenizer.convert_ids_to_tokens(non_pad_ids)
+        token_chars = [
+            tokenizer.convert_tokens_to_string([tok]) if tok is not None else ""
+            for tok in token_strs
+        ]
+        decoded = tokenizer.decode(non_pad_ids, skip_special_tokens=False)
+
+        lines: List[str] = []
+        lines.append("\nONE-TIME SAMPLE (post-previews, pads removed, limit 1000)")
+        lines.append(f"  tokenizer: {target_alias}")
+        lines.append(f"  file: {first_file}")
+        lines.append(f"  decoded: {decoded}")
+        lines.append("  index  id      token -> chars")
+        for i, (tid, tok, chars) in enumerate(zip(non_pad_ids, token_strs, token_chars)):
+            lines.append(f"  {i:04d}  {tid:>6}  {repr(tok):>20} -> {repr(chars)}")
+
+        # Print to stdout and append to summary file for later inspection.
+        print("\n".join(lines))
+        try:
+            with SUMMARY_PATH.open("a", encoding="utf-8") as fh:
+                fh.write("\n".join(lines) + "\n")
+        except Exception as exc:
+            print(f"Failed to write summary to {SUMMARY_PATH}: {exc}")
+        break
 
 
 def summarize_dataset(
@@ -315,6 +394,7 @@ def summarize_dataset(
             "estimated_pad": estimated_pad,
             "estimated_effective": estimated_effective,
             "verification": verification,
+        "tokenizer_path": tokenizer_path,
         }
 
     return dataset_summary
@@ -335,6 +415,9 @@ def print_train_report(summary: Optional[Dict[str, Any]]) -> None:
         if stats is None:
             print("    no samples collected")
             continue
+        tok_path = stats.get("tokenizer_path")
+        if tok_path:
+            print(f"    path: {tok_path}")
         print(
             "    estimates: units≈{estimated_valid_lines:,}, "
             "samples≈{estimated_samples:,}, tokens≈{estimated_tokens:,}, "
@@ -423,6 +506,7 @@ def exhaust_validation_dataset(
             "utilization": utilization,
             "pad_id": pad_id,
             "sep_id": sep_id,
+            "tokenizer_path": tokenizer_path,
         }
 
     return result
@@ -442,6 +526,9 @@ def print_validation_report(summary: Optional[Dict[str, Any]]) -> None:
         if stats.get("samples", 0) == 0:
             print("    no samples processed")
             continue
+        tok_path = stats.get("tokenizer_path")
+        if tok_path:
+            print(f"    path: {tok_path}")
         print(
             f"    samples={stats['samples']:,}, tokens={stats['token_count']:,}, "
             f"pad={stats['pad_count']:,}, effective={stats['effective_tokens']:,} "
@@ -495,6 +582,64 @@ def print_overall_summary(
                 f"tokens={stats['token_count']:,}, pad={stats['pad_count']:,}, "
                 f"effective={stats['effective_tokens']:,} ({stats['utilization']:.2f}%)"
             )
+
+
+def _write_summary_file(
+    train_summary: Optional[Dict[str, Any]],
+    validation_summary: Optional[Dict[str, Any]],
+    elapsed: float,
+) -> None:
+    """
+    Append the final summary to SUMMARY_PATH for offline inspection.
+    """
+    lines: list[str] = []
+    lines.append("\n" + "=" * 70)
+    lines.append("RUN SUMMARY (saved)")
+    lines.append("=" * 70)
+    lines.append(f"Total runtime: {elapsed:.2f}s")
+
+    if train_summary:
+        lines.append("\nTRAIN ESTIMATES OVERVIEW")
+        train_path = train_summary.get("path")
+        sample_file = train_summary.get("sample_file")
+        if train_path:
+            lines.append(f"  Dataset path: {train_path}")
+        if sample_file:
+            sample_path = f"{train_path}/{sample_file}" if train_path else sample_file
+            lines.append(f"  Sample file: {sample_path}")
+        lines.append(f"  Total lines: {train_summary.get('total_lines', 0):,}")
+        for alias, stats in (train_summary.get("tokenizers") or {}).items():
+            if not stats:
+                lines.append(f"  {alias}: no stats")
+                continue
+            lines.append(
+                f"  {alias}: units≈{stats['estimated_valid_lines']:,}, "
+                f"samples≈{stats['estimated_samples']:,}, "
+                f"tokens≈{stats['estimated_tokens']:,}, pad≈{stats['estimated_pad']:,}, "
+                f"effective≈{stats['estimated_effective']:,}"
+            )
+
+    if validation_summary:
+        lines.append("\nVALIDATION COUNTS OVERVIEW")
+        valid_path = validation_summary.get("path")
+        if valid_path:
+            lines.append(f"  Dataset path: {valid_path}")
+        lines.append(f"  Total lines: {validation_summary.get('total_lines', 0):,}")
+        for alias, stats in (validation_summary.get("tokenizers") or {}).items():
+            if stats.get("samples", 0) == 0:
+                lines.append(f"  {alias}: no samples processed")
+                continue
+            lines.append(
+                f"  {alias}: samples={stats['samples']:,}, "
+                f"tokens={stats['token_count']:,}, pad={stats['pad_count']:,}, "
+                f"effective={stats['effective_tokens']:,} ({stats['utilization']:.2f}%)"
+            )
+
+    try:
+        with SUMMARY_PATH.open("a", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+    except Exception as exc:
+        print(f"Failed to append final summary to {SUMMARY_PATH}: {exc}")
 
 
 def dump_json_summary(
@@ -575,9 +720,22 @@ def main() -> None:
     if not args.skip_validation:
         print_validation_report(validation_summary)
 
+    # After previews have been emitted by the above dataloader runs, print a single
+    # encoded/decoded mapping using the custom tokenizer.
+    if args.tokenizers:
+        _print_one_time_sample(
+            dataset_path=train_path,
+            tokenizer_aliases=args.tokenizers,
+            tokenizer_map=tokenizer_map,
+            seq_len=args.seq_len,
+            seed=args.seed,
+            limit=1000,
+        )
+
     elapsed = time.time() - start_time
     print_overall_summary(train_summary, validation_summary, elapsed)
     dump_json_summary(train_summary, validation_summary, elapsed)
+    _write_summary_file(train_summary, validation_summary, elapsed)
 
 
 if __name__ == "__main__":
