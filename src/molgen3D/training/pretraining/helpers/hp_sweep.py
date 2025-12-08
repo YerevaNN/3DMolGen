@@ -35,7 +35,16 @@ except ModuleNotFoundError as exc:  # pragma: no cover - explicit error
 LRS: list[float] = [1e-4, 2e-4, 3e-4, 4e-4]
 
 # Global batch sizes to try (TorchTitan interprets this as total across ranks).
-GLOBAL_BATCH_SIZES: list[int] = [96, 144, 192]
+GLOBAL_BATCH_SIZES: list[int] = [96, 144]
+
+# Training steps keyed by global batch size.
+TRAIN_STEPS_BY_GB: dict[int, int] = {
+    144: 1500,
+    96: 1000,
+}
+
+# Warmup steps for the scheduler.
+WARMUP_STEPS: int = 200
 
 # Base TOML to copy/override per run (relative to repo root or absolute).
 TRAIN_TOML: Path = Path("src/molgen3D/config/pretrain/qwen3_06b.toml")
@@ -85,7 +94,12 @@ def main() -> None:
             # Update optimizer.lr
             cfg.setdefault("optimizer", {})["lr"] = float(lr)
             # Update global batch size
-            cfg.setdefault("training", {})["global_batch_size"] = int(gb)
+            training_cfg = cfg.setdefault("training", {})
+            training_cfg["global_batch_size"] = int(gb)
+            if gb in TRAIN_STEPS_BY_GB:
+                training_cfg["steps"] = int(TRAIN_STEPS_BY_GB[gb])
+            # Update warmup steps for the scheduler
+            cfg.setdefault("wsds_scheduler", {})["warmup_steps"] = int(WARMUP_STEPS)
             desc = f"lr{lr}_gb{gb}"
             cfg.setdefault("job", {})["description"] = desc
 
