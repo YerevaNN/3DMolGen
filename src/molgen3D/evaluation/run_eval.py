@@ -183,14 +183,21 @@ def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
     t0 = time.time()
     # Process generated molecules and calculate total count
     processed_gen_data = rdkit_utils.process_molecules_remove_hs(gens_dict)
+
+    def _num_confs(value) -> int:
+        if isinstance(value, dict) and "confs" in value:
+            return len(value["confs"])
+        if isinstance(value, list):
+            return len(value)
+        return 0
     gen_stats = {
         "total_molecules_num": len(processed_gen_data),
-        "total_conformers_num": sum(len(confs) for confs in processed_gen_data.values()),
-        "gen_path": gens_path,
+        "total_conformers_num": sum(_num_confs(value) for value in processed_gen_data.values()),
+        "gen_path": gens_path,  
     }
     gt_stats = {
         "total_molecules_num": len(gt_dict),
-        "total_conformers_num": sum(len(confs) for confs in gt_dict.values()),
+        "total_conformers_num": sum(_num_confs(value) for value in gt_dict.values()),
         "gt_path": get_data_path(f"{args.test_set}_smi"),
     }
     
@@ -308,7 +315,7 @@ def main() -> None:
     parser.add_argument("--num-workers", type=int, default=10, help="Number of workers for evaluation")
     parser.add_argument("--max-recent", type=int, default=3, help="Max recent missing directories to evaluate")
     parser.add_argument("--specific-dir", type=str, default=None, help="Specific directory to evaluate")
-    parser.add_argument("--test_set", type=str, default="distinct", choices=["clean", "distinct", "xl"], help="Test set to evaluate")
+    parser.add_argument("--test_set", type=str, default="distinct", choices=["clean", "distinct", "xl", "qm9"], help="Test set to evaluate")
     args = parser.parse_args()
     
     run_directory_mode(args)

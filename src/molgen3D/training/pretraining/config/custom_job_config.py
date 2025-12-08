@@ -114,7 +114,6 @@ class MolGenRunConfig:
     base_model_tag: Optional[str] = "base_paths:qwen3_0.6b_base_model"
     resume_run_path_tag: Optional[str] = None
     run_name: Optional[str] = None
-    run_desc: Optional[str] = None
 
 
 @dataclass

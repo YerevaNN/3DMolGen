@@ -115,7 +115,6 @@ Or manually:
 ```bash
 torchrun --nproc_per_node=2 \
   -m molgen3D.training.pretraining.torchtitan_runner \
-  --run-desc "my_run" \
   --train-toml src/molgen3D/config/pretrain/qwen3_06b.toml
 ```
 

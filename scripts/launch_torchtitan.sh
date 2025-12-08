@@ -17,8 +17,6 @@ export WANDB_CONFIG=${WANDB_CONFIG:-'{"run_type": "pretrain"}'}
 export TORCH_COMPILE=0
 
 TRAIN_TOML=${TRAIN_TOML:-src/molgen3D/config/pretrain/qwen3_06b.toml}
-DEFAULT_RUN_DESC=$(basename "${TRAIN_TOML}" .toml)
-RUN_DESC=${RUN_DESC:-${DEFAULT_RUN_DESC}}
 
 MASTER_ADDR=${MASTER_ADDR:-$(hostname)}
 MASTER_PORT=${MASTER_PORT:-$(( (RANDOM % 20000) + 20000 ))}
@@ -38,5 +36,4 @@ exec torchrun \
     --nnodes="${NNODES}" \
     --node_rank="${NODE_RANK}" \
     -m molgen3D.training.pretraining.torchtitan_runner \
-    --run-desc "${RUN_DESC}" \
     --train-toml "${TRAIN_TOML}"

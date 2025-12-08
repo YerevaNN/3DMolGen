@@ -16,7 +16,7 @@ The TOML is split into logical sections. Fields marked **(recommended)** are goo
 
 ### `[job]`
 - `description` *(recommended)* – becomes part of the run name (`YYMMDD-HHMM-<hash>-description`). Use short, unique text so logs/checkpoints stay readable.
-- `dump_folder` *(recommended)* – alias under `paths.yaml.base_paths`. The final checkpoint folder is `<dump_folder>/<run-name>/checkpoint`.
+- `dump_folder` *(recommended)* – resolved relative to `paths.yaml.base_paths`. Logs live under `pretrain_logs_root/<run-name>`, checkpoints under `qwen_yerevann_root/qwen3_06b/<run-name>/checkpoint`, and wandb under `wandb_root/<run-name>`.
 - `print_config` *(optional)* – keep `true` to log the resolved config at startup.
 - `custom_config_module = "molgen3D.training.pretraining.config.custom_job_config"` **(required)** – wires in the MolGen-specific path resolver, WSDS scheduler helper, HF checkpoint patch, and dataloader defaults. Removing it reverts to upstream TorchTitan behavior.
 
@@ -29,7 +29,7 @@ This section controls initialization mode and tokenizer selection.
 - `tokenizer_tag` *(required)* – alias under `paths.yaml.tokenizers`. `tokenizers:qwen3_0.6b_custom` lives inside the repo, while `tokenizers:qwen3_0.6b_origin` points at the untouched HF snapshot.
 - `base_model_tag` *(required when `init_mode="hf_pretrain"`)* – alias under `paths.yaml.base_paths` for the official checkpoint (`qwen3_0.6b_base_model`).
 - `resume_run_path_tag` *(required when `init_mode="resume"`)* – alias pointing to the existing checkpoint directory (e.g. `ckpts:qwen3_06b/<run-name>`).
-- `run_name` *(optional)* – force a specific run name (used when resuming a run and you want logs/checkpoints to stay in the same directories).
+- `run_name` *(optional)* – force a specific run name (used when resuming a run and you want logs/checkpoints to stay in the same directories). If absent, the runner auto-generates `YYMMDD-HHMM-<4hex>-<description>` using `[job].description` to avoid collisions even when launchers don’t inject one.
 
 ### `[model]`
 - `name = "molgen_qwen3"`, `flavor = "0.6B"` *(required)* – selects the patched Titan train spec registered by `experimental.custom_import`.
@@ -71,8 +71,7 @@ Controls the custom warmup/stable/decay schedule.
 - `interval` *(recommended)* – 2 500 steps keeps a good balance between recovery granularity and disk usage.
 - `keep_latest_k` *(recommended)* – set to 3–4 to limit storage.
 - `folder = "checkpoint"` *(required)* – directory under `<run-name>` where Titan saves DCPs.
-- `initial_load_path`, `initial_load_model_only`, `initial_load_in_hf` *(see `[molgen_run]`)* – these fields are overwritten automatically by `launch_qwen3_pretrain` depending on `init_mode`.
-// NOTE: HF export per checkpoint is no longer supported in the MolGen Qwen3 integration.
+- `initial_load_path`, `initial_load_model_only`, `initial_load_in_hf` *(see `[molgen_run]`)* – these fields are overwritten automatically by `launch_qwen3_pretrain` depending on `init_mode`. HF export per checkpoint is disabled; `last_save_in_hf` is forced off by the runner.
 - `async_mode = "async"` *(optional)* – leave `async` for faster checkpointing; switch to `sync` when network contention causes issues.
 
 ### `[metrics]`
@@ -107,7 +106,7 @@ Controls how `JsonlTaggedPackedDataset` behaves.
 - `WANDB_RUN_NAME` – set this when resuming an existing run so logs, checkpoints, and WandB all use the same run folder.
 - `WANDB_PROJECT`, `WANDB_ENTITY`, `WANDB_GROUP` – can be exported in the launch script or per invocation. Defaults are set in `scripts/launch_torchtitan.sh`.
 - `WANDB_DIR` – automatically pointed at `wandb/<run-name>` by `launch_qwen3_pretrain`, but you can override it to stash offline runs elsewhere.
-- `RUN_DESC` (launch script) – environment variable forwarded to `--run-desc`; effectively a friendlier name for the run.
+- `JOB_DESCRIPTION` (launch script) – optional override for `[job].description`; defaults to the description found in the TOML.
 - `MASTER_PORT`, `NGPU_PER_NODE` – configurable via the launcher; necessary when running multiple jobs per node.
 - `export HF_DATASETS_OFFLINE=1` – optional for air‑gapped environments when you already copied tokenizer/model files locally.
 
@@ -116,10 +115,9 @@ Controls how `JsonlTaggedPackedDataset` behaves.
 ## 3. Control Flow & File Map
 
 1. **Launch script (`scripts/launch_torchtitan.sh`)**
-   - Sets Slurm/torchrun variables, defaults `TRAIN_TOML`, exports WandB metadata, and finally invokes:
+   - Sets Slurm/torchrun variables, defaults `TRAIN_TOML`, exports WandB metadata, and finally invokes `torchrun`. If the launcher does not inject `run_name`, the runner will generate a timestamp+hash name before training starts:
      ```bash
      torchrun ... -m molgen3D.training.pretraining.torchtitan_runner \
-       --run-desc "${RUN_DESC}" \
        --train-toml "${TRAIN_TOML}"
      ```
 
@@ -140,7 +138,7 @@ Controls how `JsonlTaggedPackedDataset` behaves.
    - Implements `JsonlTaggedPackedDataset` and the Titan-compatible wrapper `TitanStatefulDataLoader`, which streams `[SMILES]…[/SMILES][CONFORMER]…[/CONFORMER]` units and packs them into fixed-length sequences with <|endoftext|> separators.
 
 6. **Trainer (TorchTitan)**
-   - Standard Titan `Trainer` handles forward/backward, FSDP sharding, WSDS scheduler steps, logging, and checkpointing. Our patches ensure `molgen_run` initializations, tokenizer overrides, and HF exports integrate seamlessly.
+   - Standard Titan `Trainer` handles forward/backward, FSDP sharding, WSDS scheduler steps, logging, and checkpointing. The runner disables HF export per checkpoint while keeping HF initial-load support intact.
 
 ---
 
@@ -180,7 +178,7 @@ During training, TorchTitan flattens logits and labels, drops the `ignore_index`
 
 1. **Create or modify a TOML** by editing `src/molgen3D/config/pretrain/qwen3_06b.toml`. Choose `molgen_run.init_mode` (`scratch`, `hf_pretrain`, or `resume`) and adjust any hyperparameters or dataset aliases.
 2. **Launch** via `scripts/launch_torchtitan.sh` (or your own `torchrun` command). Ensure the correct environment variables (WandB, run name) are exported if you need deterministic folder naming.
-3. **Monitor** `outputs/pretrain_logs/<run-name>/runtime.log` for the startup banner and metrics, plus `wandb/<run-name>` for offline WandB files. Check `ckpts_root/qwen3_06b/<run-name>/checkpoint` for Titan DCPs and `_hf` folders when HF export is enabled.
+3. **Monitor** `outputs/pretrain_logs/<run-name>/runtime.log` for the startup banner and metrics, plus `wandb/<run-name>` for offline WandB files. Check `ckpts_root/qwen3_06b/<run-name>/checkpoint` for Titan DCPs. HF export is disabled by default in the runner; use the manual conversion utility if you need HF artifacts.
 4. **Resume** by reusing the run name, pointing `molgen_run.init_mode = "resume"` and `resume_run_path_tag` at the existing checkpoint directory, or leaving `init_mode = "scratch"` but exporting `WANDB_RUN_NAME=<existing>` if you just want Titan to pick up the latest checkpoint automatically.
 
 Refer to `tests/dataloader/` for executable invariants that prove label shifting, metric reductions, and distributed sharding all behave as described. Any change to the dataloader or runner should keep those tests green.

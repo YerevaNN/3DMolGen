@@ -25,6 +25,8 @@ wandb/
 wandb_runs/
 # tests/
 *.egg-info/
+build/
+dist/
 # Log files
 *.log
 *.csv

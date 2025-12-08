@@ -14,7 +14,6 @@ export WANDB_PROJECT="${WANDB_PROJECT:-3dmolgen}"
 export WANDB_GROUP="${WANDB_GROUP:-basic_test}"
 export WANDB_JOB_TYPE="${WANDB_JOB_TYPE:-test}"
 
-RUN_DESC="${RUN_DESC:-torchtitan-test}"
 TRAIN_TOML=${TRAIN_TOML:-src/molgen3D/config/pretrain/qwen3_06b_wsds.toml}
 MASTER_PORT=${MASTER_PORT:-$(( (RANDOM % 20000) + 20000 ))}
 MASTER_ADDR=${MASTER_ADDR:-$(hostname)}
@@ -27,5 +26,4 @@ exec torchrun \
     --nnodes=1 \
     --node_rank=0 \
     -m molgen3D.training.pretraining.torchtitan_runner \
-    --run-desc "${RUN_DESC}" \
     --train-toml "${TRAIN_TOML}"

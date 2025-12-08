@@ -85,9 +85,20 @@ def _load_full_dcp_state(step_dir: Path) -> Dict[str, torch.Tensor]:
     if not step_dir.exists():
         raise FileNotFoundError(f"DCP step directory does not exist: {step_dir}")
 
+    has_distcp = any(step_dir.glob("*.distcp"))
+    if not has_distcp:
+        raise FileNotFoundError(
+            f"No .distcp shards found under {step_dir}; not a valid DCP step directory."
+        )
+
     reader = dcp.FileSystemReader(str(step_dir))
-    metadata = reader.read_metadata()
+    try:
+        metadata = reader.read_metadata()
+    except Exception as exc:
+        raise RuntimeError(f"Failed to read DCP metadata: {exc}") from exc
     tmeta = metadata.state_dict_metadata  # type: ignore[assignment]
+    if not tmeta:
+        raise RuntimeError("DCP metadata is empty or corrupted; no tensors described.")
 
     state_dict: Dict[str, torch.Tensor] = {}
     skipped: list[tuple[str, str]] = []
@@ -195,24 +206,47 @@ def _resolve_expected_dtype(job_cfg: Dict) -> Tuple[str, Optional[torch.dtype]]:
     return dtype_str, dtype
 
 
-def _normalize_state_dict_dtype(
+def _dtype_rank(dt: torch.dtype) -> int:
+    """Order floating dtypes by fidelity for safe upcasting."""
+    if dt == torch.float16:
+        return 0
+    if dt == torch.bfloat16:
+        return 1
+    if dt == torch.float32:
+        return 2
+    # Default to highest rank for unknown/extended precisions to avoid downcast.
+    return 3
+
+
+def _harmonize_state_dict_dtype(
     state_dict: Dict[str, torch.Tensor],
     expected_dtype: Optional[torch.dtype],
 ) -> torch.dtype:
-    dtypes = {tensor.dtype for tensor in state_dict.values()}
-    if len(dtypes) == 1 and expected_dtype is None:
-        return next(iter(dtypes))
+    """
+    Harmonize floating tensor dtypes by only upcasting to the highest precision seen
+    (or the expected dtype if it is higher). Never downcasts to avoid fidelity loss.
+    """
+    float_dtypes = {t.dtype for t in state_dict.values() if t.is_floating_point()}
+    if not float_dtypes:
+        raise ValueError("Checkpoint contains no floating-point tensors to normalize.")
 
-    target_dtype = expected_dtype or next(iter(dtypes))
+    target_dtype = max(
+        float_dtypes.union({expected_dtype} if expected_dtype is not None else set()),
+        key=_dtype_rank,
+    )
 
     for name, tensor in list(state_dict.items()):
         if tensor.is_floating_point() and tensor.dtype != target_dtype:
             state_dict[name] = tensor.to(target_dtype)
 
-    remaining = {tensor.dtype for tensor in state_dict.values()}
+    remaining = {tensor.dtype for tensor in state_dict.values() if tensor.is_floating_point()}
     if len(remaining) != 1:
-        raise ValueError(
-            f"Inconsistent tensor dtypes after normalization: {remaining}"
+        raise ValueError(f"Inconsistent tensor dtypes after harmonization: {remaining}")
+
+    if expected_dtype is not None and target_dtype != expected_dtype:
+        print(
+            f"[WARN] Checkpoint dtype ({target_dtype}) differs from training config ({expected_dtype}); "
+            "using higher-precision target to avoid downcasting."
         )
     return target_dtype
 
@@ -351,6 +385,80 @@ def _sanity_compare_titan_and_hf_embeddings(
     print("[SUCCESS] HF and Titan embeddings are identical")
 
 
+def _sanity_compare_full_state(
+    hf_state_dict: Dict[str, torch.Tensor],
+    hf_model: Qwen3ForCausalLM,
+    *,
+    atol: float = 0.0,
+    rtol: float = 0.0,
+) -> None:
+    """
+    Ensure every tensor loaded into the HF model matches the converted HF state dict.
+    This guards against silent dtype truncation or shape mismatches across all layers.
+    """
+    model_state = hf_model.state_dict()
+    mismatches: list[str] = []
+    extra_model_keys = []
+    for key, src_tensor in hf_state_dict.items():
+        if key not in model_state:
+            raise ValueError(f"HF model missing tensor key after load: {key}")
+        tgt_tensor = model_state[key]
+        if src_tensor.shape != tgt_tensor.shape:
+            raise ValueError(f"Shape mismatch for {key}: src={src_tensor.shape}, tgt={tgt_tensor.shape}")
+        if src_tensor.dtype != tgt_tensor.dtype:
+            raise ValueError(f"Dtype mismatch for {key}: src={src_tensor.dtype}, tgt={tgt_tensor.dtype}")
+        if src_tensor.is_floating_point():
+            if not torch.allclose(src_tensor, tgt_tensor, atol=atol, rtol=rtol):
+                max_diff = (src_tensor - tgt_tensor).abs().max().item()
+                mismatches.append(f"{key} (max_diff={max_diff:.3e})")
+        else:
+            if not torch.equal(src_tensor, tgt_tensor):
+                mismatches.append(f"{key} (non-floating tensor differs)")
+
+    extra_model_keys = [k for k in model_state.keys() if k not in hf_state_dict]
+    if extra_model_keys:
+        raise ValueError(f"HF model has unexpected keys after load_state_dict: {extra_model_keys[:5]}")
+
+    if mismatches:
+        sample = mismatches[:3]
+        raise ValueError(
+            f"{len(mismatches)} tensor(s) differ after load_state_dict, e.g. {sample}"
+        )
+    print(f"[SUCCESS] Verified {len(hf_state_dict)} tensors match after load_state_dict")
+
+
+def _validate_config_matches_job_cfg(
+    config: Qwen3Config,
+    job_cfg: Dict,
+) -> None:
+    """Ensure the HF config matches the recorded training config (source of truth)."""
+    model_cfg = job_cfg.get("model", {})
+
+    def _expect(name: str, cfg_val: Optional[int], actual: Optional[int]) -> None:
+        if cfg_val is None or actual is None:
+            return
+        if int(cfg_val) != int(actual):
+            raise ValueError(f"Config mismatch for {name}: json={cfg_val}, model={actual}")
+
+    _expect("hidden_size", model_cfg.get("hidden_size"), getattr(config, "hidden_size", None))
+    _expect("intermediate_size", model_cfg.get("intermediate_size"), getattr(config, "intermediate_size", None))
+    _expect("num_hidden_layers", model_cfg.get("num_hidden_layers"), getattr(config, "num_hidden_layers", None))
+    _expect("num_attention_heads", model_cfg.get("num_attention_heads"), getattr(config, "num_attention_heads", None))
+
+    # Rope / positional settings
+    json_rope_theta = model_cfg.get("rope_theta")
+    cfg_rope_theta = getattr(config, "rope_theta", None) if hasattr(config, "rope_theta") else None
+    if json_rope_theta is not None and cfg_rope_theta is not None and float(json_rope_theta) != float(cfg_rope_theta):
+        raise ValueError(f"Config mismatch for rope_theta: json={json_rope_theta}, model={cfg_rope_theta}")
+
+    json_rope_scaling = model_cfg.get("rope_scaling")
+    cfg_rope_scaling = getattr(config, "rope_scaling", None) if hasattr(config, "rope_scaling") else None
+    if json_rope_scaling is not None and cfg_rope_scaling is not None and json_rope_scaling != cfg_rope_scaling:
+        raise ValueError(f"Config mismatch for rope_scaling: json={json_rope_scaling}, model={cfg_rope_scaling}")
+
+    print("[INFO] Validated HF config matches job_config.json (structure & rope settings)")
+
+
 def _tiny_forward_fidelity_check(
     titan_state: Dict[str, torch.Tensor],
     hf_model: Qwen3ForCausalLM,
@@ -418,6 +526,40 @@ def _tiny_forward_fidelity_check(
     print("[SUCCESS] Forward fidelity check passed")
 
 
+def _full_model_forward_check(
+    hf_model: Qwen3ForCausalLM,
+    *,
+    seq_len: int = 16,
+    batch_size: int = 2,
+    vocab_limit: int = 2048,
+) -> None:
+    """
+    Run a lightweight forward through the entire HF model to ensure all layers
+    produce finite logits. This is a structural fidelity check, not a perf test.
+    """
+    config_vocab = hf_model.config.vocab_size
+    vocab_limit = min(vocab_limit, config_vocab)
+    hf_model.eval()
+    input_ids = torch.randint(
+        low=0,
+        high=vocab_limit,
+        size=(batch_size, seq_len),
+        dtype=torch.long,
+        device="cpu",
+    )
+    with torch.no_grad():
+        outputs = hf_model(input_ids=input_ids, use_cache=False)
+    logits = outputs.logits
+    if not torch.isfinite(logits).all():
+        raise ValueError("Full-model forward produced non-finite logits.")
+    max_abs = logits.abs().max().item()
+    print(
+        f"[INFO] Full-model forward check: batch_size={batch_size}, seq_len={seq_len}, "
+        f"vocab_limit={vocab_limit}, max_abs_logit={max_abs:.2f}"
+    )
+    print("[SUCCESS] Full-model forward check passed")
+
+
 def _copy_tokenizer_assets(
     tokenizer_path: Optional[str],
     out_dir: Path,
@@ -470,8 +612,9 @@ def export_qwen3_dcp_step_to_hf(
     hf_assets_path: Path | str,
     *,
     expected_specs: Dict[str, Optional[object]],
-    expected_dtype: torch.dtype,
-    tokenizer_path: Optional[str],
+    expected_dtype: Optional[torch.dtype],
+    job_cfg: Optional[Dict] = None,
+    tokenizer=None,
     out_dir: Path | str | None = None,
 ) -> Path:
     """
@@ -499,11 +642,23 @@ def export_qwen3_dcp_step_to_hf(
     # Load and verify Titan checkpoint
     print("[INFO] Loading Titan checkpoint...")
     titan_state = _load_full_dcp_state(step_dir)
-    actual_dtype = _normalize_state_dict_dtype(titan_state, expected_dtype)
-    expected_dtype = actual_dtype
-    print(f"[INFO] Normalized Titan checkpoint dtype to {actual_dtype}")
+    target_dtype = _harmonize_state_dict_dtype(titan_state, expected_dtype)
+    print(f"[INFO] Harmonized Titan checkpoint dtype to {target_dtype}")
     titan_embed, titan_head, _, _ = _resolve_embed_and_head(titan_state)
     print(f"[INFO] Titan model: {titan_embed.shape[0]} vocab, {titan_embed.shape[1]} hidden dim")
+
+    if titan_embed.shape[0] != PADDED_VOCAB:
+        raise ValueError(
+            f"Embedding vocab {titan_embed.shape[0]} != expected PADDED_VOCAB {PADDED_VOCAB}"
+        )
+    if titan_embed.shape[0] < BASE_VOCAB + NUM_NEW_TOKENS:
+        raise ValueError(
+            "Embedding rows are insufficient for base + new tokens; invariants broken."
+        )
+    if titan_head.shape != titan_embed.shape:
+        raise ValueError(
+            f"LM head shape {tuple(titan_head.shape)} != embed shape {tuple(titan_embed.shape)}"
+        )
 
     base_vocab = int(expected_specs["base_vocab"])
     extra_tokens = int(expected_specs["new_tokens"])
@@ -524,25 +679,31 @@ def export_qwen3_dcp_step_to_hf(
         hf_assets_path,
         expected_padded_vocab=padded_vocab,
         expected_seq_len=seq_len,
-        target_dtype=expected_dtype,
+        target_dtype=target_dtype,
     )
+    if job_cfg is not None:
+        _validate_config_matches_job_cfg(hf_model.config, job_cfg)
     hf_state_dict = _map_titan_to_hf_state(titan_state, hf_model, hf_assets_path)
 
-    missing, unexpected = hf_model.load_state_dict(hf_state_dict, strict=False)
-    if missing:
-        raise ValueError(f"HF load_state_dict missing keys: {missing}")
-    if unexpected:
-        raise ValueError(f"HF load_state_dict unexpected keys: {unexpected}")
+    missing, unexpected = hf_model.load_state_dict(hf_state_dict, strict=True)
+    if missing or unexpected:
+        raise ValueError(f"HF load_state_dict issues; missing={missing}, unexpected={unexpected}")
+
+    # Enforce weight tying after load in case adapter didn't tie
+    hf_model.lm_head.weight = hf_model.model.embed_tokens.weight
+    if hf_model.lm_head.weight.data_ptr() != hf_model.model.embed_tokens.weight.data_ptr():
+        raise ValueError("HF LM head is not tied to embedding weights after load.")
 
     # Verify conversion
     print("[INFO] Verifying conversion quality...")
+    _sanity_compare_full_state(hf_state_dict, hf_model)
     _sanity_compare_titan_and_hf_embeddings(titan_state, hf_model)
     _tiny_forward_fidelity_check(titan_state, hf_model)
+    _full_model_forward_check(hf_model)
 
     # Save result
     print(f"[INFO] Saving HF checkpoint to {out_dir}")
-    hf_model.save_pretrained(out_dir)
-    _copy_tokenizer_assets(tokenizer_path, out_dir)
+    hf_model.save_pretrained(out_dir, safe_serialization=True)
     print(f"[SUCCESS] Converted {step_dir.name} ({len(titan_state)} tensors, {titan_embed.shape[0]} vocab) -> {out_dir.name}")
     print(f"[INFO] Verified: embeddings tied, finite weights, forward fidelity")
     return out_dir
@@ -641,8 +802,8 @@ def main(cfg: DcpToHfConfig) -> None:
                 hf_base,
                 out_dir=None,
                 expected_specs=run_metadata,
-                expected_dtype=dtype or torch.float32,
-                tokenizer_path=run_metadata.get("tokenizer_path"),
+                expected_dtype=dtype,
+                job_cfg=job_cfg,
             )
         except Exception as exc:
             print(f"[ERROR] Failed to convert {step_dir.name}: {_format_exception(exc)}")

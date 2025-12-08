@@ -1,13 +1,12 @@
 [job]
-description = "qwen3_06b_pre_20k_step_144effb"
+description = "qwen3_06b_pre_4e_108effb"
 dump_folder = "pretrain_runs"
 print_config = true
 custom_config_module = "molgen3D.training.pretraining.config.custom_job_config"
 
 [molgen_run]
 init_mode = "hf_pretrain" # scratch | hf_pretrain | resume
-# tokenizer_tag = "tokenizers:qwen3_0.6b_custom"
-run_desc = "qwen3_06b_pre_20k_step_144effb_v3data"
+tokenizer_tag = "tokenizers:qwen3_0.6b_custom"
 base_model_tag = "base_paths:qwen3_0.6b_base_model"
 # resume_run_path_tag = "ckpts:qwen3_0.6b_previous_run"
 
@@ -34,7 +33,7 @@ dataset_path = "data:conformers_train"
 enable = true
 dataset = "molgen_jsonl"
 dataset_path = "data:conformers_valid"
-local_batch_size = 8
+local_batch_size = 6
 seq_len = 2048
 freq = 500
 steps = 200
@@ -55,7 +54,7 @@ lookahead_limit = 100
 
 [optimizer]
 name = "AdamW"
-lr = 1e-4
+lr = 2e-4
 beta1 = 0.9
 beta2 = 0.95
 eps = 1e-8
@@ -68,7 +67,7 @@ weight_decay = 0.1
 [wsds_scheduler]
 enable = true
 warmup_steps = 500
-checkpoints = [20000]
+checkpoints = [20000, 40000, 60000, 80000]
 lr_min = 0
 decay_frac = 0.1
 

@@ -8,6 +8,7 @@ extrapolates totals for the whole split, and verifies the extrapolation using fi
 """
 
 import argparse
+import json
 import math
 import random
 import time
@@ -18,6 +19,8 @@ from transformers import AutoTokenizer
 
 from molgen3D.config.paths import get_data_path, get_tokenizer_path
 from molgen3D.training.pretraining.dataprocessing.dataloader import build_dataloader
+
+SUMMARY_PATH = Path(__file__).resolve().parent / "qwen_data_summary.txt"
 
 
 def list_jsonl_files(directory: str) -> List[Path]:
@@ -53,17 +56,21 @@ def _extract_inputs(batch):
     return inputs["input"] if isinstance(inputs, dict) else inputs
 
 
-def count_lines_and_bytes(files: List[Path]) -> Tuple[int, int]:
+def count_lines_and_bytes(files: List[Path]) -> Tuple[int, int, List[Dict[str, Any]]]:
     total_lines = 0
     total_bytes = 0
+    file_stats: List[Dict[str, Any]] = []
     for file in files:
         try:
             with file.open("rb") as fh:
-                total_lines += sum(1 for _ in fh)
-            total_bytes += file.stat().st_size
+                line_count = sum(1 for _ in fh)
+            byte_count = file.stat().st_size
+            total_lines += line_count
+            total_bytes += byte_count
+            file_stats.append({"path": str(file), "lines": line_count, "bytes": byte_count})
         except OSError:
             continue
-    return total_lines, total_bytes
+    return total_lines, total_bytes, file_stats
 
 
 def bytes_for_lines(file_path: Path, lines: int) -> Optional[int]:
@@ -86,7 +93,7 @@ def sample_dataloader(
     tokenizer_path: str,
     tokenizer,
     seq_len: int,
-    max_items: int,
+    target_lines: int,
     batch_size: int,
     shuffle: bool,
     seed: int,
@@ -140,6 +147,7 @@ def sample_dataloader(
 
         for idx in range(bsz):
             sample = inputs[idx]
+
             pad_count = 0
             for token in reversed(sample.tolist()):
                 if token == pad_id:
@@ -154,9 +162,9 @@ def sample_dataloader(
             pad_total += pad_count
             samples += 1
 
-            if items >= max_items:
+            if items >= target_lines:
                 break
-        if items >= max_items:
+        if items >= target_lines:
             break
 
     if samples == 0:
@@ -168,6 +176,7 @@ def sample_dataloader(
     effective_tokens = tokens_produced - pad_total
 
     return {
+        "lines_target": float(target_lines),
         "lines_consumed": float(items),
         "samples": float(samples),
         "batches": float(batches),
@@ -175,6 +184,8 @@ def sample_dataloader(
         "effective_tokens": float(effective_tokens),
         "avg_pad_per_sample": float(avg_pad_per_sample),
         "avg_items_per_sample": float(avg_items_per_sample),
+        "pad_id": float(pad_id),
+        "sep_id": float(sep_id),
     }
 
 
@@ -193,6 +204,82 @@ def verify_bytes(sample_bytes: Optional[int], sample_lines: int, total_lines: in
     }
 
 
+def _print_one_time_sample(
+    dataset_path: str,
+    tokenizer_aliases: List[str],
+    tokenizer_map: Dict[str, Tuple[str, AutoTokenizer]],
+    seq_len: int,
+    seed: int,
+    limit: int = 1000,
+) -> None:
+    """
+    After previews have run, load a single sample with a custom tokenizer and
+    print a decoded/encoded mapping (pads removed) once.
+    """
+    # Prefer the custom tokenizer if present, otherwise fall back to the first.
+    target_alias = "qwen3_0.6b_custom" if "qwen3_0.6b_custom" in tokenizer_aliases else tokenizer_aliases[0]
+    tok_path, tokenizer = tokenizer_map[target_alias]
+
+    files = list_jsonl_files(dataset_path)
+    if not files:
+        return
+    first_file = files[0]
+
+    loader = build_dataloader(
+        train_path=str(first_file),
+        tokenizer_path=tok_path,
+        tokenizer=tokenizer,
+        seq_len=seq_len,
+        batch_size=1,
+        num_workers=0,
+        pin_memory=False,
+        shuffle_lines=False,
+        infinite=False,
+        seed=seed,
+        min_emb_len=0,
+        drop_last=False,
+        persistent_workers=False,
+        world_size=1,
+        rank=0,
+    )
+
+    dataset = getattr(loader, "dataset", None)
+    if dataset is None:
+        return
+    _ensure_dataset_tokenizer(dataset)
+    pad_id = getattr(dataset, "pad_id", None)
+
+    for batch in loader:
+        inputs = _extract_inputs(batch)
+        sample = inputs[0]
+        token_ids = sample.tolist()
+        non_pad_ids = [tid for tid in token_ids if pad_id is None or tid != pad_id][:limit]
+        token_strs = tokenizer.convert_ids_to_tokens(non_pad_ids)
+        token_chars = [
+            tokenizer.convert_tokens_to_string([tok]) if tok is not None else ""
+            for tok in token_strs
+        ]
+        decoded = tokenizer.decode(non_pad_ids, skip_special_tokens=False)
+
+        lines: List[str] = []
+        lines.append("\nONE-TIME SAMPLE (post-previews, pads removed, limit 1000)")
+        lines.append(f"  tokenizer: {target_alias}")
+        lines.append(f"  file: {first_file}")
+        lines.append(f"  decoded: {decoded}")
+        lines.append("  index  id      token -> chars")
+        for i, (tid, tok, chars) in enumerate(zip(non_pad_ids, token_strs, token_chars)):
+            lines.append(f"  {i:04d}  {tid:>6}  {repr(tok):>20} -> {repr(chars)}")
+
+        # Print to stdout and append to summary file for later inspection.
+        print("\n".join(lines))
+        try:
+            with SUMMARY_PATH.open("a", encoding="utf-8") as fh:
+                fh.write("\n".join(lines) + "\n")
+        except Exception as exc:
+            print(f"Failed to write summary to {SUMMARY_PATH}: {exc}")
+        break
+
+
 def summarize_dataset(
     name: str,
     directory: str,
@@ -208,65 +295,106 @@ def summarize_dataset(
     if not files:
         return None
 
-    total_lines, total_bytes = count_lines_and_bytes(files)
-    chosen_file = random.choice(files)
-    with chosen_file.open("rb") as fh:
-        file_line_count = sum(1 for _ in fh)
-    target_lines = min(sample_lines, file_line_count)
+    total_lines, total_bytes, file_stats = count_lines_and_bytes(files)
 
     dataset_summary: Dict[str, Any] = {
         "name": name,
         "path": directory,
         "total_lines": total_lines,
         "total_bytes": total_bytes,
-        "sample_file": chosen_file.name,
-        "sample_file_lines": file_line_count,
-        "target_lines": target_lines,
         "tokenizers": {},
     }
 
     for alias in tokenizer_aliases:
         tokenizer_path, tokenizer = tokenizer_map[alias]
-        stats = sample_dataloader(
-            chosen_file,
-            tokenizer_path,
-            tokenizer,
-            seq_len,
-            max_items=target_lines,
-            batch_size=batch_size,
-            shuffle=shuffle,
-            seed=seed,
-        )
-        if not stats:
+        sum_samples = 0.0
+        sum_items = 0.0
+        sum_pad = 0.0
+        sum_batches = 0.0
+        sum_tokens_produced = 0.0
+        sum_effective = 0.0
+        sum_target_lines = 0.0
+        sum_sample_bytes = 0.0
+
+        for file_path in files:
+            file_line_count = next((f["lines"] for f in file_stats if f["path"] == str(file_path)), None)
+            if file_line_count is None:
+                try:
+                    with file_path.open("rb") as fh:
+                        file_line_count = sum(1 for _ in fh)
+                except OSError:
+                    continue
+            target_lines = min(sample_lines, file_line_count)
+
+            stats = sample_dataloader(
+                file_path,
+                tokenizer_path,
+                tokenizer,
+                seq_len,
+                target_lines=target_lines,
+                batch_size=batch_size,
+                shuffle=shuffle,
+                seed=seed,
+            )
+            if not stats:
+                continue
+
+            sum_samples += stats["samples"]
+            sum_items += stats["lines_consumed"]
+            sum_pad += stats["avg_pad_per_sample"] * stats["samples"]
+            sum_batches += stats["batches"]
+            sum_tokens_produced += stats["tokens_produced"]
+            sum_effective += stats["effective_tokens"]
+            sum_target_lines += stats["lines_target"]
+
+            sample_bytes = bytes_for_lines(file_path, int(target_lines))
+            if sample_bytes:
+                sum_sample_bytes += sample_bytes
+
+        if sum_samples == 0 or sum_target_lines == 0:
             dataset_summary["tokenizers"][alias] = None
             continue
 
-        avg_items = stats["avg_items_per_sample"]
-        estimated_samples = int(total_lines / avg_items) if avg_items else 0
+        avg_items_per_sample = sum_items / sum_samples
+        avg_pad_per_sample = sum_pad / sum_samples
+        valid_ratio = sum_items / sum_target_lines  # fraction of sampled lines that produced usable items
+
+        estimated_valid_lines = total_lines * valid_ratio
+        estimated_samples = int(estimated_valid_lines / avg_items_per_sample) if avg_items_per_sample else 0
         estimated_batches = math.ceil(estimated_samples / batch_size) if batch_size else 0
         estimated_tokens = estimated_samples * seq_len
-        estimated_pad = int(stats["avg_pad_per_sample"] * estimated_samples)
+        estimated_pad = int(avg_pad_per_sample * estimated_samples)
         estimated_effective = estimated_tokens - estimated_pad
 
-        sample_bytes = bytes_for_lines(chosen_file, target_lines)
-        verification = verify_bytes(sample_bytes, target_lines, total_lines, total_bytes)
+        # Byte-size sanity check: scale sampled bytes to total lines.
+        verification = verify_bytes(
+            sum_sample_bytes if sum_sample_bytes else None,
+            int(sum_target_lines),
+            total_lines,
+            total_bytes,
+        )
 
         dataset_summary["tokenizers"][alias] = {
             "batch_size": batch_size,
             "seq_len": seq_len,
-            "lines_target": target_lines,
-            "lines_consumed": int(stats["lines_consumed"]),
-            "batches": int(stats["batches"]),
-            "tokens_produced": int(stats["tokens_produced"]),
-            "effective_tokens": int(stats["effective_tokens"]),
-            "avg_items_per_sample": stats["avg_items_per_sample"],
-            "avg_pad_per_sample": stats["avg_pad_per_sample"],
+            "sampled_files": len(files),
+            "lines_target_total": int(sum_target_lines),
+            "lines_consumed_total": int(sum_items),
+            "sample_bytes_total": int(sum_sample_bytes),
+            "batches_sampled": int(sum_batches),
+            "tokens_produced_sampled": int(sum_tokens_produced),
+            "effective_tokens_sampled": int(sum_effective),
+            "avg_items_per_sample": float(avg_items_per_sample),
+            "avg_pad_per_sample": float(avg_pad_per_sample),
+            "valid_ratio": float(valid_ratio),
+            "estimated_valid_lines": int(estimated_valid_lines),
             "estimated_samples": estimated_samples,
             "estimated_batches": estimated_batches,
             "estimated_tokens": estimated_tokens,
             "estimated_pad": estimated_pad,
             "estimated_effective": estimated_effective,
             "verification": verification,
+        "tokenizer_path": tokenizer_path,
         }
 
     return dataset_summary
@@ -280,33 +408,27 @@ def print_train_report(summary: Optional[Dict[str, Any]]) -> None:
     name = summary.get("name", "dataset").upper()
     print(f"\n{name} DATASET")
     print(f"  path: {summary.get('path')}")
-    print(f"  sample source: {summary.get('sample_file')} ({summary.get('sample_file_lines', 0)} lines)")
-    print(f"  total lines: {summary.get('total_lines', 0):,}, total bytes: {summary.get('total_bytes', 0):,}")
+    print(f"  total lines: {summary.get('total_lines', 0):,}")
 
     for alias, stats in (summary.get("tokenizers") or {}).items():
         print(f"\n  Tokenizer: {alias}")
         if stats is None:
             print("    no samples collected")
             continue
-        verification = stats.get("verification")
-        print(f"    batch_size: {stats.get('batch_size')}, seq_len: {stats.get('seq_len')}")
-        print(f"    sampled lines target: {stats.get('lines_target', 0):,}, consumed: {stats.get('lines_consumed', 0):,}")
-        print(f"    dataloader batches: {stats.get('batches', 0):,}")
-        print(f"    tokens produced: {stats.get('tokens_produced', 0):,}, effective: {stats.get('effective_tokens', 0):,}")
-        print(f"    avg items/sample: {stats.get('avg_items_per_sample', 0):.2f}, avg pad/sample: {stats.get('avg_pad_per_sample', 0):.2f}")
-        print(f"    estimated total samples: {stats.get('estimated_samples', 0):,}, batches: {stats.get('estimated_batches', 0):,}")
-        print(f"    estimated tokens: {stats.get('estimated_tokens', 0):,}, pad tokens: {stats.get('estimated_pad', 0):,}, effective: {stats.get('estimated_effective', 0):,}")
-        if verification:
-            expected_bytes = int(round(verification["expected_bytes"]))
-            actual_bytes = int(round(verification["actual_bytes"]))
-            diff = int(round(verification["difference"]))
-            diff_pct = verification["difference_pct"]
-            print(
-                f"    verification: expected bytes {expected_bytes:,}, "
-                f"actual {actual_bytes:,}, diff {diff:,} ({diff_pct:.2f}%)"
+        tok_path = stats.get("tokenizer_path")
+        if tok_path:
+            print(f"    path: {tok_path}")
+        print(
+            "    estimates: units≈{estimated_valid_lines:,}, "
+            "samples≈{estimated_samples:,}, tokens≈{estimated_tokens:,}, "
+            "pad≈{estimated_pad:,}, effective≈{estimated_effective:,}".format(
+                estimated_valid_lines=stats.get("estimated_valid_lines", 0),
+                estimated_samples=stats.get("estimated_samples", 0),
+                estimated_tokens=stats.get("estimated_tokens", 0),
+                estimated_pad=stats.get("estimated_pad", 0),
+                estimated_effective=stats.get("estimated_effective", 0),
             )
-        else:
-            print("    verification: insufficient byte data")
+        )
 
 
 def exhaust_validation_dataset(
@@ -321,7 +443,7 @@ def exhaust_validation_dataset(
     if not files:
         return None
 
-    total_lines, total_bytes = count_lines_and_bytes(files)
+    total_lines, total_bytes, _ = count_lines_and_bytes(files)
     result: Dict[str, Any] = {
         "path": directory,
         "total_lines": total_lines,
@@ -356,7 +478,6 @@ def exhaust_validation_dataset(
         _ensure_dataset_tokenizer(dataset)
         pad_id = getattr(dataset, "pad_id", None)
         sep_id = getattr(dataset, "sep_id", None)
-        first_sample_text = None
         sample_count = 0
         batch_count = 0
         token_count = 0
@@ -366,11 +487,6 @@ def exhaust_validation_dataset(
             input_ids = _extract_inputs(batch)
             if input_ids.numel() == 0:
                 continue
-            if first_sample_text is None:
-                try:
-                    first_sample_text = tokenizer.decode(input_ids[0].tolist(), skip_special_tokens=False)
-                except Exception:
-                    first_sample_text = "<decode_error>"
 
             batch_count += 1
             sample_count += input_ids.size(0)
@@ -388,9 +504,9 @@ def exhaust_validation_dataset(
             "pad_count": pad_total,
             "effective_tokens": effective_tokens,
             "utilization": utilization,
-            "first_sample_text": first_sample_text,
             "pad_id": pad_id,
             "sep_id": sep_id,
+            "tokenizer_path": tokenizer_path,
         }
 
     return result
@@ -403,19 +519,21 @@ def print_validation_report(summary: Optional[Dict[str, Any]]) -> None:
 
     print("\nVALIDATION DATASET")
     print(f"  path: {summary['path']}")
-    print(f"  total lines: {summary['total_lines']:,}, total bytes: {summary['total_bytes']:,}")
+    print(f"  total lines: {summary.get('total_lines', 0):,}")
 
     for alias, stats in summary.get("tokenizers", {}).items():
         print(f"\n  Tokenizer: {alias}")
         if stats.get("samples", 0) == 0:
             print("    no samples processed")
             continue
-        print(f"    samples: {stats['samples']:,}")
-        print(f"    tokens: {stats['token_count']:,}, pad tokens: {stats['pad_count']:,}")
-        print(f"    effective tokens: {stats['effective_tokens']:,} ({stats['utilization']:.2f}% utilization)")
-        print(f"    pad/sep id: {stats.get('pad_id')} / {stats.get('sep_id')}")
-        if stats.get("first_sample_text"):
-            print(f"    decoded first sample: {stats['first_sample_text']!r}")
+        tok_path = stats.get("tokenizer_path")
+        if tok_path:
+            print(f"    path: {tok_path}")
+        print(
+            f"    samples={stats['samples']:,}, tokens={stats['token_count']:,}, "
+            f"pad={stats['pad_count']:,}, effective={stats['effective_tokens']:,} "
+            f"({stats['utilization']:.2f}% util)"
+        )
 
 
 def print_overall_summary(
@@ -430,20 +548,31 @@ def print_overall_summary(
 
     if train_summary:
         print("\nTRAIN ESTIMATES OVERVIEW")
-        print(f"  Dataset: {train_summary.get('path')} | Lines: {train_summary.get('total_lines'):,}")
+        train_path = train_summary.get("path")
+        sample_file = train_summary.get("sample_file")
+        if train_path:
+            print(f"  Dataset path: {train_path}")
+        if sample_file:
+            sample_path = f"{train_path}/{sample_file}" if train_path else sample_file
+            print(f"  Sample file: {sample_path}")
+        print(f"  Total lines: {train_summary.get('total_lines', 0):,}")
         for alias, stats in (train_summary.get("tokenizers") or {}).items():
             if not stats:
                 print(f"  {alias}: no stats")
                 continue
             print(
-                f"  {alias}: est. samples={stats['estimated_samples']:,}, "
-                f"est. tokens={stats['estimated_tokens']:,}, pad={stats['estimated_pad']:,}, "
-                f"effective={stats['estimated_effective']:,}"
+                f"  {alias}: units≈{stats['estimated_valid_lines']:,}, "
+                f"samples≈{stats['estimated_samples']:,}, "
+                f"tokens≈{stats['estimated_tokens']:,}, pad≈{stats['estimated_pad']:,}, "
+                f"effective≈{stats['estimated_effective']:,}"
             )
 
     if validation_summary:
         print("\nVALIDATION COUNTS OVERVIEW")
-        print(f"  Dataset: {validation_summary.get('path')} | Lines: {validation_summary.get('total_lines'):,}")
+        valid_path = validation_summary.get("path")
+        if valid_path:
+            print(f"  Dataset path: {valid_path}")
+        print(f"  Total lines: {validation_summary.get('total_lines', 0):,}")
         for alias, stats in (validation_summary.get("tokenizers") or {}).items():
             if stats.get("samples", 0) == 0:
                 print(f"  {alias}: no samples processed")
@@ -453,6 +582,86 @@ def print_overall_summary(
                 f"tokens={stats['token_count']:,}, pad={stats['pad_count']:,}, "
                 f"effective={stats['effective_tokens']:,} ({stats['utilization']:.2f}%)"
             )
+
+
+def _write_summary_file(
+    train_summary: Optional[Dict[str, Any]],
+    validation_summary: Optional[Dict[str, Any]],
+    elapsed: float,
+) -> None:
+    """
+    Append the final summary to SUMMARY_PATH for offline inspection.
+    """
+    lines: list[str] = []
+    lines.append("\n" + "=" * 70)
+    lines.append("RUN SUMMARY (saved)")
+    lines.append("=" * 70)
+    lines.append(f"Total runtime: {elapsed:.2f}s")
+
+    if train_summary:
+        lines.append("\nTRAIN ESTIMATES OVERVIEW")
+        train_path = train_summary.get("path")
+        sample_file = train_summary.get("sample_file")
+        if train_path:
+            lines.append(f"  Dataset path: {train_path}")
+        if sample_file:
+            sample_path = f"{train_path}/{sample_file}" if train_path else sample_file
+            lines.append(f"  Sample file: {sample_path}")
+        lines.append(f"  Total lines: {train_summary.get('total_lines', 0):,}")
+        for alias, stats in (train_summary.get("tokenizers") or {}).items():
+            if not stats:
+                lines.append(f"  {alias}: no stats")
+                continue
+            lines.append(
+                f"  {alias}: units≈{stats['estimated_valid_lines']:,}, "
+                f"samples≈{stats['estimated_samples']:,}, "
+                f"tokens≈{stats['estimated_tokens']:,}, pad≈{stats['estimated_pad']:,}, "
+                f"effective≈{stats['estimated_effective']:,}"
+            )
+
+    if validation_summary:
+        lines.append("\nVALIDATION COUNTS OVERVIEW")
+        valid_path = validation_summary.get("path")
+        if valid_path:
+            lines.append(f"  Dataset path: {valid_path}")
+        lines.append(f"  Total lines: {validation_summary.get('total_lines', 0):,}")
+        for alias, stats in (validation_summary.get("tokenizers") or {}).items():
+            if stats.get("samples", 0) == 0:
+                lines.append(f"  {alias}: no samples processed")
+                continue
+            lines.append(
+                f"  {alias}: samples={stats['samples']:,}, "
+                f"tokens={stats['token_count']:,}, pad={stats['pad_count']:,}, "
+                f"effective={stats['effective_tokens']:,} ({stats['utilization']:.2f}%)"
+            )
+
+    try:
+        with SUMMARY_PATH.open("a", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+    except Exception as exc:
+        print(f"Failed to append final summary to {SUMMARY_PATH}: {exc}")
+
+
+def dump_json_summary(
+    train_summary: Optional[Dict[str, Any]],
+    validation_summary: Optional[Dict[str, Any]],
+    elapsed: float,
+) -> None:
+    """
+    Emit a machine-readable summary so callers can parse results without scraping stdout.
+    """
+    payload = {
+        "train": train_summary,
+        "validation": validation_summary,
+        "elapsed_seconds": elapsed,
+    }
+    try:
+        print("\nJSON_SUMMARY_START")
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        print("JSON_SUMMARY_END")
+    except Exception:
+        # Fallback: avoid crashing the script if serialization fails on unexpected fields.
+        pass
 
 
 def main() -> None:
@@ -511,8 +720,22 @@ def main() -> None:
     if not args.skip_validation:
         print_validation_report(validation_summary)
 
+    # After previews have been emitted by the above dataloader runs, print a single
+    # encoded/decoded mapping using the custom tokenizer.
+    if args.tokenizers:
+        _print_one_time_sample(
+            dataset_path=train_path,
+            tokenizer_aliases=args.tokenizers,
+            tokenizer_map=tokenizer_map,
+            seq_len=args.seq_len,
+            seed=args.seed,
+            limit=1000,
+        )
+
     elapsed = time.time() - start_time
     print_overall_summary(train_summary, validation_summary, elapsed)
+    dump_json_summary(train_summary, validation_summary, elapsed)
+    _write_summary_file(train_summary, validation_summary, elapsed)
 
 
 if __name__ == "__main__":
