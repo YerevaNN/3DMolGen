@@ -35,12 +35,13 @@ except ModuleNotFoundError as exc:  # pragma: no cover - explicit error
 LRS: list[float] = [1e-4, 2e-4, 3e-4, 4e-4]
 
 # Global batch sizes to try (TorchTitan interprets this as total across ranks).
-GLOBAL_BATCH_SIZES: list[int] = [96, 144]
+GLOBAL_BATCH_SIZES: list[int] = [96, 144, 192]
 
 # Training steps keyed by global batch size.
 TRAIN_STEPS_BY_GB: dict[int, int] = {
-    144: 1500,
-    96: 1000,
+    192: 1000,
+    144: 1300,
+    96: 2000,
 }
 
 # Warmup steps for the scheduler.
