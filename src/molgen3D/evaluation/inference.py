@@ -22,10 +22,8 @@ from molgen3D.evaluation.utils import extract_between, same_molecular_graph
 from molgen3D.config.paths import get_ckpt, get_tokenizer_path, get_data_path, get_base_path
 from molgen3D.config.sampling_config import sampling_configs, gen_num_codes
 
-torch.backends.cudnn.benchmark = True
+torch.backends.cudnn.benchmark = False
 
-
-tag_pattern = re.compile(r'<[^>]*>')
 
 def set_seed(seed=42):
     random.seed(seed)  # Python random module
@@ -37,7 +35,7 @@ def set_seed(seed=42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def load_model_tokenizer(model_path, tokenizer_path, torch_dtype="bfloat16", attention_imp="flash_attention_2", device="auto"):
+def load_model_tokenizer(model_path, tokenizer_path, torch_dtype="bfloat16", attention_imp="sdpa", device="auto"):
     tokenizer  = AutoTokenizer.from_pretrained(str(tokenizer_path), padding_side='left', local_files_only=True)
     model = AutoModelForCausalLM.from_pretrained(str(model_path),
                                                  torch_dtype=getattr(torch, torch_dtype),
@@ -127,7 +125,7 @@ def run_inference(inference_config: dict):
                                             device=inference_config["device"])
     logger.info(f"model loaded: {model.dtype=}, {model.device=}")
     
-    eos_token_id = tokenizer.encode("[/CONFORMER]")[0]
+    eos_token_id = tokenizer.encode("[/CONFORMER]", add_special_tokens=False)
     with open(inference_config["test_data_path"],'rb') as test_data_file:
         test_data = cloudpickle.load(test_data_file)
 
@@ -208,20 +206,21 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
     # Base configuration template
     base_inference_config = {
         "model_path": get_ckpt("m380_conf_v2","2e"),
-        "tokenizer_path": get_tokenizer_path("llama3_chem_v1"),
+        "tokenizer_path": get_tokenizer_path("qwen3_0.6b_custom"),
         "torch_dtype": "bfloat16",
-        "batch_size": 400,
+        "batch_size": 128,
         "num_gens": gen_num_codes["2k_per_conf"],
         "gen_config": sampling_configs["top_p_sampling1"],
         "device": "cuda",
         "results_path": get_base_path("gen_results_root"),
-        "run_name": "new_data_p1",
+        "run_name": "qwen_pre",
         "limit": limit,
     }
 
     if grid_run_inference:
         param_grid = {
-            "model_path": [("m380_conf_v2", "4e")],
+            # "model_path": [("m380_conf_v2", "4e")],
+            "model_path": [("m600_qwen", "1e"), ("m600_qwen", "2e")],
             # "model_path": [("m380_conf_v2", "1e")],
         }
         jobs = []
