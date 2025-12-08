@@ -219,7 +219,7 @@
       "special": false
     },
     "151670": {
-      "content": "[CONFORMERS]",
+      "content": "[CONFORMER]",
       "lstrip": false,
       "normalized": true,
       "rstrip": false,
@@ -235,7 +235,7 @@
       "special": false
     },
     "151672": {
-      "content": "[/CONFORMERS]",
+      "content": "[/CONFORMER]",
       "lstrip": false,
       "normalized": true,
       "rstrip": false,
