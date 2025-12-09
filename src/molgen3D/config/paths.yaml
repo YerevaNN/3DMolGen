@@ -14,6 +14,7 @@ base_paths:
   pretrain_logs_root: "outputs/pretrain_logs"
   wandb_root: "wandb_runs"
   qwen3_0.6b_base_model: "/nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b/Qwen3-0.6B-Base"
+  tokenizers_root: "src/molgen3D/training/tokenizers"
 
 data:
   clean_smi: "clean_smi.pickle"
@@ -47,12 +48,12 @@ tokenizers:
 models:
   # ---------- BASE MODELS ----------
   m600_qwen:
-    root: "qwen3_06b/251207-1653-7d74-qwen3_06b_pre_80kst_4e_144effb"
+    root: "qwen3_06b/251208-1746-61f0-qwen3_06b_pre_4e_108effb"
     steps:
       "1e": "step-20000-hf"
       "2e": "step-40000-hf"
       "3e": "step-60000-hf"
-      "4e": "step-80000-hf"
+      # "4e": "step-80000-hf"
     
   m380_conf:
     root: "Llama-3.2-380M_conformers"
