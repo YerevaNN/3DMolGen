@@ -220,9 +220,12 @@ def sanity_check_embeddings(embed: torch.Tensor, head: torch.Tensor) -> None:
         num_zero = int((norms == 0).sum().item())
         min_norm = float(norms.min().item())
         max_norm = float(norms.max().item())
+        mean_norm = float(norms.mean().item())
+        std_norm = float(norms.std(unbiased=False).item())
         print(
             f"{name}: rows={num_rows}, zero-rows={num_zero}, "
-            f"min_norm={min_norm:.3e}, max_norm={max_norm:.3e}"
+            f"min_norm={min_norm:.3e}, max_norm={max_norm:.3e}, "
+            f"mean_norm={mean_norm:.3e}, std_norm={std_norm:.3e}"
         )
 
     summarize_block("Base block   ", base_norms)
