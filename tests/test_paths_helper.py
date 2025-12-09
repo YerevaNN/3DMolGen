@@ -86,7 +86,7 @@ def test_pretrain_dump_path_accepts_absolute():
     assert get_pretrain_dump_path(absolute) == absolute
 
 
-@pytest.mark.parametrize("name", ["llama3_chem_v1", "qwen3_0.6b_conf_v1"])
+@pytest.mark.parametrize("name", ["llama3_chem_v1", "qwen3_0.6b_custom", "qwen3_0.6b_origin"])
 def test_tokenizer_paths_exist(name):
     tok_path = get_tokenizer_path(name)
     assert_exists(tok_path)
@@ -218,3 +218,29 @@ def test_resolve_tag_invalid_section():
     """Test that resolve_tag raises KeyError for invalid section."""
     with pytest.raises(KeyError, match="Unsupported tag section"):
         resolve_tag("invalid_section:some_key")
+
+
+def test_get_base_path_all_keys_absolute():
+    """Every base_paths entry should resolve to an absolute Path."""
+    paths_cfg = load_paths_yaml()
+    for key in paths_cfg.get("base_paths", {}):
+        p = get_base_path(key)
+        assert isinstance(p, Path)
+        assert p.is_absolute()
+
+
+@pytest.mark.parametrize(
+    "data_key",
+    [
+        k
+        for k, v in load_paths_yaml().get("data", {}).items()
+        if isinstance(v, (str, Path))
+    ],
+)
+def test_get_data_path_all_keys(data_key):
+    """All data keys should resolve; existence is best-effort (skip if missing)."""
+    p = get_data_path(data_key)
+    assert isinstance(p, Path)
+    if not p.exists():
+        pytest.skip(f"Data path missing on this system: {p}")
+    assert p.exists()
