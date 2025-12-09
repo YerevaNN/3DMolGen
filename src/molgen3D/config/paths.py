@@ -8,11 +8,17 @@ import copy
 import yaml
 
 
-# Root of the installed molgen3D package (…/src/molgen3D)
-PKG_ROOT = Path(pkg_resources.files("molgen3D"))
-
-# Repository root: parent of src/ (one level above molgen3D)
-REPO_ROOT = PKG_ROOT.parent
+_ENV_REPO_ROOT = os.environ.get("MOLGEN3D_REPO_ROOT")
+_CANDIDATE_ROOT = (
+    Path(_ENV_REPO_ROOT).expanduser().resolve()
+    if _ENV_REPO_ROOT
+    else Path(__file__).resolve().parents[3]
+)
+if not (_CANDIDATE_ROOT / "src" / "molgen3D").exists():
+    cwd = Path.cwd().resolve()
+    if (cwd / "src" / "molgen3D").exists():
+        _CANDIDATE_ROOT = cwd
+REPO_ROOT = _CANDIDATE_ROOT
 
 # Keys that should use geom_data_root instead of data_root
 GEOM_DATA_KEYS = {
@@ -113,14 +119,7 @@ def get_tokenizer_path(name: str) -> Path:
     tokenizers = _get_config_section("tokenizers")
     if name not in tokenizers:
         raise KeyError(f"Unknown tokenizer '{name}', available: {sorted(tokenizers.keys())}")
-    tok_rel = Path(tokenizers[name])
-    if tok_rel.is_absolute():
-        return tok_rel
-
-    base_paths = _get_config_section("base_paths")
-    # Always start from the molgen3D package root unless overridden
-    tok_root = base_paths.get("tokenizers_root") or (PKG_ROOT / "training" / "tokenizers")
-    return (Path(tok_root) if Path(tok_root).is_absolute() else REPO_ROOT / tok_root) / tok_rel
+    return _to_absolute_path(tokenizers[name])
 
 
 def get_base_path(key: str) -> Path:
