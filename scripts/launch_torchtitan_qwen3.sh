@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=torchtitan-qwen3
 #SBATCH --cpus-per-task=96
-#SBATCH --partition=a100
+#SBATCH --partition=h100
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:6
 #SBATCH --mem=200G
