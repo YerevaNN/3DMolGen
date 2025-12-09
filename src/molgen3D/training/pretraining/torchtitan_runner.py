@@ -207,6 +207,23 @@ def _load_tokenizer_details(tokenizer_path: Path) -> TokenizerDetails:
         )
     padded_vocab = QWEN3_PADDED_VOCAB
 
+    # Lightweight sanity log: encode/decode a marker to ensure tokenizer is healthy.
+    if _is_log_rank():
+        try:
+            sample1 = "[SMILES][CONFORMER][/SMILES][/CONFORMER]"
+            sample2 = [151669, 151670, 151671, 151672]
+            encoded = tokenizer.encode(sample1, add_special_tokens=False)
+            decoded = tokenizer.decode(sample2, skip_special_tokens=False)
+            logger.warning(  # warning to make sure it surfaces in logs
+                "TOKENIZER_CHECK: sample1='%s' -> ids=%s -> sample2=%s -> decoded='%s'",
+                sample1,
+                encoded,
+                sample2,
+                decoded,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Tokenizer sanity check failed: %s", exc)
+
     return TokenizerDetails(
         path=tokenizer_path,
         vocab_size=vocab_size,
@@ -276,6 +293,20 @@ def _normalize_job_config_paths(job_config) -> None:
     if job_config.model.hf_assets_path:
         job_config.model.hf_assets_path = str(
             _resolve_tag_or_path(job_config.model.hf_assets_path)
+        )
+
+    # Resolve tokenizer references so config.json contains absolute paths.
+    if getattr(job_config.model, "tokenizer_override", None):
+        job_config.model.tokenizer_override = str(
+            _resolve_tag_or_path(job_config.model.tokenizer_override)
+        )
+    tok_cfg = getattr(job_config, "tokenizer", None)
+    if tok_cfg is not None and getattr(tok_cfg, "path", None):
+        tok_cfg.path = str(_resolve_tag_or_path(tok_cfg.path))
+    data_cfg = getattr(job_config, "molgen_data", None)
+    if data_cfg is not None and getattr(data_cfg, "tokenizer_override", None):
+        data_cfg.tokenizer_override = str(
+            _resolve_tag_or_path(data_cfg.tokenizer_override)
         )
 
     dataset_path = getattr(job_config.training, "dataset_path", None)
