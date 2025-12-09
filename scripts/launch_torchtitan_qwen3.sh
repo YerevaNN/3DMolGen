@@ -15,6 +15,7 @@ export WANDB_GROUP=${WANDB_GROUP:-pretrain}
 export WANDB_JOB_TYPE=${WANDB_JOB_TYPE:-pretrain}
 export WANDB_CONFIG=${WANDB_CONFIG:-'{"run_type": "pretrain"}'}
 export TORCH_COMPILE=${TORCH_COMPILE:-0}
+export TOKENIZERS_PARALLELISM=${TOKENIZERS_PARALLELISM:-false}
 
 TRAIN_TOML=${TRAIN_TOML:-src/molgen3D/config/pretrain/qwen3_06b.toml}
 
