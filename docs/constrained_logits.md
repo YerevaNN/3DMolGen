@@ -353,14 +353,17 @@ python scripts/logit_processor/run_logit_processor_smoke.py \
   --json-report outputs/smoke/v2_precompute_simple_v2.json
 ```
 
-### Distinct dataset
+### Distinct dataset - qwen
 ```bash
 python scripts/logit_processor/run_logit_processor_smoke.py \
   --dataset distinct \
-  --sample-size 1000 \
-  --batch-size 128 \
+  --sample-size 256 \
+  --batch-size 64 \
   --sampling-config top_p_sampling4 \
-  --json-report outputs/smoke/v2_precompute_simple_v2_distinct.json
+  --model-alias m600_qwen \
+  --model-step 1e \
+  --tokenizer-name qwen3_0.6b_custom \
+  --json-report outputs/smoke/v_2_1_new_strip_distinct_sample_qwen.json
 ```
 
 ### small sample of clean
@@ -393,6 +396,32 @@ python scripts/logit_processor/run_logit_processor_smoke.py \
   --sampling-config top_p_sampling4 \
   --json-report outputs/smoke/v2_precompute_simple_v2_distinct_top_p_sampling4.json
 ```
+
+### small sample, attn mechanism change
+```bash
+python scripts/logit_processor/run_logit_processor_smoke.py \
+  --dataset clean \
+  --sample-size 32 \
+  --batch-size 16 \
+  --sampling-config greedy \
+  --attention flash_attention_2 \
+  --json-report outputs/smoke/v2_precompute_simple_v2_small.json
+```
+
+### static kv cache
+```bash
+python scripts/logit_processor/run_logit_processor_smoke.py \
+    --sample-size 1000 \
+    --batch-size 96 \
+    --sampling-config top_p_sampling4 \
+    --kv-cache static \
+    --model-alias llama3_chem_v1 \
+    --model-step 2e \
+    --tokenizer-name llama3_chem_v1 \
+    --json-report outputs/smoke/static_cache_test_static.json
+```
+
+
 
 ## Edge Cases with Non-Greedy Sampling
 

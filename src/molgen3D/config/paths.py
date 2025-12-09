@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from functools import lru_cache
-import os
 from pathlib import Path
 import importlib.resources as pkg_resources
 import copy
@@ -11,8 +10,8 @@ import yaml
 # Root of the installed molgen3D package (…/src/molgen3D)
 PKG_ROOT = Path(pkg_resources.files("molgen3D"))
 
-# Repository root: parent of src/ (one level above molgen3D)
-REPO_ROOT = PKG_ROOT.parent
+# Repository root: parent of src/ (two levels above molgen3D)
+REPO_ROOT = PKG_ROOT.parent.parent
 
 # Keys that should use geom_data_root instead of data_root
 GEOM_DATA_KEYS = {
@@ -66,12 +65,12 @@ def load_paths_yaml() -> dict:
 def get_ckpt(alias: str, key: str | None = None) -> Path:
     """
     Get the path to a checkpoint for a given model alias and step key.
-    
+
     Args:
         alias: Model alias from the config
         key: Step key (e.g., "1e", "final"). If None, uses "final" if available,
              otherwise the last step alphabetically.
-    
+
     Returns:
         Absolute path to the checkpoint directory
     """
@@ -103,10 +102,10 @@ def get_ckpt(alias: str, key: str | None = None) -> Path:
 def get_tokenizer_path(name: str) -> Path:
     """
     Get the path to a tokenizer by name.
-    
+
     Args:
         name: Tokenizer name from the config
-    
+
     Returns:
         Absolute path to the tokenizer directory
     """
@@ -116,20 +115,24 @@ def get_tokenizer_path(name: str) -> Path:
     tok_rel = Path(tokenizers[name])
     if tok_rel.is_absolute():
         return tok_rel
+    # If the config already contains a repo-relative path (e.g., src/molgen3D/…), use it directly.
+    if tok_rel.parts[:2] == ("src", "molgen3D"):
+        return REPO_ROOT / tok_rel
 
     base_paths = _get_config_section("base_paths")
     # Always start from the molgen3D package root unless overridden
     tok_root = base_paths.get("tokenizers_root") or (PKG_ROOT / "training" / "tokenizers")
-    return (Path(tok_root) if Path(tok_root).is_absolute() else REPO_ROOT / tok_root) / tok_rel
+    tok_root_path = Path(tok_root) if Path(tok_root).is_absolute() else REPO_ROOT / tok_root
+    return tok_root_path / tok_rel
 
 
 def get_base_path(key: str) -> Path:
     """
     Get a base path by key.
-    
+
     Args:
         key: Base path key from the config
-    
+
     Returns:
         Absolute path
     """
@@ -142,17 +145,17 @@ def get_base_path(key: str) -> Path:
 def get_data_path(key: str) -> Path:
     """
     Get a data path by key.
-    
+
     Args:
         key: Data path key from the config
-    
+
     Returns:
         Absolute path to the data file or directory
     """
     data_cfg = _get_config_section("data")
     if key not in data_cfg:
         raise KeyError(f"Unknown data path '{key}', available: {sorted(data_cfg.keys())}")
-    
+
     rel = Path(data_cfg[key])
     if rel.is_absolute():
         return rel
@@ -169,11 +172,11 @@ def get_data_path(key: str) -> Path:
 def get_root_path(base_key: str, folder: str | Path) -> Path:
     """
     Return the path under the provided base key for the given folder.
-    
+
     Args:
         base_key: Base path key from the config
         folder: Folder name or path (if absolute, returned as-is)
-    
+
     Returns:
         Absolute path
     """
@@ -188,11 +191,11 @@ def get_root_path(base_key: str, folder: str | Path) -> Path:
 def get_pretrain_dump_path(folder: str | Path, *, base_key: str = "pretrain_results_root") -> Path:
     """
     Return the path under `base_key` for the provided dump folder.
-    
+
     Args:
         folder: Folder name or path
         base_key: Base path key (default: "pretrain_results_root")
-    
+
     Returns:
         Absolute path
     """
@@ -202,10 +205,10 @@ def get_pretrain_dump_path(folder: str | Path, *, base_key: str = "pretrain_resu
 def get_pretrain_logs_path(folder: str | Path) -> Path:
     """
     Get the path for pretraining logs.
-    
+
     Args:
         folder: Folder name or path
-    
+
     Returns:
         Absolute path
     """
@@ -215,10 +218,10 @@ def get_pretrain_logs_path(folder: str | Path) -> Path:
 def get_wandb_path(folder: str | Path) -> Path:
     """
     Get the path for wandb logs.
-    
+
     Args:
         folder: Folder name or path
-    
+
     Returns:
         Absolute path
     """
@@ -228,13 +231,13 @@ def get_wandb_path(folder: str | Path) -> Path:
 def resolve_tag(tag: str) -> Path:
     """
     Resolve a structured tag like "base_paths:ckpts_root" into an absolute path.
-    
+
     Supported sections: base_paths, data, tokenizers.
     If no colon is present, treats the tag as a direct path.
-    
+
     Args:
         tag: Tag string in format "section:key" or a direct path
-    
+
     Returns:
         Absolute path
     """
