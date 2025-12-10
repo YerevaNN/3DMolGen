@@ -1,5 +1,5 @@
 [job]
-description = "qwen3_06b_pre_4e_108effb"
+description = "qwen3_06b_pre_4e_144effb"
 # description = "qwen3_06b_hf_test_run"
 dump_folder = "pretrain_runs"
 print_config = true
@@ -22,7 +22,7 @@ custom_import = "molgen3D.training.pretraining.torchtitan_model.qwen3_custom"
 [training]
 seq_len = 2048
 local_batch_size = 12
-global_batch_size =144
+global_batch_size = 144
 steps = 10000
 max_norm = 1.0
 dtype = "bfloat16"
@@ -74,7 +74,7 @@ decay_frac = 0.1
 
 [checkpoint]
 enable = true
-interval = 10000
+interval = 1000
 keep_latest_k = 4
 folder = "checkpoint"
 create_seed_checkpoint = false
