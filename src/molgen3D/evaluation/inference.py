@@ -40,7 +40,7 @@ def set_seed(seed=42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def load_model_tokenizer(model_path, tokenizer_path, torch_dtype="bfloat16", attention_imp="sdpa", device="auto"):
+def load_model_tokenizer(model_path, tokenizer_path, torch_dtype="bfloat16", attention_imp="flash_attention_2", device="auto"):
     tokenizer  = AutoTokenizer.from_pretrained(str(tokenizer_path), padding_side='left', local_files_only=True)
     model = AutoModelForCausalLM.from_pretrained(str(model_path),
                                                  torch_dtype=getattr(torch, torch_dtype),
@@ -148,7 +148,8 @@ def run_inference(inference_config: dict):
                                             device=inference_config["device"])
     logger.info(f"model loaded: {model.dtype=}, {model.device=}")
     
-    eos_token_id = tokenizer.encode("[/CONFORMER]", add_special_tokens=False)
+    # eos_token_id = tokenizer.encode("[/CONFORMER]", add_special_tokens=False)
+    eos_token_id = tokenizer.encode("<|endoftext|>", add_special_tokens=False)
     with open(inference_config["test_data_path"],'rb') as test_data_file:
         test_data = cloudpickle.load(test_data_file)
 
@@ -248,7 +249,7 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
     if grid_run_inference:
         param_grid = {
             # "model_path": [("m380_conf_v2", "4e")],
-            "model_path": [("m600_qwen", "1e"), ("m600_qwen", "2e")],
+            "model_path": [("m600_qwen", "3e"), ("m600_qwen", "1e"), ("m600_qwen", "2e")],
             # "model_path": [("m380_conf_v2", "1e")],
         }
         jobs = []
