@@ -7,7 +7,10 @@ import random
 from pathlib import Path
 from typing import BinaryIO, Dict, Iterator, List, Optional, Sequence, Tuple, Union
 
+import cloudpickle
+import numpy as np
 import torch
+import torch.distributed as dist
 from collections import defaultdict, deque
 from loguru import logger
 from torch.utils.data import IterableDataset, get_worker_info
@@ -35,6 +38,8 @@ from molgen3D.training.pretraining.config.custom_job_config import (
     JobConfig as MolGenJobConfig,
     MolGenDataConfig,
 )
+from molgen3D.data_processing.utils import decode_cartesian_raw
+from molgen3D.evaluation.utils import extract_between
 from molgen3D.training.pretraining.dataprocessing.sequence_packing import (
     PendingUnit,
     SequenceState,
@@ -48,11 +53,24 @@ from molgen3D.training.pretraining.dataprocessing.utils import (
     expand_paths,
     read_line_at,
 )
+from molgen3D.utils.utils import get_best_rmsd
 
 try:  # optional faster JSON parser
     import orjson as _fast_json
 except Exception:  # pragma: no cover
     _fast_json = None
+
+NUM_NUMERICAL_VALIDATION_PROMPTS = 200
+PRETOKENIZED_PROMPTS_PATH = Path("/auto/home/vover/3DMolGen/data/pretokenized_prompts.json")
+VALIDATION_PICKLE_PATH = Path("/auto/home/vover/3DMolGen/data/valid_set.pickle")
+
+
+def _is_primary_rank() -> bool:
+    """
+    Return True only for the primary logging rank to avoid duplicated work.
+    """
+
+    return (not dist.is_available()) or (not dist.is_initialized()) or dist.get_rank() == 0
 
 
 def _json_loads(raw: str):
@@ -702,6 +720,7 @@ if Validator is not None:
             pp_has_last_stage=None,
         ):
             self.job_config = job_config
+            self.tokenizer = tokenizer
             self.parallel_dims = parallel_dims
             self.loss_fn = loss_fn
             self.validation_dataloader = validation_dataloader
@@ -711,12 +730,289 @@ if Validator is not None:
             self.pp_schedule = pp_schedule
             self.pp_has_first_stage = pp_has_first_stage
             self.pp_has_last_stage = pp_has_last_stage
+            self._conformer_start_id = self._resolve_token_id("[CONFORMERS]", "[CONFORMER]")
+            self._conformer_end_id = self._resolve_token_id(
+                "[/CONFORMERS]", "[/CONFORMER]"
+            )
+            self._eos_id = _resolve_special_token_id(
+                tokenizer,
+                "eos_id",
+                (
+                    getattr(tokenizer, "eos_token", None),
+                    "<|endoftext|>",
+                ),
+            )
+            self._pad_id = _resolve_special_token_id(
+                tokenizer,
+                "pad_id",
+                (
+                    getattr(tokenizer, "pad_token", None),
+                    "<|endoftext|>",
+                ),
+            )
 
             if self.job_config.validation.steps == -1 and titan_logger is not None:
                 titan_logger.warning(
                     "Setting validation steps to -1 might cause hangs because of "
                     "unequal sample counts across ranks when dataset is exhausted."
                 )
+
+        def _resolve_token_id(self, *tokens: str) -> Optional[int]:
+            for token in tokens:
+                if not token:
+                    continue
+                token_id = self.tokenizer.convert_tokens_to_ids(token)
+                if isinstance(token_id, int) and token_id >= 0:
+                    return int(token_id)
+            return None
+
+        def _build_prompt_tensor(
+            self, token_ids: Sequence[Union[int, float]], device: torch.device
+        ) -> Optional[torch.Tensor]:
+            ids: List[int] = []
+            for tid in token_ids:
+                try:
+                    ids.append(int(tid))
+                except (TypeError, ValueError):
+                    continue
+
+            if self._conformer_start_id is None:
+                logger.warning(
+                    "Skipping numerical validation because conformer start token is missing."
+                )
+                return None
+
+            ids.append(self._conformer_start_id)
+            return torch.tensor(ids, device=device, dtype=torch.long).unsqueeze(0)
+
+        def _greedy_decode(
+            self,
+            model: torch.nn.Module,
+            prompt: torch.Tensor,
+            max_new_tokens: int,
+            max_total_len: int,
+        ) -> torch.Tensor:
+            generated = prompt
+            for _ in range(max_new_tokens):
+                logits = model(generated)
+                next_token = torch.argmax(logits[:, -1, :], dim=-1)
+                generated = torch.cat([generated, next_token.unsqueeze(-1)], dim=-1)
+
+                token_id = int(next_token.item())
+                if self._conformer_end_id is not None and token_id == self._conformer_end_id:
+                    break
+                if self._eos_id is not None and token_id == self._eos_id:
+                    break
+                if generated.shape[1] >= max_total_len:
+                    break
+            return generated
+
+        def _extract_conformer_text(self, token_tensor: torch.Tensor) -> str:
+            decoded = self.tokenizer.decode(
+                token_tensor[0].tolist(), skip_special_tokens=False
+            )
+            conformer = extract_between(decoded, "[CONFORMERS]", "[/CONFORMERS]")
+            if not conformer:
+                conformer = extract_between(decoded, "[CONFORMER]", "[/CONFORMER]")
+            return conformer.strip()
+
+        def _best_rmsd(self, generated_mol, ground_truths: Sequence) -> float:
+            rmsds: List[float] = []
+            for gt in ground_truths:
+                try:
+                    rmsds.append(float(get_best_rmsd(generated_mol, gt, use_alignmol=False)))
+                except Exception:
+                    rmsds.append(float("nan"))
+            if not rmsds:
+                return float("nan")
+            return float(np.nanmin(rmsds))
+
+        def _load_prompts(self) -> List[Tuple[str, List[int]]]:
+            if not PRETOKENIZED_PROMPTS_PATH.exists():
+                logger.warning(
+                    f"Numerical validation prompts file not found at {PRETOKENIZED_PROMPTS_PATH}"
+                )
+                return []
+            try:
+                with open(PRETOKENIZED_PROMPTS_PATH, "r") as fh:
+                    payload = json.load(fh)
+            except Exception as exc:  # pragma: no cover - runtime safety
+                logger.warning(
+                    f"Failed to load pretokenized prompts from {PRETOKENIZED_PROMPTS_PATH}: {exc}"
+                )
+                return []
+
+            if not isinstance(payload, dict):
+                logger.warning(
+                    f"Pretokenized prompts should be a dict of SMILES->token list, got {type(payload)}"
+                )
+                return []
+
+            items = sorted(payload.items(), key=lambda kv: kv[0])[
+                :NUM_NUMERICAL_VALIDATION_PROMPTS
+            ]
+            normalized: List[Tuple[str, List[int]]] = []
+            for key, value in items:
+                if isinstance(value, list):
+                    try:
+                        normalized.append((key, [int(v) for v in value]))
+                    except Exception:
+                        normalized.append((key, []))
+                else:
+                    normalized.append((key, []))
+            return normalized
+
+        def _load_ground_truths(self) -> Dict[str, List]:
+            if not VALIDATION_PICKLE_PATH.exists():
+                logger.warning(
+                    f"Ground truth conformers not found at {VALIDATION_PICKLE_PATH}"
+                )
+                return {}
+            try:
+                with open(VALIDATION_PICKLE_PATH, "rb") as fh:
+                    data = cloudpickle.load(fh)
+            except Exception as exc:  # pragma: no cover - runtime safety
+                logger.warning(
+                    f"Failed to load ground truth conformers from {VALIDATION_PICKLE_PATH}: {exc}"
+                )
+                return {}
+
+            if not isinstance(data, dict):
+                logger.warning(
+                    f"Expected dict[str, list[Mol]] in {VALIDATION_PICKLE_PATH}, got {type(data)}"
+                )
+                return {}
+            return data
+
+        def _log_numerical_metrics(
+            self, rmsd_values: List[float], failures: int, step: int
+        ) -> None:
+            valid = np.array(rmsd_values, dtype=float)
+            valid = valid[~np.isnan(valid)]
+            metrics: Dict[str, float] = {
+                "numerical_val/failures": float(failures),
+                "numerical_val/successes": float(valid.size),
+            }
+            if valid.size > 0:
+                metrics.update(
+                    {
+                        "numerical_val/rmsd_min": float(np.nanmin(valid)),
+                        "numerical_val/rmsd_max": float(np.nanmax(valid)),
+                        "numerical_val/rmsd_mean": float(np.nanmean(valid)),
+                        "numerical_val/rmsd_std": float(np.nanstd(valid)),
+                    }
+                )
+
+            successes = int(metrics.get("numerical_val/successes", 0))
+            suffix = (
+                f" | rmsd min={metrics.get('numerical_val/rmsd_min', float('nan')):.4f}"
+                f" mean={metrics.get('numerical_val/rmsd_mean', float('nan')):.4f}"
+                f" std={metrics.get('numerical_val/rmsd_std', float('nan')):.4f}"
+                f" max={metrics.get('numerical_val/rmsd_max', float('nan')):.4f}"
+                if valid.size > 0
+                else ""
+            )
+            logger.info(
+                f"Numerical validation (step {step}): successes={successes} failures={failures}{suffix}"
+            )
+
+            try:  # best effort W&B logging
+                import wandb  # type: ignore
+
+                if wandb.run is not None:
+                    wandb.log(metrics, step=step)
+            except ModuleNotFoundError:
+                logger.info("W&B not installed; skipping numerical validation logging.")
+            except Exception as exc:  # pragma: no cover - runtime safety
+                logger.warning(f"Failed to log numerical metrics to W&B: {exc}")
+
+        def _run_numerical_validation(
+            self, model_parts: List[torch.nn.Module], step: int
+        ) -> None:
+            if not getattr(self.job_config.validation, "numerical_validation", False):
+                return
+            if not _is_primary_rank():
+                return
+            if self.parallel_dims.pp_enabled or len(model_parts) != 1:
+                logger.warning(
+                    "Numerical validation currently supports single-stage models; skipping."
+                )
+                return
+            if self._conformer_start_id is None or self._conformer_end_id is None:
+                logger.warning(
+                    "Conformer tokens missing from tokenizer; numerical validation skipped."
+                )
+                return
+
+            prompts = self._load_prompts()
+            ground_truths = self._load_ground_truths()
+            if not prompts or not ground_truths:
+                return
+
+            model = model_parts[0]
+            device = next(model.parameters()).device
+            max_seq_len = int(
+                getattr(self.job_config.validation, "seq_len", 2048)
+                or getattr(self.job_config.training, "seq_len", 2048)
+                or 2048
+            )
+
+            rmsd_values: List[float] = []
+            failures = 0
+            was_training = model.training
+            model.eval()
+
+            with torch.inference_mode():
+                for key, token_ids in prompts:
+                    gt_confs = ground_truths.get(key)
+                    if not gt_confs:
+                        failures += 1
+                        continue
+
+                    prompt_tensor = self._build_prompt_tensor(token_ids, device)
+                    if prompt_tensor is None:
+                        failures += 1
+                        continue
+
+                    available = max(max_seq_len - prompt_tensor.shape[1], 1)
+                    max_new_tokens = min(512, available)
+
+                    generated_ids = self._greedy_decode(
+                        model, prompt_tensor, max_new_tokens, max_seq_len
+                    )
+                    conformer_text = self._extract_conformer_text(generated_ids)
+                    if not conformer_text:
+                        failures += 1
+                        continue
+
+                    try:
+                        generated_mol = decode_cartesian_raw(conformer_text)
+                    except Exception:
+                        failures += 1
+                        continue
+
+                    rmsd_val = self._best_rmsd(generated_mol, gt_confs)
+                    if np.isnan(rmsd_val):
+                        failures += 1
+                    else:
+                        rmsd_values.append(rmsd_val)
+
+            if was_training:
+                model.train()
+
+            self._log_numerical_metrics(rmsd_values, failures, step)
+
+        @torch.no_grad()
+        def validate(
+            self,
+            model_parts: list[torch.nn.Module],
+            step: int,
+        ) -> None:
+            super().validate(model_parts, step)
+            try:
+                self._run_numerical_validation(model_parts, step)
+            except Exception as exc:  # pragma: no cover - safety
+                logger.warning("Numerical validation failed: %s", exc)
 
     MolGenValidatorClass = MolGenValidator
 

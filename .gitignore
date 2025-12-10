@@ -25,3 +25,4 @@ wandb_runs/
 # Log files
 *.log
 *.csv
+src/molgen3D/data_processing/alignment.ipynb
