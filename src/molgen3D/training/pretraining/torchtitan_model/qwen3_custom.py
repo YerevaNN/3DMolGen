@@ -27,8 +27,26 @@ QWEN3_BASE_VOCAB = 151_669
 QWEN3_PADDED_VOCAB = 151_936
 
 
+def _safe_rank(default: int = 0) -> int:
+    """Return rank if dist is ready; otherwise fall back to env or a default.
+
+    TorchTitan logger hooks can run before torch.distributed is initialized. Using
+    a guarded helper avoids raising in those cases while preserving normal behavior
+    once the process group is up.
+    """
+    if dist.is_available() and dist.is_initialized():
+        return dist.get_rank()
+    env_rank = os.environ.get("RANK")
+    if env_rank is not None:
+        try:
+            return int(env_rank)
+        except ValueError:
+            return default
+    return default
+
+
 def _is_log_rank() -> bool:
-    return (not dist.is_available()) or (not dist.is_initialized()) or dist.get_rank() == 0
+    return _safe_rank() == 0
 
 
 def _log_rank(msg: str, *args) -> None:
@@ -51,12 +69,13 @@ class MolGenQwen3StateDictAdapter(Qwen3StateDictAdapter):
         return state_dict
 
 
-_WANDB_MODULE = None
+_WANDB_UNINITIALIZED = object()
+_WANDB_MODULE = _WANDB_UNINITIALIZED
 
 
 def _maybe_import_wandb():
     global _WANDB_MODULE
-    if _WANDB_MODULE is not None:
+    if _WANDB_MODULE is not _WANDB_UNINITIALIZED:
         return _WANDB_MODULE
     try:
         import wandb  # type: ignore[import]
@@ -65,13 +84,16 @@ def _maybe_import_wandb():
             "wandb package is not installed; disabling W&B logging for this run."
         )
         _WANDB_MODULE = None
-        return None
-    _WANDB_MODULE = wandb
+    else:
+        _WANDB_MODULE = wandb
     return _WANDB_MODULE
 
 
 def _unwrap_module(module: nn.Module) -> nn.Module:
-    return module.module if hasattr(module, "module") else module
+    # Nested wrappers (DDP(FSDP(...))) can appear; unwrap until the leaf module.
+    while hasattr(module, "module"):
+        module = module.module
+    return module
 
 
 def _get_job_tokenizer_config(job_config):
@@ -117,6 +139,12 @@ def _initialize_extra_embeddings(module: nn.Module, base_vocab: int, num_new_tok
 
     start = base_vocab
     end = base_vocab + num_new_tokens
+    num_rows = int(getattr(embed, "num_embeddings", embed.weight.shape[0]))
+    if end > num_rows:
+        raise ValueError(
+            "Tokenizer config requests more tokens than embedding rows "
+            f"(base_vocab={base_vocab}, num_new_tokens={num_new_tokens}, rows={num_rows})"
+        )
 
     with torch.no_grad():
         init_std = embed.embedding_dim ** -0.5
@@ -140,7 +168,9 @@ def _parallelize_with_molgen(model, parallel_dims, job_config):
     )
 
     if _is_log_rank():
-        embed = getattr(model, "tok_embeddings", None)
+        embed = getattr(model, "tok_embeddings", None) or getattr(
+            model, "embed_tokens", None
+        )
         embed_rows = int(getattr(embed, "num_embeddings", -1)) if embed is not None else -1
         hidden_dim = int(getattr(embed, "embedding_dim", -1)) if embed is not None else -1
         _log_rank(
@@ -171,6 +201,12 @@ def _parallelize_with_molgen(model, parallel_dims, job_config):
     run_cfg = getattr(job_config, "molgen_run", None)
     init_mode = getattr(run_cfg, "init_mode", "scratch") if run_cfg is not None else "scratch"
     if init_mode in ("scratch", "hf_pretrain"):
+        _log_rank(
+            "Initializing extra embeddings: init_mode=%s base_vocab=%d num_new_tokens=%d",
+            init_mode,
+            base_vocab,
+            num_new_tokens,
+        )
         _initialize_extra_embeddings(underlying, base_vocab, num_new_tokens)
     _tie_lm_head(underlying)
 
@@ -179,6 +215,20 @@ def _parallelize_with_molgen(model, parallel_dims, job_config):
             underlying, "embed_tokens", None
         )
         if embed is not None:
+            wt = getattr(embed, "weight", None)
+            if wt is not None:
+                is_flat = getattr(wt, "_is_flat_param", False) or (
+                    "FlatParameter" in wt.__class__.__name__
+                )
+                wt_shape = tuple(wt.shape) if hasattr(wt, "shape") else "<unknown>"
+                wt_device = getattr(wt, "device", "<unknown>")
+                _log_rank(
+                    "Embedding weight details: type=%s shape=%s device=%s flat_param=%s",
+                    wt.__class__.__name__,
+                    wt_shape,
+                    wt_device,
+                    is_flat,
+                )
             rows = int(getattr(embed, "num_embeddings", embed.weight.shape[0]))
             _log_rank(
                 "MolGen Qwen3 embeddings: rows=%d base=%d new=%d padded=%d",
@@ -222,7 +272,7 @@ def _patch_metric_logging() -> None:
 
         if not metrics_config.save_for_all_ranks:
             metrics_rank = titan_metrics._get_metrics_rank(parallel_dims, job_config)
-            if torch.distributed.get_rank() != metrics_rank:
+            if _safe_rank() != metrics_rank:
                 return titan_metrics.BaseLogger()
 
         dump_dir = job_config.job.dump_folder
@@ -235,7 +285,7 @@ def _patch_metric_logging() -> None:
 
         if metrics_config.save_for_all_ranks:
             base_log_dir = os.path.join(
-                base_log_dir, f"rank_{torch.distributed.get_rank()}"
+                base_log_dir, f"rank_{_safe_rank()}"
             )
 
         logger_container = titan_metrics.LoggerContainer()
@@ -256,7 +306,7 @@ def _patch_metric_logging() -> None:
 
     titan_metrics._build_metric_logger = _build_metric_logger
 
-    original_wandb_init = titan_metrics.WandBLogger.__init__
+    _original_wandb_init = titan_metrics.WandBLogger.__init__
 
     def _wandb_init(self, log_dir, job_config, tag=None):
         wandb_lib = _maybe_import_wandb()
