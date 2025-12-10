@@ -1,13 +1,24 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import os
 from pathlib import Path
 import importlib.resources as pkg_resources
 import copy
 import yaml
 
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+_ENV_REPO_ROOT = os.environ.get("MOLGEN3D_REPO_ROOT")
+_CANDIDATE_ROOT = (
+    Path(_ENV_REPO_ROOT).expanduser().resolve()
+    if _ENV_REPO_ROOT
+    else Path(__file__).resolve().parents[3]
+)
+if not (_CANDIDATE_ROOT / "src" / "molgen3D").exists():
+    cwd = Path.cwd().resolve()
+    if (cwd / "src" / "molgen3D").exists():
+        _CANDIDATE_ROOT = cwd
+REPO_ROOT = _CANDIDATE_ROOT
 
 # Keys that should use geom_data_root instead of data_root
 GEOM_DATA_KEYS = {
@@ -41,6 +52,8 @@ def _get_config_section(section: str) -> dict:
 
 def _get_ckpt_base_path(root_rel: str, base_paths: dict) -> str:
     """Determine the base path for a checkpoint based on root_rel pattern."""
+    if root_rel.startswith("qwen3_06b"):
+        return base_paths.get("qwen_yerevann_root", base_paths.get("hf_yerevann_root", "."))
     if "code_snapshot" in root_rel or "grpo_outputs" in root_rel:
         return base_paths.get("grpo_outputs_root", ".")
     if root_rel.startswith("2025-"):

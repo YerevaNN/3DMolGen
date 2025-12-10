@@ -1,13 +1,13 @@
 [job]
-description = "qwen3_06b_pre_20k_step_144effb"
+description = "qwen3_06b_scr_4e_108effb"
 dump_folder = "pretrain_runs"
 print_config = true
 custom_config_module = "molgen3D.training.pretraining.config.custom_job_config"
 
 [molgen_run]
-init_mode = "hf_pretrain" # scratch | hf_pretrain | resume
+init_mode = "scratch" # scratch | hf_pretrain | resume
 tokenizer_tag = "tokenizers:qwen3_0.6b_custom"
-base_model_tag = "base_paths:qwen3_0.6b_base_model"
+# base_model_tag = "base_paths:qwen3_0.6b_base_model"
 # resume_run_path_tag = "ckpts:qwen3_0.6b_previous_run"
 
 [model]
@@ -20,9 +20,9 @@ custom_import = "molgen3D.training.pretraining.torchtitan_model.qwen3_custom"
 
 [training]
 seq_len = 2048
-local_batch_size = 6
-global_batch_size = 96
-steps = 20000
+local_batch_size = 12
+global_batch_size = 144
+steps = 80000
 max_norm = 1.0
 dtype = "bfloat16"
 seed = 1234
@@ -54,7 +54,7 @@ lookahead_limit = 100
 
 [optimizer]
 name = "AdamW"
-lr = 1e-4
+lr = 2e-4
 beta1 = 0.9
 beta2 = 0.95
 eps = 1e-8
@@ -67,13 +67,13 @@ weight_decay = 0.1
 [wsds_scheduler]
 enable = true
 warmup_steps = 500
-checkpoints = [20000]
+checkpoints = [20000, 40000, 60000, 80000]
 lr_min = 0
 decay_frac = 0.1
 
 [checkpoint]
 enable = true
-interval = 500
+interval = 20000
 keep_latest_k = 4
 folder = "checkpoint"
 create_seed_checkpoint = false

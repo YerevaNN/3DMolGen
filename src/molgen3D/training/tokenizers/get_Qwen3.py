@@ -18,12 +18,12 @@ CUSTOM_TOK_DIR = os.path.join("./src/molgen3D/training/tokenizers", "Qwen3_token
 MODEL_DIR = os.path.join("/nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b/", "Qwen3-0.6B-Base")
 
 # Your 4 new tokens as *normal* vocab items
-NEW_TOKENS = ["[SMILES]", "[CONFORMERS]", "[/SMILES]", "[/CONFORMERS]"]
+NEW_TOKENS = ["[SMILES]", "[CONFORMER]", "[/SMILES]", "[/CONFORMER]"]
 
 # ----- SCRIPT -----
 
 def main():
-    # load_model_and_tokenizer()
+    load_model_and_tokenizer()
     sanity_checks()
 
 def load_model_and_tokenizer():

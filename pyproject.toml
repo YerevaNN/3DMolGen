@@ -57,6 +57,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = { find = { where = ["src"], namespaces = false } }
+[tool.setuptools.package-data]
+"molgen3D.config" = ["paths.yaml"]
 
 [tool.black]
 line-length = 100
