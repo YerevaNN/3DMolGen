@@ -3,7 +3,7 @@
 #SBATCH --cpus-per-task=96
 #SBATCH --partition=h100
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:6
+#SBATCH --gres=gpu:4
 #SBATCH --mem=200G
 #SBATCH --time=6-00:00:00
 #SBATCH --output=outputs/slurm_jobs/titan/%j.out
@@ -14,7 +14,14 @@ export WANDB_PROJECT=${WANDB_PROJECT:-3dmolgen}
 export WANDB_GROUP=${WANDB_GROUP:-pretrain}
 export WANDB_JOB_TYPE=${WANDB_JOB_TYPE:-pretrain}
 export WANDB_CONFIG=${WANDB_CONFIG:-'{"run_type": "pretrain"}'}
+# Keep per-parameter tensors for FSDP to expose embedding rows (needed for grad probe)
+# export TORCH_FSDP_USE_ORIG_PARAMS=${TORCH_FSDP_USE_ORIG_PARAMS:-1}
+# Also disable parameter flattening so embedding rows remain addressable
+# export TORCH_FSDP_FLATTEN_PARAMETERS=${TORCH_FSDP_FLATTEN_PARAMETERS:-0}
+# Disable DTensor FSDP so embedding weights stay real tensors for probes
+# export TORCH_FSDP_USE_DTENSOR=${TORCH_FSDP_USE_DTENSOR:-0}
 export TORCH_COMPILE=${TORCH_COMPILE:-0}
+export TOKENIZERS_PARALLELISM=${TOKENIZERS_PARALLELISM:-false}
 
 TRAIN_TOML=${TRAIN_TOML:-src/molgen3D/config/pretrain/qwen3_06b.toml}
 

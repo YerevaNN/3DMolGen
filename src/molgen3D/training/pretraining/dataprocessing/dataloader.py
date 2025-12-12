@@ -201,15 +201,24 @@ class _PreviewLogger:
         if rank in self._done:
             return
         try:
+            token_ids = tensor.tolist()
             decoded = self._tokenizer.decode(
-                tensor.tolist(),
+                token_ids,
                 skip_special_tokens=False,
             )
         except Exception as exc:  # pragma: no cover - diagnostic only
+            token_ids = "<encode_error>"
             decoded = f"<decode_error: {exc}>"
 
+        if isinstance(token_ids, list) and len(token_ids) > 64:
+            token_ids = token_ids[:64] + ["..."]
+
         seq_idx = self._counts[rank] + 1
-        logger.info("Rank {} preview sample {}: {}", rank, seq_idx, decoded)
+        logger.warning(
+            f"PREVIEW_SAMPLE rank={rank} idx={seq_idx} "
+            f"len={len(token_ids) if isinstance(token_ids, list) else '?'} "
+            f"ids={token_ids} decoded={decoded if decoded.strip() else '<empty_decode>'}"
+        )
         self._counts[rank] = seq_idx
 
         if seq_idx >= self._limit:
@@ -237,6 +246,7 @@ class JsonlTaggedPackedDataset(IterableDataset):
         lookahead_limit: int = 100,
         ignore_index: int = -100,
         truncate_overflow_units: bool = True,
+        preview_enabled: bool = True,
     ):
         super().__init__()
         self.files = _coerce_train_targets(train_path)
@@ -281,6 +291,7 @@ class JsonlTaggedPackedDataset(IterableDataset):
         self._monster_warning_shown = False
         self._truncation_warning_shown = False
         self._preview: Optional[_PreviewLogger] = None
+        self._preview_enabled = bool(preview_enabled)
         self._reset_epoch_state()
 
     @property
@@ -358,7 +369,9 @@ class JsonlTaggedPackedDataset(IterableDataset):
                 all_pairs = self._pairs_for_epoch()
                 worker_pairs = [p for i, p in enumerate(all_pairs) if (i % nworkers) == wid]
                 self._pairs_total = len(worker_pairs)
-                preview_enabled = (self._epoch == 0) and (wid == 0)
+                preview_enabled = (
+                    self._preview_enabled and (self._epoch == 0) and (wid == 0)
+                )
                 yield from self._pack_from_pairs(worker_pairs, fps, preview_enabled)
 
                 if not self.infinite:
@@ -564,7 +577,8 @@ class JsonlTaggedPackedDataset(IterableDataset):
         preview_enabled: bool,
     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
         inp, lab = self._sequence_state.finalize()
-        if preview_enabled and self._preview is not None:
+        # Only log previews from rank 0 to avoid noisy multi-rank logs.
+        if preview_enabled and self._preview is not None and self.rank == 0:
             self._preview.maybe_log(self.rank, inp)
         return {"input": inp}, lab
 
@@ -588,6 +602,7 @@ def build_dataloader(
     rank: Optional[int] = None,
     lookahead_limit: int = 100,
     truncate_overflow_units: bool = True,
+    preview_enabled: bool = True,
 ):
     ds = JsonlTaggedPackedDataset(
         train_path=train_path,
@@ -602,6 +617,7 @@ def build_dataloader(
         rank=rank,
         lookahead_limit=lookahead_limit,
         truncate_overflow_units=truncate_overflow_units,
+        preview_enabled=preview_enabled,
     )
     effective_persistent = (
         persistent_workers if persistent_workers is not None else (num_workers > 0)
@@ -687,6 +703,7 @@ def build_molgen_dataloader(
         world_size=dp_world_size,
         rank=dp_rank,
         lookahead_limit=data_cfg.lookahead_limit,
+        preview_enabled=True,
     )
 
 
@@ -1068,6 +1085,7 @@ def build_molgen_validator(
         prefetch_factor=min(data_cfg.prefetch_factor or 2, 2),  # Reduce prefetch for validation
         world_size=dp_world_size,
         rank=dp_rank,
+        preview_enabled=False,
     )
 
     return MolGenValidatorClass(  # type: ignore[arg-type]
