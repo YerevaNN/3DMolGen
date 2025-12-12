@@ -339,6 +339,19 @@ outputs = model.generate(
 )
 ```
 
+## Inference Configuration Rules
+
+**IMPORTANT: All inference is done with single GPU.**
+
+When running inference locally or via slurm:
+- Local: Use `--device cuda:0` to specify single GPU
+- Slurm submission: The script requests 1 GPU automatically (`gpus_per_node=1`)
+
+This applies to:
+- Smoke tests (`run_logit_processor_smoke.py`)
+- Inference scripts (`inference.py`)
+- Any model generation workloads
+
 ## Running the smoke test (for v2 pre-computed mask)
 Run the following commands to test the pre-computed mask processor:
 Check `config/sampling_config.py` for the sampling configurations.
@@ -585,3 +598,83 @@ The pre-computed mask assumes placeholder coords "0.0000,0.0000,0.0000" tokenize
 3. **Future v2.1:** Could loosen `<` and `>` constraints if needed, or implement hybrid state machine + pre-computed mask for robustness.
 
 4. **Non-greedy sampling edge cases:** See "Edge Cases with Non-Greedy Sampling" section above for detailed analysis of the ~1.5% failure rate with top_p sampling.
+
+---
+
+## Qwen-Specific LP Investigation (2025-12-12)
+
+### Problem Statement
+
+When using Qwen models with the generic LP, some generations have malformed coordinates like:
+- `<x,y,z,0>` (4 values instead of 3)
+- `<x,y,z.,>` (trailing punctuation)
+
+Root cause: Position drift due to variable token counts. Different digit sequences tokenize to different numbers of tokens.
+
+### Benchmark Results (64 samples, greedy, qwen3_06b_pre step-40k)
+
+| Configuration | Passed | Failed | Time | Parse Failures |
+|--------------|--------|--------|------|----------------|
+| No LP | **64/64** | 0 | 24s | 0 |
+| Generic LP (blocklist) | 56/64 | 8 | 102s | 8 |
+| Qwen LP v3 (allowlist, position-based) | 34/64 | 30 | 104s | 30 |
+| Qwen LP v3.1 (position-based allowlist, like generic) | Testing | - | - | - |
+
+### Key Findings
+
+1. **Model without LP works perfectly** - 100% pass rate, fastest (24s)
+2. **Generic LP has ~12% failure rate** - Position drift causes malformed coords
+3. **Qwen allowlist LP v3 was worse** - Stricter position-based had same drift issue
+4. **v3.1 mirrors generic LP** - Simple position-based with allowlist (testing)
+
+### Root Cause Analysis
+
+The position-based approach assumes:
+- Template placeholder `0.0000,0.0000,0.0000` tokenizes to N tokens
+- Generated coords also tokenize to N tokens
+
+But in practice:
+- `,-` tokenizes as single token (not two)
+- Different digit patterns have different token counts
+- This causes position mismatch → malformed output
+
+### Implementation Status
+
+**Qwen LP v3.1 has been implemented** (2025-12-12):
+- Mirrors generic LP v2.1 structure exactly
+- Uses position-based pre-computed mask (not state machine)
+- Uses ALLOWLIST for FREE positions (only `0-9`, `.`, `,`, `-`)
+- Has look-ahead comma/dash blocking
+
+**Test commands:**
+```bash
+# Local (single GPU)
+python scripts/logit_processor/run_logit_processor_smoke.py \
+    --model-alias qwen3_06b_pre --model-step 40k \
+    --tokenizer-name qwen3_0.6b_custom --processor-type qwen \
+    --attention sdpa --device cuda:0 \
+    --json-report outputs/smoke/qwen_lp_v31_allowlist.json
+
+# H100 submission
+python scripts/logit_processor/run_logit_processor_smoke.py \
+    --model-alias qwen3_06b_pre --model-step 40k \
+    --tokenizer-name qwen3_0.6b_custom --processor-type qwen \
+    --attention sdpa --submit h100 \
+    --json-report outputs/smoke/qwen_lp_v31_allowlist_h100.json
+```
+
+**Files modified:**
+- `src/molgen3D/evaluation/qwen_constraint_logit_processor.py` - Rewritten to v3.1
+
+### Technical Notes
+
+- Qwen tokenizer has single-char digit tokens (IDs 15-24 for 0-9)
+- 66 tokens in coordinate allowlist
+- `>` token ID: 29, `>[` token ID: 30768
+- Template correctly handles merged tokens like `]<`, `>[`
+
+### Related Files
+
+- `src/molgen3D/evaluation/constraint_logit_processor.py` - Generic LP (v2.1)
+- `src/molgen3D/evaluation/qwen_constraint_logit_processor.py` - Qwen LP (needs fix)
+- `outputs/smoke/experiments/attention_torch29/qwen40k_*.json` - Benchmark results
