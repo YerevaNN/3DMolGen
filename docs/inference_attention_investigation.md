@@ -557,6 +557,36 @@ model.generation_config.cache_implementation = "static"
 # model.generation_config.cache_implementation = "dynamic"  # default
 ```
 
+### H100 Results with Logit Processor
+
+**Critical Update**: We also tested static cache on H100 **with the logit processor enabled**:
+
+| Config | Time | Relative |
+|--------|------|----------|
+| dynamic + LP | **12.9s** | **1.00x (baseline)** |
+| static + LP | 30.5s | 0.42x (2.4x SLOWER!) |
+| static + no LP | 35.2s | 0.37x (2.7x SLOWER!) |
+
+**This contradicts the Phase 2 benchmark** where static cache showed 1.8x speedup. The difference:
+- Phase 2 benchmark: NO logit processor → CUDA graphs work → static helps
+- Smoke runner: WITH logit processor → CUDA graphs broken → static hurts
+
+### Root Cause: Logit Processor Breaks CUDA Graphs
+
+Static KV cache's speedup comes from enabling CUDA graph capture. However:
+1. **Logit processor runs Python code every token** (constraint checking)
+2. **Dynamic control flow prevents graph compilation**
+3. **Without graphs, static pre-allocation is pure overhead**
+
+### Final Recommendation
+
+| Use Case | Static Cache? | Why |
+|----------|---------------|-----|
+| Unconstrained generation (no LP) | ✅ Yes (H100 only) | CUDA graphs work, 1.8x speedup |
+| **Constrained generation (with LP)** | ❌ No (any GPU) | Graphs broken, 2-3x slowdown |
+
+**For 3DMolGen with logit processor**: Always use dynamic cache. Focus on CPU-side optimizations.
+
 ### Scripts Updated
 
 - `scripts/logit_processor/run_logit_processor_smoke.py`:
@@ -564,34 +594,86 @@ model.generation_config.cache_implementation = "static"
   - Added `--submit {local,h100,a100}` for slurm submission
   - Added GPU detection warning for consumer GPUs
   - Added cache sizing info logging
+  - Added `--parallel-templates` for CPU-side optimization
 
 ---
 
 ## Phase 3: CPU-Side Optimizations (In Progress)
 
-**Key insight**: Since static KV cache is GPU-specific, we focus on **CPU-side optimizations** that help on ANY GPU.
+**Key insight**: Static KV cache is incompatible with logit processor. Focus on **CPU-side optimizations** that help regardless of cache mode.
 
 ### Remaining Optimizations
 
-#### 1. torch.compile with Static Cache
-- Now that static cache works, we can try `torch.compile()`
-- **Expected**: Additional 10-30% speedup from graph optimization
-- **Risk**: May not work with logit processor
+#### ~~1. torch.compile with Static Cache~~ (Not viable)
+- **Status**: Likely incompatible with logit processor (same reason as static cache)
+- Graph-based optimizations require static control flow
+- Logit processor's per-token Python execution breaks compilation
+- **Verdict**: Skip for constrained generation
 
-#### 2. Batched Template Building
-- Current: Templates built per-sequence in logit processor
-- Optimization: Batch template construction for multiple sequences
-- **Location**: `ConformerConstraintLogitsProcessor.build_templates_for_batch()`
+#### 2. Parallel Template Building ✅ (Implemented)
+- **Status**: Implemented in smoke runner with `--parallel-templates` flag
+- Uses `ThreadPoolExecutor` to parallelize template construction
+- Template building involves CPU-bound tokenization and SMILES parsing
+- **Expected**: 20-40% speedup on template construction phase
+- **Flags**: `--parallel-templates [--template-workers N]`
+- **Auto-detection**: If `--template-workers` not specified:
+  - Uses `SLURM_CPUS_PER_TASK` if running under slurm
+  - Falls back to `os.cpu_count() // 2 + 1`, capped at 8
 
-#### 3. Reduced Tokenizer Overhead
-- Current: `tokenizer.encode_plus()` called frequently in logit processor
-- Optimization: Cache tokenization results, use faster encoding methods
-- **Location**: Logit processor's token-by-token constraint checking
+#### 3. Tokenizer Caching ✅ (Implemented)
+- **Status**: Implemented in both constraint_logit_processor.py and qwen_constraint_logit_processor.py
+- Caches `tokenizer.encode_plus()` results keyed by `(ref_str, tokenizer_id)`
+- Avoids redundant tokenization for repeated molecules/skeletons
+- **Flag**: `--cache-tokenizer`
+- **Expected**: 10-20% speedup on tokenization overhead for batches with repeated molecules
+
+**Where tokenizer caching helps**:
+- **Smoke runner** (unique SMILES per sample): ❌ **Hurts performance** - 100% cache misses = pure overhead
+- **inference.py** (2*k generations per molecule): ✅ **Significant benefit** - same SMILES tokenized 2*k times
+- Each molecule in GEOM-Drugs test set (1000 molecules) has k ground truth conformers
+- We generate 2*k conformers per molecule, so the cache will be hit (2*k - 1) times per molecule
+- **Real-world impact**: For 1000 molecules with avg 5 conformers → 10k generations, 9k cache hits
+
+**GTX 3070 Benchmark Results** (64 samples, batch_size=32, top_p_sampling4):
+| Config | Time | Notes |
+|--------|------|-------|
+| Baseline | 37s | No optimizations |
+| `--parallel-templates` | 28s | **24% speedup** ✅ |
+| `--cache-tokenizer` | ~37s | No benefit (unique SMILES) |
+| Both flags | 30s | Cache overhead hurts parallel |
+
+**Recommendation**:
+- **Smoke runner**: Use `--parallel-templates` only
+- **inference.py**: Use both `--parallel-templates --cache-tokenizer`
+
+**H100 Multi-Gen Benchmark Results** (64 SMILES × 4 generations = 256 total, batch_size=32, torch 2.9):
+
+| Config | Time | vs Best | Notes |
+|--------|------|---------|-------|
+| dynamic + parallel | **50.1s** | **1.00x** | Best config ✅ |
+| dynamic + parallel + cache | **50.1s** | **1.00x** | Cache has no impact (same SMILES batched together) |
+| static only | 80.6s | 0.62x | Static hurts even with multi-gen |
+| static + parallel | 80.2s | 0.62x | Parallel doesn't help static |
+| static + parallel + cache | 81.2s | 0.62x | All opts can't save static |
+
+**Key Findings (H100 + Logit Processor + Multi-Gen)**:
+1. **Static KV cache is ~1.6x slower** regardless of CPU optimizations
+2. **Tokenizer cache shows no benefit** even with multi-gen (likely because same SMILES are batched together, not interleaved)
+3. **Parallel templates is the only optimization that helps** with constrained generation
+4. **Dynamic cache remains optimal** for all constrained generation workloads
+
+**Final Recommendation for Constrained Generation**:
+```bash
+# Production config (any GPU)
+python scripts/logit_processor/run_logit_processor_smoke.py \
+    --parallel-templates \
+    --kv-cache dynamic  # default, but explicit for clarity
+```
 
 #### 4. Profiling Strategy
-- Profile on `np` node for quick iteration
-- Validate on `h100` with large generations
-- Track metrics: tokens/sec, memory, latency per token
+- Profile on `np` node (GTX 3070) for quick iteration
+- Validate on `h100` for production numbers
+- Track metrics: time_taken, throughput_chars_per_sec in JSON reports
 
 ### Scripts Created/Modified
 

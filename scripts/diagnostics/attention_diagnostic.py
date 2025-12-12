@@ -14,7 +14,6 @@ Usage:
 import torch
 import time
 import sys
-from typing import Optional
 
 def print_section(title: str):
     print("\n" + "=" * 60)
@@ -62,17 +61,15 @@ def get_sdpa_backend_info():
 
     # Check flash_attn package
     try:
-        import flash_attn
-        print(f"flash_attn package version: {flash_attn.__version__}")
-        has_flash_attn = True
+        import flash_attn as fa
+        print(f"flash_attn package version: {fa.__version__}")
+        return True
     except ImportError as e:
         print(f"flash_attn package: Not installed or import error ({e})")
-        has_flash_attn = False
+        return False
     except Exception as e:
         print(f"flash_attn package: Error ({e})")
-        has_flash_attn = False
-
-    return has_flash_attn
+        return False
 
 
 def benchmark_sdpa_backends(batch_size: int = 4, num_heads: int = 16,
@@ -140,12 +137,11 @@ def benchmark_sdpa_backends(batch_size: int = 4, num_heads: int = 16,
 
 def benchmark_model_inference(model_alias: str = "m600_qwen",
                               model_step: str = "2e",
-                              tokenizer_name: str = "qwen3_0.6b_custom",
+                              tokenizer_name: str | None = None,
                               test_prompt: str = "[SMILES]CCO[/SMILES]"):
     """Benchmark actual model inference with different attention implementations.
 
-    Default uses Qwen model with matching Qwen tokenizer.
-    For Llama models, use model_alias="m380_conf_v2", tokenizer_name="llama3_chem_v1"
+    Tokenizer is auto-detected from model config if not specified.
     """
     print_section("Model Inference Benchmarks")
 
@@ -154,11 +150,23 @@ def benchmark_model_inference(model_alias: str = "m600_qwen",
         return {}
 
     try:
-        from molgen3D.config.paths import get_ckpt, get_tokenizer_path as get_tok_path
+        from molgen3D.config.paths import get_ckpt, get_tokenizer_path as get_tok_path, get_model_tokenizer
         model_path = get_ckpt(model_alias, model_step)
+
+        # Auto-detect tokenizer from model config if not specified
+        if tokenizer_name is None:
+            tokenizer_name = get_model_tokenizer(model_alias)
+            if not tokenizer_name:
+                raise ValueError(
+                    f"No tokenizer specified and model '{model_alias}' has no default tokenizer."
+                )
+            print(f"Model: {model_alias} ({model_step}) -> {model_path}")
+            print(f"Tokenizer: {tokenizer_name} (auto-detected)")
+        else:
+            print(f"Model: {model_alias} ({model_step}) -> {model_path}")
+            print(f"Tokenizer: {tokenizer_name}")
+
         tokenizer_path = get_tok_path(tokenizer_name)
-        print(f"Model: {model_alias} ({model_step}) -> {model_path}")
-        print(f"Tokenizer: {tokenizer_name} -> {tokenizer_path}")
     except ImportError:
         print("Could not import molgen3D config, skipping model benchmarks")
         return {}
@@ -186,17 +194,15 @@ def benchmark_model_inference(model_alias: str = "m600_qwen",
             tokenizer = AutoTokenizer.from_pretrained(
                 str(tokenizer_path),
                 padding_side='left',
-                local_files_only=True
             )
             tokenizer.pad_token = tokenizer.eos_token
 
             model = AutoModelForCausalLM.from_pretrained(
                 str(model_path),
-                dtype=torch.bfloat16,  # Use 'dtype' instead of deprecated 'torch_dtype'
+                torch_dtype=torch.bfloat16,
                 attn_implementation=attn_impl,
                 device_map="cuda",
                 trust_remote_code=True,
-                local_files_only=True
             ).eval()
 
             inputs = tokenizer(test_prompt, return_tensors="pt").to("cuda")
@@ -350,30 +356,33 @@ For Ampere GPUs (A100, RTX 30xx, compute capability 8.x):
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="3DMolGen Attention Diagnostic")
-    parser.add_argument("--model", type=str, default="m600_qwen",
-                        help="Model alias (default: m600_qwen for Qwen, use m380_conf_v2 for Llama)")
-    parser.add_argument("--model-step", type=str, default="2e",
-                        help="Model step (default: 2e)")
-    parser.add_argument("--tokenizer", type=str, default="qwen3_0.6b_custom",
-                        help="Tokenizer name (default: qwen3_0.6b_custom, use llama3_chem_v1 for Llama)")
+    parser.add_argument("--model", type=str, default="qwen3_06b_pre",
+                        help="Model alias (default: qwen3_06b_pre for latest Qwen, use m380_conf_v2 for Llama)")
+    parser.add_argument("--model-step", type=str, default=None,
+                        help="Model step (default: auto-select last available step)")
+    parser.add_argument("--tokenizer", type=str, default=None,
+                        help="Tokenizer name. If not specified, auto-detected from model config.")
     parser.add_argument("--skip-model-bench", action="store_true",
                         help="Skip model inference benchmarks (useful for quick SDPA kernel tests)")
     parser.add_argument("--seq-len", type=int, default=2048,
                         help="Sequence length for SDPA benchmarks (default: 2048)")
     args = parser.parse_args()
 
+    # Display tokenizer info
+    tokenizer_display = args.tokenizer if args.tokenizer else "(auto-detect from model)"
+
     print("3DMolGen Attention Diagnostic")
     print("Run this on H100 for accurate recommendations")
     print(f"\nConfiguration:")
-    print(f"  Model: {args.model} ({args.model_step})")
-    print(f"  Tokenizer: {args.tokenizer}")
+    print(f"  Model: {args.model} ({args.model_step or 'auto'})")
+    print(f"  Tokenizer: {tokenizer_display}")
     print(f"  Seq length: {args.seq_len}")
 
     # Get environment info
     get_environment_info()
 
     # Check SDPA backends
-    has_flash_attn = get_sdpa_backend_info()
+    get_sdpa_backend_info()
 
     # Benchmark SDPA backends
     sdpa_results = benchmark_sdpa_backends(
@@ -388,8 +397,8 @@ def main():
     if not args.skip_model_bench:
         model_results = benchmark_model_inference(
             model_alias=args.model,
-            model_step=args.model_step,
-            tokenizer_name=args.tokenizer,
+            model_step=args.model_step,  # None means auto-select
+            tokenizer_name=args.tokenizer,  # None means auto-detect
         )
     else:
         print("\n[Skipping model inference benchmarks]")

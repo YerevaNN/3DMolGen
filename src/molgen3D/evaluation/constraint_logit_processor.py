@@ -29,6 +29,71 @@ from molgen3D.data_processing.smiles_encoder_decoder import (
 # Placeholder coordinate string (4 decimal places per spec)
 COORD_PLACEHOLDER = "0.0000,0.0000,0.0000"
 
+# Cache for tokenizer encode_plus results (optimization for repeated skeletons)
+# Key: (ref_str, tokenizer_id) -> (input_ids_tuple, offset_mapping_tuple)
+_TOKENIZER_ENCODING_CACHE: dict = {}
+
+
+def _cached_encode_plus(
+    ref_str: str,
+    tokenizer: PreTrainedTokenizer,
+    *,
+    use_cache: bool = True,
+) -> tuple[list[int], list[tuple[int, int]]]:
+    """
+    Encode a reference string with optional caching.
+
+    Caching reduces redundant tokenization for repeated skeletons.
+    Expected gain: 10-20% on preprocessing for batches with repeated molecules.
+
+    Args:
+        ref_str: The reference skeleton string to encode
+        tokenizer: HuggingFace tokenizer
+        use_cache: Whether to use caching (default: True)
+
+    Returns:
+        Tuple of (input_ids list, offset_mapping list)
+    """
+    if not use_cache:
+        encoding = tokenizer.encode_plus(
+            ref_str,
+            add_special_tokens=False,
+            return_offsets_mapping=True,
+        )
+        return encoding["input_ids"], encoding["offset_mapping"]
+
+    cache_key = (ref_str, id(tokenizer))
+    if cache_key in _TOKENIZER_ENCODING_CACHE:
+        # Return cached result (convert tuples back to lists for compatibility)
+        input_ids_tuple, offset_tuple = _TOKENIZER_ENCODING_CACHE[cache_key]
+        return list(input_ids_tuple), list(offset_tuple)
+
+    # Encode and cache
+    encoding = tokenizer.encode_plus(
+        ref_str,
+        add_special_tokens=False,
+        return_offsets_mapping=True,
+    )
+    # Store as immutable tuples
+    _TOKENIZER_ENCODING_CACHE[cache_key] = (
+        tuple(encoding["input_ids"]),
+        tuple(tuple(x) for x in encoding["offset_mapping"]),
+    )
+    return encoding["input_ids"], encoding["offset_mapping"]
+
+
+def clear_tokenizer_cache():
+    """Clear the tokenizer encoding cache (useful for testing)."""
+    _TOKENIZER_ENCODING_CACHE.clear()
+
+
+def get_tokenizer_cache_stats() -> dict:
+    """Get cache statistics for debugging."""
+    return {
+        "size": len(_TOKENIZER_ENCODING_CACHE),
+        "memory_keys": sum(len(k[0]) for k in _TOKENIZER_ENCODING_CACHE.keys()),
+    }
+
 
 @dataclass
 class PrecomputedTemplate:
@@ -185,27 +250,28 @@ def build_precomputed_template(
     tokenizer: PreTrainedTokenizer,
     *,
     include_tags: bool = True,
+    use_tokenizer_cache: bool = False,
 ) -> PrecomputedTemplate:
     """
     Build pre-computed template per spec:
     1. Build reference skeleton
     2. Tokenize to get ref_ids
     3. Derive is_free mask using character positions
+
+    Args:
+        smiles: Input SMILES string
+        tokenizer: HuggingFace tokenizer
+        include_tags: Whether to include [CONFORMER] tags (default: True)
+        use_tokenizer_cache: Enable tokenizer caching for repeated skeletons (default: False)
     """
     # skeleton looks like this: "[C]<0.0000,0.0000,0.0000>[C]<0.0000,0.0000,0.0000>=[O]<0.0000,0.0000,0.0000>"
     skeleton = build_reference_skeleton(smiles)
     ref_str = f"[CONFORMER]{skeleton}[/CONFORMER]" if include_tags else skeleton
 
-    # Tokenize with offset mapping
-    encoding = tokenizer.encode_plus(
-        ref_str,
-        add_special_tokens=False,  # what are special tokens? they are the ones that are not part of the vocabulary, such as [CONFORMER], [SMILES], ..., etc.
-        return_offsets_mapping=True,
+    # Tokenize with offset mapping (optionally cached)
+    ref_ids, offset_mapping = _cached_encode_plus(
+        ref_str, tokenizer, use_cache=use_tokenizer_cache
     )
-
-    # TODO: explore unused variable `ref_ids` if we can just reference `encoding["input_ids"]` in function return block
-    ref_ids = encoding["input_ids"] # list of token IDs for the reference string
-    offset_mapping = encoding["offset_mapping"] # list of (start_char, end_char) pairs for each token in the reference string
 
     # Build character-level mask (array of booleans) (not token-level because we want to know if the entire token is FREE or not)
     char_is_free = []
@@ -353,6 +419,17 @@ class ConformerConstraintLogitsProcessor(LogitsProcessor):
 def build_templates_for_batch(
     smiles_list: Sequence[str],
     tokenizer: PreTrainedTokenizer,
+    *,
+    use_tokenizer_cache: bool = False,
 ) -> List[PrecomputedTemplate]:
-    """Build templates for a batch of SMILES strings."""
-    return [build_precomputed_template(smi, tokenizer) for smi in smiles_list]
+    """Build templates for a batch of SMILES strings.
+
+    Args:
+        smiles_list: List of SMILES strings
+        tokenizer: HuggingFace tokenizer
+        use_tokenizer_cache: Enable tokenizer caching for repeated skeletons (default: False)
+    """
+    return [
+        build_precomputed_template(smi, tokenizer, use_tokenizer_cache=use_tokenizer_cache)
+        for smi in smiles_list
+    ]

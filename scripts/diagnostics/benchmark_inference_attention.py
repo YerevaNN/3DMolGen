@@ -50,7 +50,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, GenerationConfig
 PROJECT_ROOT = "/auto/home/aram.dovlatyan/3DMolGen-new/3DMolGen"
 
 # Default path to smoke test results with real SMILES (absolute for NFS)
-DEFAULT_SMILES_JSON = f"{PROJECT_ROOT}/outputs/smoke/v2_1_new_strip_smiles_distinct_top_p.json"
+DEFAULT_SMILES_JSON = f"{PROJECT_ROOT}/outputs/smoke/experiments/logit_processing/strip_smiles_distinct/v2_1_new_strip_smiles_distinct_top_p.json"
 
 # Fallback SMILES if JSON file not available
 FALLBACK_SMILES = [
@@ -184,7 +184,6 @@ def load_model(
     tokenizer = AutoTokenizer.from_pretrained(
         str(tokenizer_path),
         padding_side='left',
-        local_files_only=True
     )
     tokenizer.pad_token = tokenizer.eos_token
 
@@ -194,7 +193,6 @@ def load_model(
         attn_implementation=base_impl,
         device_map="cuda",
         trust_remote_code=True,
-        local_files_only=True
     ).eval()
 
     print(f"  Model loaded: {model.dtype}, {model.device}")
@@ -451,10 +449,20 @@ def run_benchmark(config: dict):
     Args:
         config: Dictionary with benchmark configuration
     """
-    from molgen3D.config.paths import get_ckpt, get_tokenizer_path
+    from molgen3D.config.paths import get_ckpt, get_tokenizer_path, get_model_tokenizer
 
     model_path = get_ckpt(config['model'], config['model_step'])
-    tokenizer_path = get_tokenizer_path(config['tokenizer'])
+
+    # Auto-detect tokenizer from model config if not explicitly provided
+    tokenizer_name = config.get('tokenizer')
+    if not tokenizer_name:
+        tokenizer_name = get_model_tokenizer(config['model'])
+        if not tokenizer_name:
+            raise ValueError(
+                f"No tokenizer specified and model '{config['model']}' has no default tokenizer. "
+                "Use --tokenizer to specify one."
+            )
+    tokenizer_path = get_tokenizer_path(tokenizer_name)
 
     # Get static cache setting
     static_cache = config.get('static_cache', False)
@@ -466,7 +474,7 @@ def run_benchmark(config: dict):
     print("\nConfiguration:")
     print(f"  Model: {config['model']} ({config['model_step']})")
     print(f"  Model path: {model_path}")
-    print(f"  Tokenizer: {config['tokenizer']}")
+    print(f"  Tokenizer: {tokenizer_name} (auto-detected)" if not config.get('tokenizer') else f"  Tokenizer: {tokenizer_name}")
     print(f"  SMILES source: {config.get('smiles_json', DEFAULT_SMILES_JSON)}")
     print(f"  Num samples: {config['num_samples']}")
     print(f"  Batch size: {config['batch_size']}")
@@ -592,8 +600,9 @@ def main():
         help="Model step (default: 2e)"
     )
     parser.add_argument(
-        "--tokenizer", type=str, required=True,
-        help="Tokenizer name (e.g., qwen3_0.6b_custom, llama3_chem_v1)"
+        "--tokenizer", type=str, default=None,
+        help="Tokenizer name (e.g., qwen3_0.6b_custom, llama3_chem_v1). "
+             "If not specified, auto-detected from model config."
     )
     parser.add_argument(
         "--num-samples", type=int, default=64,

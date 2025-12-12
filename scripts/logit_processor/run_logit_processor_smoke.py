@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
@@ -34,6 +35,24 @@ from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
+
+def _get_optimal_workers() -> int:
+    """Get optimal number of workers for parallel template building.
+
+    Priority:
+    1. SLURM_CPUS_PER_TASK (if running under slurm)
+    2. os.cpu_count() with cap at 8 (more workers not always better)
+
+    Returns:
+        Number of workers to use for parallel template building
+    """
+    slurm_cpus = os.environ.get("SLURM_CPUS_PER_TASK")
+    if slurm_cpus:
+        return int(slurm_cpus)
+    # Default: use half of available CPUs, capped at 8
+    cpu_count = os.cpu_count() or 4
+    return min(cpu_count // 2 + 1, 8)
+
 from molgen3D.config.paths import get_ckpt, get_tokenizer_path
 from molgen3D.config.sampling_config import sampling_configs
 from molgen3D.evaluation.constraint_logit_processor import (
@@ -45,6 +64,11 @@ from molgen3D.evaluation.qwen_constraint_logit_processor import (
     QwenConformerConstraintLogitsProcessor,
     build_templates_for_batch as qwen_build_templates_for_batch,
     build_precomputed_template as qwen_build_precomputed_template,
+)
+from molgen3D.evaluation.qwen_vectorized_constraint_lp import (
+    QwenVectorizedConstraintLogitsProcessor,
+    build_templates_for_batch as vectorized_build_templates_for_batch,
+    build_precomputed_template as vectorized_build_precomputed_template,
 )
 from molgen3D.config.paths import get_data_path
 from molgen3D.evaluation.inference import load_model_tokenizer
@@ -64,6 +88,7 @@ def build_templates_parallel(
     tokenizer,
     processor_type: str = "generic",
     num_workers: int = 4,
+    use_tokenizer_cache: bool = False,
 ) -> list:
     """
     Build templates in parallel using ThreadPoolExecutor.
@@ -74,20 +99,27 @@ def build_templates_parallel(
     Args:
         smiles_list: List of SMILES strings
         tokenizer: HuggingFace tokenizer
-        processor_type: "generic" or "qwen"
+        processor_type: "generic", "qwen", "vectorized-qwen", or "vectorized-qwen-v2"
         num_workers: Number of threads to use
+        use_tokenizer_cache: Enable tokenizer caching for repeated skeletons
 
     Returns:
         List of PrecomputedTemplate objects
     """
-    build_fn = (
-        qwen_build_precomputed_template
-        if processor_type == "qwen"
-        else build_precomputed_template
-    )
+    # Map processor type to template builder function
+    # Note: vectorized processors use the same template format as qwen
+    build_fn_map = {
+        "generic": build_precomputed_template,
+        "qwen": qwen_build_precomputed_template,
+        "vectorized-qwen": vectorized_build_precomputed_template,
+        "vectorized-qwen-v2": vectorized_build_precomputed_template,
+    }
+    build_fn = build_fn_map.get(processor_type, build_precomputed_template)
 
-    # Use partial to bind tokenizer to build function
-    build_with_tokenizer = partial(build_fn, tokenizer=tokenizer)
+    # Use partial to bind tokenizer and cache flag to build function
+    build_with_tokenizer = partial(
+        build_fn, tokenizer=tokenizer, use_tokenizer_cache=use_tokenizer_cache
+    )
 
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
         templates = list(executor.map(build_with_tokenizer, smiles_list))
@@ -221,6 +253,9 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run v2 simple precompute mask smoke test")
     parser.add_argument("--dataset", choices=["clean", "distinct"], default="distinct")
     parser.add_argument("--sample-size", type=int, default=64)
+    parser.add_argument("--num-generations", type=int, default=1,
+                        help="Number of conformer generations per SMILES (default: 1). "
+                             "Use >1 to simulate inference.py behavior and test tokenizer caching.")
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--model-alias", default="m380_conf_v2")
     parser.add_argument("--model-step", default="2e")
@@ -237,8 +272,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--fail-fast", action="store_true")
     parser.add_argument("--no-logit-processor", action="store_true",
                         help="Disable logit processor for timing comparison")
-    parser.add_argument("--processor-type", choices=["generic", "qwen"], default="generic",
-                        help="Select logit processor type: 'generic' (blocklist) or 'qwen' (allowlist)")
+    parser.add_argument("--processor-type",
+                        choices=["generic", "qwen", "vectorized-qwen", "vectorized-qwen-v2"],
+                        default="generic",
+                        help="Select logit processor type: 'generic' (blocklist), 'qwen' (allowlist v3.3), "
+                             "'vectorized-qwen' (v4.0 torch.compile compatible), "
+                             "'vectorized-qwen-v2' (v4.1 branchless)")
     # Optimization flags
     parser.add_argument("--kv-cache", choices=["dynamic", "static"], default="dynamic",
                         help="KV cache mode: 'dynamic' (default) or 'static' (~1.8x speedup on H100)")
@@ -247,14 +286,23 @@ def _parse_args() -> argparse.Namespace:
                              "padded_prompt_len + max_new_tokens. Only used when --kv-cache=static")
     parser.add_argument("--parallel-templates", action="store_true",
                         help="Build templates in parallel using ThreadPoolExecutor (CPU optimization)")
-    parser.add_argument("--template-workers", type=int, default=4,
-                        help="Number of workers for parallel template building (default: 4)")
+    parser.add_argument("--template-workers", type=int, default=None,
+                        help="Number of workers for parallel template building. "
+                             "Default: auto-detect from SLURM_CPUS_PER_TASK or os.cpu_count()")
+    parser.add_argument("--cache-tokenizer", action="store_true",
+                        help="Cache tokenizer encodings for repeated skeletons (CPU optimization)")
     parser.add_argument("--submit", choices=["local", "h100", "a100"], default="local",
                         help="Where to run: 'local' (default) or submit to 'h100'/'a100' via slurm")
+    # Profiling flags
+    parser.add_argument("--profile", action="store_true",
+                        help="Enable torch.profiler and generate Chrome trace JSON")
+    parser.add_argument("--profile-output", type=Path, default=None,
+                        help="Output path for profile trace (default: outputs/profiles/smoke_profile_<timestamp>.json)")
     return parser.parse_args()
 
 
-def _load_model_and_tokenizer(args):
+def _load_model_and_tokenizer(args) -> tuple:
+    """Load model and tokenizer, returning (model, tokenizer, model_path, tokenizer_path)."""
     model_path = args.model_path or get_ckpt(args.model_alias, args.model_step)
     tokenizer_path = get_tokenizer_path(args.tokenizer_name)
 
@@ -302,7 +350,7 @@ def _load_model_and_tokenizer(args):
         logger.info(f"  Est. cache for batch={args.batch_size}, len={max_cache_len}: "
                     f"{(cache_per_token * max_cache_len * args.batch_size) / (1024**3):.2f} GB")
 
-    return model, tokenizer
+    return model, tokenizer, model_path, tokenizer_path
 
 
 def _extract_between(text: str, start_tag: str, end_tag: str) -> str | None:
@@ -356,7 +404,7 @@ def _build_pass_record(rec) -> dict:
 
 
 def _build_failure_record(rec) -> dict:
-    """Build failure record with generated_smiles_from_conformer field."""
+    """Build failure record with generation_has_same_molecular_graph field."""
     record = {
         "prompt_smiles": rec.prompt_smiles,
         "issues": rec.issues,
@@ -367,23 +415,41 @@ def _build_failure_record(rec) -> dict:
         record["parse_error"] = rec.parse_error
     conformer = _extract_between(rec.decoded_text, "[CONFORMER]", "[/CONFORMER]")
     if not conformer:
-        record["generated_smiles_from_conformer"] = "NO_CONFORMER_BLOCK"
+        record["generation_has_same_molecular_graph"] = "NO_CONFORMER_BLOCK"
         return record
     try:
         gen_smiles = strip_smiles(conformer)
         if same_molecular_graph(rec.prompt_smiles, gen_smiles):
-            record["generated_smiles_from_conformer"] = True
+            record["generation_has_same_molecular_graph"] = True
         else:
-            record["generated_smiles_from_conformer"] = gen_smiles
+            # Include the mismatched SMILES for debugging
+            record["generation_has_same_molecular_graph"] = False
+            record["extracted_smiles"] = gen_smiles
     except Exception as e:
-        record["generated_smiles_from_conformer"] = f"PARSE_ERROR: {e}"
+        record["generation_has_same_molecular_graph"] = f"PARSE_ERROR: {e}"
     return record
+
+
+def _get_processor_class_and_template_fn(processor_type: str):
+    """Return (ProcessorClass, template_build_fn) for the given processor type."""
+    if processor_type == "generic":
+        return ConformerConstraintLogitsProcessor, build_precomputed_template
+    elif processor_type == "qwen":
+        return QwenConformerConstraintLogitsProcessor, qwen_build_precomputed_template
+    elif processor_type in ("vectorized-qwen", "vectorized-qwen-v2"):
+        # Both map to the same v4.1 implementation (v2 is now an alias)
+        return QwenVectorizedConstraintLogitsProcessor, vectorized_build_precomputed_template
+    else:
+        raise ValueError(f"Unknown processor type: {processor_type}")
 
 
 def _generate(
     model, tokenizer, smiles_list, gen_config, batch_size, max_new_tokens,
     use_logit_processor, processor_type: str = "generic", static_cache: bool = False,
     parallel_templates: bool = False, template_workers: int = 4,
+    use_tokenizer_cache: bool = False,
+    enable_profiling: bool = False,
+    profile_output_path: Path | None = None,
 ):
     prompts = [f"[SMILES]{s}[/SMILES]" for s in smiles_list]
     eos_token_id = tokenizer.eos_token_id or tokenizer.pad_token_id
@@ -396,66 +462,135 @@ def _generate(
         tokenize_kwargs["pad_to_multiple_of"] = 64
 
     model.eval()
+
+    # Get processor class and template function
+    ProcessorClass, template_fn = _get_processor_class_and_template_fn(processor_type)
+
+    # Setup profiler if enabled
+    profiler = None
+    if enable_profiling:
+        from torch.profiler import profile as torch_profile, ProfilerActivity
+        if profile_output_path is None:
+            profile_output_path = Path(f"outputs/profiles/smoke_profile_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+        elif isinstance(profile_output_path, str):
+            profile_output_path = Path(profile_output_path)
+        profile_output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        profiler = torch_profile(
+            activities=[
+                ProfilerActivity.CPU,
+                ProfilerActivity.CUDA,
+            ],
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=True,
+        )
+        logger.info(f"Profiling enabled, will save to: {profile_output_path}")
+
     start_time = time()
 
-    with torch.inference_mode():
-        for start in range(0, len(prompts), batch_size):
-            end = start + batch_size
-            prompt_chunk = prompts[start:end]
-            smiles_chunk = smiles_list[start:end]
+    # Wrap generation loop with profiler context if enabled
+    ctx = profiler if profiler else torch.inference_mode()
 
-            tokenized = tokenizer(prompt_chunk, **tokenize_kwargs)
-            tokenized = {k: v.to(device) for k, v in tokenized.items()}
-
-            logits_processor = None
-            if use_logit_processor:
-                prompt_lengths = [int(m.sum().item()) for m in tokenized["attention_mask"]]
-
-                # Build templates (optionally in parallel)
-                if parallel_templates:
-                    templates = build_templates_parallel(
-                        smiles_chunk, tokenizer,
-                        processor_type=processor_type,
-                        num_workers=template_workers,
-                    )
-                elif processor_type == "qwen":
-                    templates = qwen_build_templates_for_batch(smiles_chunk, tokenizer)
-                else:
-                    templates = build_templates_for_batch(smiles_chunk, tokenizer)
-
-                # Create the appropriate processor
-                if processor_type == "qwen":
-                    processor = QwenConformerConstraintLogitsProcessor(
-                        templates, prompt_lengths,
-                        tokenizer=tokenizer,
-                        eos_token_id=eos_token_id,
-                    )
-                else:
-                    processor = ConformerConstraintLogitsProcessor(
-                        templates, prompt_lengths,
-                        tokenizer=tokenizer,
-                        eos_token_id=eos_token_id,
-                    )
-                logits_processor = LogitsProcessorList([processor])
-
-            outputs = model.generate(
-                input_ids=tokenized["input_ids"],
-                attention_mask=tokenized["attention_mask"],
-                max_new_tokens=max_new_tokens,
-                eos_token_id=eos_token_id,
-                generation_config=gen_config,
-                logits_processor=logits_processor,
-                use_cache=True,
+    with ctx:
+        if profiler:
+            # Need inference_mode inside profiler context
+            with torch.inference_mode():
+                decoded = _run_generation_loop(
+                    model, tokenizer, prompts, smiles_list, gen_config,
+                    batch_size, max_new_tokens, use_logit_processor,
+                    ProcessorClass, template_fn, processor_type,
+                    parallel_templates, template_workers, use_tokenizer_cache,
+                    eos_token_id, device, tokenize_kwargs,
+                )
+        else:
+            decoded = _run_generation_loop(
+                model, tokenizer, prompts, smiles_list, gen_config,
+                batch_size, max_new_tokens, use_logit_processor,
+                ProcessorClass, template_fn, processor_type,
+                parallel_templates, template_workers, use_tokenizer_cache,
+                eos_token_id, device, tokenize_kwargs,
             )
 
-            batch_decoded = tokenizer.batch_decode(outputs, skip_special_tokens=False)
-            for text in batch_decoded:
-                text = text.replace("<|begin_of_text|>", "").replace("<|end_of_text|>", "")
-                decoded.append(text)
-
     elapsed = time() - start_time
+
+    # Export profiler results
+    if profiler:
+        logger.info("Exporting profiler trace...")
+        profiler.export_chrome_trace(str(profile_output_path))
+        logger.info(f"Profile saved to: {profile_output_path}")
+
+        # Also print summary to console
+        print("\n" + "=" * 80)
+        print("PROFILER SUMMARY (Top 20 CUDA operations by total time)")
+        print("=" * 80)
+        print(profiler.key_averages().table(sort_by="cuda_time_total", row_limit=20))
+        print("=" * 80 + "\n")
+
     logger.info(f"Generation time: {elapsed:.2f}s")
     return decoded, elapsed
+
+
+def _run_generation_loop(
+    model, tokenizer, prompts, smiles_list, gen_config,
+    batch_size, max_new_tokens, use_logit_processor,
+    ProcessorClass, template_fn, processor_type,
+    parallel_templates, template_workers, use_tokenizer_cache,
+    eos_token_id, device, tokenize_kwargs,
+):
+    """Inner loop for generation - separated for profiler context management."""
+    decoded = []
+
+    for start in range(0, len(prompts), batch_size):
+        end = start + batch_size
+        prompt_chunk = prompts[start:end]
+        smiles_chunk = smiles_list[start:end]
+
+        tokenized = tokenizer(prompt_chunk, **tokenize_kwargs)
+        tokenized = {k: v.to(device) for k, v in tokenized.items()}
+
+        logits_processor = None
+        if use_logit_processor:
+            prompt_lengths = [int(m.sum().item()) for m in tokenized["attention_mask"]]
+
+            # Build templates (optionally in parallel, optionally with tokenizer caching)
+            if parallel_templates:
+                templates = build_templates_parallel(
+                    smiles_chunk, tokenizer,
+                    processor_type=processor_type,
+                    num_workers=template_workers,
+                    use_tokenizer_cache=use_tokenizer_cache,
+                )
+            else:
+                templates = [
+                    template_fn(smi, tokenizer, use_tokenizer_cache=use_tokenizer_cache)
+                    for smi in smiles_chunk
+                ]
+
+            # Create the processor
+            processor = ProcessorClass(
+                templates, prompt_lengths,
+                tokenizer=tokenizer,
+                eos_token_id=eos_token_id,
+            )
+            logits_processor = LogitsProcessorList([processor])
+
+        outputs = model.generate(
+            input_ids=tokenized["input_ids"],
+            attention_mask=tokenized["attention_mask"],
+            max_new_tokens=max_new_tokens,
+            eos_token_id=eos_token_id,
+            generation_config=gen_config,
+            logits_processor=logits_processor,
+            use_cache=True,
+        )
+
+        batch_decoded = tokenizer.batch_decode(outputs, skip_special_tokens=False)
+        for text in batch_decoded:
+            text = text.replace("<|begin_of_text|>", "").replace("<|end_of_text|>", "")
+            decoded.append(text)
+
+    return decoded
 
 
 def run_smoke_test(config: dict) -> int:
@@ -482,30 +617,61 @@ def run_smoke_test(config: dict) -> int:
     logger.info(f"Loading dataset '{args.dataset}'")
     ground_truth = load_ground_truth(args.dataset)
     smiles_subset = sample_smiles(ground_truth, args.sample_size, seed=args.seed)
-    logger.info(f"Selected {len(smiles_subset)} SMILES")
+    num_generations = getattr(args, 'num_generations', 1)
+    logger.info(f"Selected {len(smiles_subset)} SMILES, {num_generations} generation(s) each")
 
     logger.info("Loading model/tokenizer...")
-    model, tokenizer = _load_model_and_tokenizer(args)
+    model, tokenizer, model_path, tokenizer_path = _load_model_and_tokenizer(args)
     gen_config = deepcopy(sampling_configs[args.sampling_config])
 
     use_lp = not args.no_logit_processor
     static_cache = args.kv_cache == "static"
     parallel_templates = getattr(args, 'parallel_templates', False)
-    template_workers = getattr(args, 'template_workers', 4)
+    cache_tokenizer = getattr(args, 'cache_tokenizer', False)
+
+    # Auto-detect workers if not specified
+    template_workers = getattr(args, 'template_workers', None)
+    if template_workers is None:
+        template_workers = _get_optimal_workers()
+    if parallel_templates:
+        logger.info(f"Using {template_workers} workers for parallel template building "
+                    f"(SLURM_CPUS_PER_TASK={os.environ.get('SLURM_CPUS_PER_TASK', 'N/A')})")
 
     logger.info(f"Starting generation (logit_processor={use_lp}, processor_type={args.processor_type}, "
-                f"kv_cache={args.kv_cache}, parallel_templates={parallel_templates})")
+                f"kv_cache={args.kv_cache}, parallel_templates={parallel_templates}, "
+                f"cache_tokenizer={cache_tokenizer})")
+
+    # Expand SMILES list for multiple generations per molecule
+    # This simulates inference.py behavior where same SMILES is generated multiple times
+    expanded_smiles = smiles_subset * num_generations  # [s1,s2,s3] * 2 = [s1,s2,s3,s1,s2,s3]
+
+    # Get profiling settings
+    enable_profiling = getattr(args, 'profile', False)
+    profile_output = getattr(args, 'profile_output', None)
 
     decoded, time_taken = _generate(
-        model, tokenizer, smiles_subset, gen_config,
+        model, tokenizer, expanded_smiles, gen_config,
         args.batch_size, args.max_new_tokens, use_lp,
         processor_type=args.processor_type,
         static_cache=static_cache,
         parallel_templates=parallel_templates,
         template_workers=template_workers,
+        use_tokenizer_cache=cache_tokenizer,
+        enable_profiling=enable_profiling,
+        profile_output_path=profile_output,
     )
 
-    result = validate_smoke_outputs(smiles_subset, decoded, require_conformer=True)
+    # Group decoded outputs back by original SMILES
+    # decoded_grouped[i] = list of num_generations outputs for smiles_subset[i]
+    n_smiles = len(smiles_subset)
+    decoded_grouped = [[] for _ in range(n_smiles)]
+    for gen_idx in range(num_generations):
+        for smi_idx in range(n_smiles):
+            decoded_grouped[smi_idx].append(decoded[gen_idx * n_smiles + smi_idx])
+
+    # For validation, use first generation of each SMILES (matches original behavior)
+    decoded_first = [group[0] for group in decoded_grouped]
+    result = validate_smoke_outputs(smiles_subset, decoded_first, require_conformer=True)
     logger.info(f"Passed: {result.num_passed}/{result.total}")
 
     if result.failures:
@@ -521,29 +687,54 @@ def run_smoke_test(config: dict) -> int:
         parse_failures = sum(1 for r in result.failures if r.parse_error is not None)
 
         # Get the version from the processor actually used
-        processor_version = (
-            QwenConformerConstraintLogitsProcessor.VERSION
-            if args.processor_type == "qwen"
-            else ConformerConstraintLogitsProcessor.VERSION
-        )
+        processor_version_map = {
+            "generic": ConformerConstraintLogitsProcessor.VERSION,
+            "qwen": QwenConformerConstraintLogitsProcessor.VERSION,
+            "vectorized-qwen": QwenVectorizedConstraintLogitsProcessor.VERSION,
+            "vectorized-qwen-v2": QwenVectorizedConstraintLogitsProcessor.VERSION,  # Same as vectorized-qwen
+        }
+        processor_version = processor_version_map.get(args.processor_type, "unknown")
 
         # Calculate throughput for comparison
         total_tokens = sum(len(d) for d in decoded)  # Rough estimate
         throughput = total_tokens / time_taken if time_taken > 0 else 0
+
+        # Build pass records with all generations if num_generations > 1
+        if num_generations > 1:
+            # Include all generations as array per SMILES
+            pass_records_with_all_gens = []
+            for smi_idx, rec in enumerate(result.records):
+                if not rec.issues:
+                    base_record = _build_pass_record(rec)
+                    # Add all generations for this SMILES
+                    base_record["all_generations"] = decoded_grouped[smi_idx]
+                    pass_records_with_all_gens.append(base_record)
+            pass_records = pass_records_with_all_gens
 
         payload = {
             "metadata": {
                 "version": processor_version,
                 "processor_type": args.processor_type,
                 "timestamp": datetime.now().isoformat(),
+                # Model info
+                "model_alias": args.model_alias,
+                "model_step": args.model_step,
+                "model_path": str(model_path),
+                # Tokenizer info
+                "tokenizer_name": args.tokenizer_name,
+                "tokenizer_path": str(tokenizer_path),
+                # Generation config
                 "logit_processor_enabled": use_lp,
                 "sampling": args.sampling_config,
                 "batch_size": args.batch_size,
                 "sample_size": len(smiles_subset),
+                "num_generations": num_generations,
+                "total_generations": len(smiles_subset) * num_generations,
                 "kv_cache": args.kv_cache,
                 "attention": args.attention,
                 "parallel_templates": parallel_templates,
                 "template_workers": template_workers if parallel_templates else None,
+                "cache_tokenizer": cache_tokenizer,
             },
             "time_taken": time_taken,
             "throughput_chars_per_sec": throughput,
@@ -572,6 +763,7 @@ def main():
     config = {
         "dataset": args.dataset,
         "sample_size": args.sample_size,
+        "num_generations": args.num_generations,
         "batch_size": args.batch_size,
         "model_alias": args.model_alias,
         "model_step": args.model_step,
@@ -590,7 +782,11 @@ def main():
         "kv_cache": args.kv_cache,
         "max_cache_len": args.max_cache_len,
         "parallel_templates": args.parallel_templates,
-        "template_workers": args.template_workers,
+        "template_workers": args.template_workers or _get_optimal_workers(),  # Resolve None to actual value
+        "cache_tokenizer": args.cache_tokenizer,
+        # Profiling
+        "profile": args.profile,
+        "profile_output": str(args.profile_output) if args.profile_output else None,
     }
 
     if args.submit == "local":
