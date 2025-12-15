@@ -7,9 +7,7 @@ import random
 from pathlib import Path
 from typing import BinaryIO, Dict, Iterator, List, Optional, Sequence, Tuple, Union
 
-import numpy as np
 import torch
-import torch.distributed as dist
 from collections import defaultdict, deque
 from loguru import logger
 from torch.utils.data import IterableDataset, get_worker_info
@@ -47,14 +45,6 @@ try:  # optional faster JSON parser
     import orjson as _fast_json
 except Exception:  # pragma: no cover
     _fast_json = None
-
-
-def _is_primary_rank() -> bool:
-    """
-    Return True only for the primary logging rank to avoid duplicated work.
-    """
-
-    return (not dist.is_available()) or (not dist.is_initialized()) or dist.get_rank() == 0
 
 
 def _json_loads(raw):
@@ -362,17 +352,13 @@ class JsonlTaggedPackedDataset(IterableDataset):
         wid = wi.id if wi else 0
         nworkers = wi.num_workers if wi else 1
 
-        logger.info(f"[DataLoader] __iter__ started: rank={self.rank} wid={wid} nworkers={nworkers}")
         self._ensure_tokenizer_ready()
-        logger.info(f"[DataLoader] tokenizer ready: rank={self.rank}")
         fps = [open(p, "rb") for p in self.files]
-        logger.info(f"[DataLoader] opened {len(fps)} files: rank={self.rank}")
         try:
             while True:
                 all_pairs = self._pairs_for_epoch()
                 worker_pairs = [p for i, p in enumerate(all_pairs) if (i % nworkers) == wid]
                 self._pairs_total = len(worker_pairs)
-                logger.info(f"[DataLoader] epoch={self._epoch} pairs={len(worker_pairs)}: rank={self.rank}")
                 preview_enabled = (
                     self._preview_enabled and (self._epoch == 0) and (wid == 0)
                 )
@@ -521,9 +507,6 @@ class JsonlTaggedPackedDataset(IterableDataset):
         )
         self._truncation_warning_shown = True
 
-    _read_debug_count = 0
-    _read_debug_limit = 5
-
     def _read_unit_from_pair(
         self,
         fps: List[BinaryIO],
@@ -532,33 +515,20 @@ class JsonlTaggedPackedDataset(IterableDataset):
         fi, li = pair
         raw = read_line_at(fps[fi], int(self.idxs[fi][li]))
         if not raw:
-            if self._read_debug_count < self._read_debug_limit:
-                logger.warning(f"[DEBUG] raw is empty: fi={fi} li={li} rank={self.rank}")
-                self._read_debug_count += 1
             return None
 
         try:
             obj = _json_loads(raw)
-        except Exception as e:
-            if self._read_debug_count < self._read_debug_limit:
-                logger.warning(f"[DEBUG] JSON parse failed: {e}, raw[:100]={raw[:100]!r} rank={self.rank}")
-                self._read_debug_count += 1
+        except Exception:
             return None
 
         canon = (obj.get("canonical_smiles") or "").strip()
         emb = (obj.get("embedded_smiles") or "").strip()
         if not is_valid_unit(canon, emb, min_emb_len=self.min_emb_len):
-            if self._read_debug_count < self._read_debug_limit:
-                emb_preview = emb[:50] if emb else 'EMPTY'
-                logger.warning(f"[DEBUG] is_valid_unit failed: canon={canon[:50]!r} emb={emb_preview!r} min_emb_len={self.min_emb_len} rank={self.rank}")
-                self._read_debug_count += 1
             return None
         unit = build_unit(canon, emb)
         tokens = self._tokenizer.encode(unit, add_special_tokens=False)
         if not tokens:
-            if self._read_debug_count < self._read_debug_limit:
-                logger.warning(f"[DEBUG] tokens empty: unit={unit[:100]!r} rank={self.rank}")
-                self._read_debug_count += 1
             return None
         if len(tokens) > self.max_unit_tokens:
             if not self.truncate_overflow_units:
@@ -575,28 +545,21 @@ class JsonlTaggedPackedDataset(IterableDataset):
         fps: List[BinaryIO],
         preview_enabled: bool,
     ) -> Iterator[Tuple[Dict[str, torch.Tensor], torch.Tensor]]:
-        batch_count = 0
         while True:
             self._ensure_pending_units(worker_pairs, fps)
             if not self._pending_units:
-                logger.info(f"[DataLoader] _pack_from_pairs: no pending units, breaking: rank={self.rank}")
                 break
             unit = self._select_fitting_unit()
             if unit:
                 self._sequence_state.append_unit(unit)
                 continue
             if self._sequence_state.has_content():
-                batch_count += 1
-                if batch_count <= 3:
-                    logger.info(f"[DataLoader] yielding batch {batch_count}: rank={self.rank}")
                 yield self._finalize_with_logging(preview_enabled)
                 continue
             if self._evict_monster_unit():
                 continue
             break
         if self._sequence_state.has_content():
-            batch_count += 1
-            logger.info(f"[DataLoader] yielding final batch {batch_count}: rank={self.rank}")
             yield self._finalize_with_logging(preview_enabled)
 
     def _finalize_with_logging(
