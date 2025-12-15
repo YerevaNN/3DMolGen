@@ -124,6 +124,7 @@ class MolGenValidationConfig(TorchTitanValidation):
     """
 
     numerical_validation: bool = False
+    num_val_molecules: int = 10
 
 
 @dataclass

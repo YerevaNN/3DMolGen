@@ -10,6 +10,7 @@
 #SBATCH --error=outputs/slurm_jobs/titan/%j.err
 
 export WANDB_ENTITY=${WANDB_ENTITY:-menuab_team}
+export PYTHONPATH="${PYTHONPATH}:$(pwd)/src"
 export WANDB_PROJECT=${WANDB_PROJECT:-3dmolgen}
 export WANDB_GROUP=${WANDB_GROUP:-pretrain}
 export WANDB_JOB_TYPE=${WANDB_JOB_TYPE:-pretrain}

@@ -38,7 +38,8 @@ local_batch_size = 4
 seq_len = 2048
 freq = 500
 steps = 200
-numerical_validation = false
+numerical_validation = true
+num_val_molecules = 10
 
 [molgen_data]
 train_path_key = "conformers_train"

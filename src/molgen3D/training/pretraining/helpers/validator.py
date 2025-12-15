@@ -21,11 +21,15 @@ except Exception:
     Validator = None
     titan_logger = None
 
+from transformers import AutoTokenizer
+
 from molgen3D.training.pretraining.config.custom_job_config import (
     JobConfig as MolGenJobConfig,
 )
-from molgen3D.data_processing.utils import decode_cartesian_raw
-from molgen3D.evaluation.utils import extract_between
+from rdkit import Chem
+
+from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2, strip_smiles
+from molgen3D.evaluation.utils import extract_between, same_molecular_graph
 from molgen3D.utils.utils import get_best_rmsd
 from molgen3D.training.pretraining.dataprocessing.dataloader import (
     build_dataloader,
@@ -33,9 +37,17 @@ from molgen3D.training.pretraining.dataprocessing.dataloader import (
     _resolve_tokenizer_path,
 )
 
-NUM_NUMERICAL_VALIDATION_PROMPTS = 200
+MAX_CONFORMER_TOKENS = 2000  # Typical conformer is 200-500 tokens
 PRETOKENIZED_PROMPTS_PATH = Path("/auto/home/vover/3DMolGen/data/pretokenized_prompts.json")
 VALIDATION_PICKLE_PATH = Path("/auto/home/vover/3DMolGen/data/valid_set.pickle")
+
+# Failure type constants
+FAIL_NO_CLOSING_TAG = "no_closing_tag"
+FAIL_EMPTY_CONFORMER = "empty_conformer"
+FAIL_PARSING_ERROR = "parsing_error"
+FAIL_SMILES_MISMATCH = "smiles_mismatch"
+FAIL_RMSD_NAN = "rmsd_nan"
+FAIL_NO_GROUND_TRUTH = "no_ground_truth"
 
 def _is_primary_rank() -> bool:
     """
@@ -84,10 +96,44 @@ if Validator is not None:
             self.pp_schedule = pp_schedule
             self.pp_has_first_stage = pp_has_first_stage
             self.pp_has_last_stage = pp_has_last_stage
-            self._conformer_start_id = self._resolve_token_id("[CONFORMERS]", "[CONFORMER]")
+            
+            # Store output directory for saving failed generations
+            self._output_dir = Path(job_config.job.dump_folder)
+            
+            # Load a proper AutoTokenizer for token resolution
+            # TorchTitan's HuggingFaceTokenizer doesn't load added_tokens.json properly
+            data_cfg = getattr(job_config, "molgen_data", None)
+            if data_cfg is not None:
+                tokenizer_path = _resolve_tokenizer_path(data_cfg, job_config)
+                self._token_resolver = AutoTokenizer.from_pretrained(
+                    tokenizer_path, use_fast=True
+                )
+                if _is_primary_rank():
+                    logger.info(f"Loaded AutoTokenizer from {tokenizer_path} for token resolution")
+            else:
+                self._token_resolver = None
+                if _is_primary_rank():
+                    logger.warning("No molgen_data config; using wrapped tokenizer for token resolution")
+            
+            if _is_primary_rank():
+                logger.info("Resolving conformer tokens with debug=True...")
+            self._conformer_start_id = self._resolve_token_id("[CONFORMER]", "[CONFORMERS]", debug=True)
             self._conformer_end_id = self._resolve_token_id(
-                "[/CONFORMERS]", "[/CONFORMER]"
+                "[/CONFORMER]", "[/CONFORMERS]", debug=True
             )
+            if _is_primary_rank():
+                # Debug: show tokenizer type and attributes to help diagnose issues
+                tok_type = type(tokenizer).__name__
+                has_inner = hasattr(tokenizer, "tokenizer")
+                inner_type = type(tokenizer.tokenizer).__name__ if has_inner else "N/A"
+                logger.info(
+                    f"MolGenValidator tokenizer: type={tok_type}, has_inner={has_inner}, "
+                    f"inner_type={inner_type}"
+                )
+                logger.info(
+                    f"MolGenValidator token resolution: conformer_start_id={self._conformer_start_id}, "
+                    f"conformer_end_id={self._conformer_end_id}"
+                )
             self._eos_id = _resolve_special_token_id(
                 tokenizer,
                 "eos_id",
@@ -111,26 +157,31 @@ if Validator is not None:
                     "unequal sample counts across ranks when dataset is exhausted."
                 )
 
-        def _resolve_token_id(self, *tokens: str) -> Optional[int]:
+        def _resolve_token_id(self, *tokens: str, debug: bool = False) -> Optional[int]:
+            # Use the properly loaded AutoTokenizer if available
+            # This has added_tokens.json loaded correctly
+            tokenizer = self._token_resolver if self._token_resolver is not None else self.tokenizer
+            
+            if debug and _is_primary_rank():
+                logger.info(f"  Using tokenizer: {type(tokenizer).__name__}")
+            
             for token in tokens:
                 if not token:
                     continue
                 
-                # Handle wrapped tokenizers (e.g. TorchTitan's HuggingFaceTokenizer)
-                tokenizer = self.tokenizer
-                if not hasattr(tokenizer, "convert_tokens_to_ids") and hasattr(tokenizer, "tokenizer"):
-                    tokenizer = tokenizer.tokenizer
-
+                token_id = None
+                
+                # Method 1: convert_tokens_to_ids (HuggingFace PreTrainedTokenizer)
                 if hasattr(tokenizer, "convert_tokens_to_ids"):
                     token_id = tokenizer.convert_tokens_to_ids(token)
-                elif hasattr(tokenizer, "encode"):
-                    encoded = tokenizer.encode(token, add_special_tokens=False)
-                    if isinstance(encoded, list) and len(encoded) == 1:
-                        token_id = encoded[0]
-                    else:
-                        token_id = None
-                else:
-                    token_id = None
+                    if debug and _is_primary_rank():
+                        logger.info(f"  convert_tokens_to_ids('{token}') = {token_id}")
+                
+                # Method 2: token_to_id (tokenizers.Tokenizer)
+                if token_id is None and hasattr(tokenizer, "token_to_id"):
+                    token_id = tokenizer.token_to_id(token)
+                    if debug and _is_primary_rank():
+                        logger.info(f"  token_to_id('{token}') = {token_id}")
 
                 if isinstance(token_id, int) and token_id >= 0:
                     return int(token_id)
@@ -162,6 +213,7 @@ if Validator is not None:
             max_new_tokens: int,
             max_total_len: int,
         ) -> torch.Tensor:
+            """Single-sequence greedy decoding."""
             generated = prompt
             for _ in range(max_new_tokens):
                 logits = model(generated)
@@ -177,14 +229,27 @@ if Validator is not None:
                     break
             return generated
 
+        def _decode_tokens(self, tokens: List[int]) -> str:
+            """Decode tokens using the best available tokenizer.
+            
+            Uses _token_resolver (AutoTokenizer) when available because it properly
+            handles custom tokens like [CONFORMER]. Falls back to wrapped tokenizer.
+            """
+            decoder = self._token_resolver if self._token_resolver is not None else self.tokenizer
+            return decoder.decode(tokens, skip_special_tokens=False)
+
         def _extract_conformer_text(self, token_tensor: torch.Tensor) -> str:
-            decoded = self.tokenizer.decode(
-                token_tensor[0].tolist(), skip_special_tokens=False
-            )
-            conformer = extract_between(decoded, "[CONFORMERS]", "[/CONFORMERS]")
+            """Extract conformer text from a single sequence."""
+            if token_tensor.dim() == 2:
+                tokens = token_tensor[0].tolist()
+            else:
+                tokens = token_tensor.tolist()
+            decoded = self._decode_tokens(tokens)
+            # Try [CONFORMER] first (primary format), fall back to [CONFORMERS]
+            conformer = extract_between(decoded, "[CONFORMER]", "[/CONFORMER]")
             if not conformer:
-                conformer = extract_between(decoded, "[CONFORMER]", "[/CONFORMER]")
-            return conformer.strip()
+                conformer = extract_between(decoded, "[CONFORMERS]", "[/CONFORMERS]")
+            return conformer.strip() if conformer else ""
 
         def _compute_rmsd_stats(
             self, generated_mol, ground_truths: Sequence
@@ -211,13 +276,38 @@ if Validator is not None:
                 float(np.nanmean(arr)),
             )
 
+        def _save_failed_generations(
+            self,
+            failed_generations: List[Tuple[str, str, str]],  # (prompt, full_generated, fail_type)
+            step: int,
+        ) -> None:
+            """Save all failed generations to a text file in the job's output directory."""
+            failed_dir = self._output_dir / "failed_generations"
+            failed_dir.mkdir(parents=True, exist_ok=True)
+            output_path = failed_dir / f"failed_step_{step}.txt"
+            
+            with open(output_path, "w") as f:
+                f.write(f"Failed Generations Report - Step {step}\n")
+                f.write(f"Total failures: {len(failed_generations)}\n")
+                f.write("=" * 80 + "\n\n")
+                
+                for i, (prompt, full_generated, fail_type) in enumerate(failed_generations, 1):
+                    f.write(f"--- Failure #{i} ---\n")
+                    f.write(f"Prompt:\n{prompt}\n\n")
+                    f.write(f"Full Generated String:\n{full_generated}\n\n")
+                    f.write(f"Fail Type: {fail_type}\n")
+                    f.write("-" * 80 + "\n\n")
+            
+            logger.info(f"Saved {len(failed_generations)} failed generations to {output_path}")
+
         def _log_numerical_metrics(
             self,
             min_rmsds: List[float],
             max_rmsds: List[float],
             avg_rmsds: List[float],
-            failures: int,
+            failure_counts: Dict[str, int],
             step: int,
+            sample_failures: List[Tuple[str, str, str]],  # (smiles, failure_type, details)
         ) -> None:
             valid_min = np.array(min_rmsds, dtype=float)
             valid_min = valid_min[~np.isnan(valid_min)]
@@ -228,10 +318,16 @@ if Validator is not None:
             valid_avg = np.array(avg_rmsds, dtype=float)
             valid_avg = valid_avg[~np.isnan(valid_avg)]
 
+            total_failures = sum(failure_counts.values())
             metrics: Dict[str, float] = {
-                "numerical_val/failures": float(failures),
+                "numerical_val/failures": float(total_failures),
                 "numerical_val/successes": float(valid_min.size),
             }
+            
+            # Add per-failure-type metrics
+            for fail_type, count in failure_counts.items():
+                metrics[f"numerical_val/fail_{fail_type}"] = float(count)
+            
             if valid_min.size > 0:
                 metrics.update(
                     {
@@ -252,9 +348,19 @@ if Validator is not None:
                 if valid_min.size > 0
                 else ""
             )
+            
+            # Log failure breakdown
+            failure_str = ", ".join(f"{k}={v}" for k, v in sorted(failure_counts.items()) if v > 0)
             logger.info(
-                f"Numerical validation (step {step}): successes={successes} failures={failures}{suffix}"
+                f"Numerical validation (step {step}): successes={successes} failures={total_failures} "
+                f"[{failure_str}]{suffix}"
             )
+            
+            # Log sample failures for debugging (first 3)
+            if sample_failures:
+                logger.info(f"Sample failures (first {min(3, len(sample_failures))}):")
+                for smiles, fail_type, details in sample_failures[:3]:
+                    logger.info(f"  [{fail_type}] {smiles[:50]}... : {details[:100]}")
 
             try:  # best effort W&B logging
                 import wandb  # type: ignore
@@ -265,6 +371,8 @@ if Validator is not None:
                 logger.info("W&B not installed; skipping numerical validation logging.")
             except Exception as exc:  # pragma: no cover - runtime safety
                 logger.warning(f"Failed to log numerical metrics to W&B: {exc}")
+
+        def _load_prompts(self, num_prompts: int) -> List[Tuple[str, List[int]]]:
             if not PRETOKENIZED_PROMPTS_PATH.exists():
                 logger.warning(
                     f"Numerical validation prompts file not found at {PRETOKENIZED_PROMPTS_PATH}"
@@ -285,9 +393,7 @@ if Validator is not None:
                 )
                 return []
 
-            items = sorted(payload.items(), key=lambda kv: kv[0])[
-                :NUM_NUMERICAL_VALIDATION_PROMPTS
-            ]
+            items = sorted(payload.items(), key=lambda kv: kv[0])[:num_prompts]
             normalized: List[Tuple[str, List[int]]] = []
             for key, value in items:
                 if isinstance(value, list):
@@ -321,62 +427,6 @@ if Validator is not None:
                 return {}
             return data
 
-        def _log_numerical_metrics(
-            self,
-            min_rmsds: List[float],
-            max_rmsds: List[float],
-            avg_rmsds: List[float],
-            failures: int,
-            step: int,
-        ) -> None:
-            valid_min = np.array(min_rmsds, dtype=float)
-            valid_min = valid_min[~np.isnan(valid_min)]
-
-            valid_max = np.array(max_rmsds, dtype=float)
-            valid_max = valid_max[~np.isnan(valid_max)]
-
-            valid_avg = np.array(avg_rmsds, dtype=float)
-            valid_avg = valid_avg[~np.isnan(valid_avg)]
-
-            metrics: Dict[str, float] = {
-                "numerical_val/failures": float(failures),
-                "numerical_val/successes": float(valid_min.size),
-            }
-            if valid_min.size > 0:
-                metrics.update(
-                    {
-                        "numerical_val/rmsd_min_min": float(np.nanmin(valid_min)),
-                        "numerical_val/rmsd_min_max": float(np.nanmax(valid_min)),
-                        "numerical_val/rmsd_min_mean": float(np.nanmean(valid_min)),
-                        "numerical_val/rmsd_min_std": float(np.nanstd(valid_min)),
-                        # New metrics
-                        "numerical_val/rmsd_max_mean": float(np.nanmean(valid_max)),
-                        "numerical_val/rmsd_avg_mean": float(np.nanmean(valid_avg)),
-                    }
-                )
-
-            successes = int(metrics.get("numerical_val/successes", 0))
-            suffix = (
-                f" | rmsd min_mean={metrics.get('numerical_val/rmsd_min_mean', float('nan')):.4f}"
-                f" max_mean={metrics.get('numerical_val/rmsd_max_mean', float('nan')):.4f}"
-                f" avg_mean={metrics.get('numerical_val/rmsd_avg_mean', float('nan')):.4f}"
-                if valid_min.size > 0
-                else ""
-            )
-            logger.info(
-                f"Numerical validation (step {step}): successes={successes} failures={failures}{suffix}"
-            )
-
-            try:  # best effort W&B logging
-                import wandb  # type: ignore
-
-                if wandb.run is not None:
-                    wandb.log(metrics, step=step)
-            except ModuleNotFoundError:
-                logger.info("W&B not installed; skipping numerical validation logging.")
-            except Exception as exc:  # pragma: no cover - runtime safety
-                logger.warning(f"Failed to log numerical metrics to W&B: {exc}")
-
         def _run_numerical_validation(
             self, model_parts: List[torch.nn.Module], step: int
         ) -> None:
@@ -384,19 +434,27 @@ if Validator is not None:
                 return
             # Removed primary rank check to support FSDP synchronization
             if self.parallel_dims.pp_enabled or len(model_parts) != 1:
-                logger.warning(
-                    "Numerical validation currently supports single-stage models; skipping."
-                )
+                if _is_primary_rank():
+                    logger.warning(
+                        "Numerical validation currently supports single-stage models; skipping."
+                    )
                 return
             if self._conformer_start_id is None or self._conformer_end_id is None:
-                logger.warning(
-                    "Conformer tokens missing from tokenizer; numerical validation skipped."
-                )
+                if _is_primary_rank():
+                    logger.warning(
+                        "Conformer tokens missing from tokenizer; numerical validation skipped."
+                    )
                 return
 
-            prompts = self._load_prompts()
+            num_val_molecules = getattr(self.job_config.validation, "num_val_molecules", 10)
+            prompts = self._load_prompts(num_val_molecules)
             ground_truths = self._load_ground_truths()
             if not prompts or not ground_truths:
+                if _is_primary_rank():
+                    logger.warning(
+                        f"Numerical validation skipped: prompts={len(prompts) if prompts else 0}, "
+                        f"ground_truths={len(ground_truths) if ground_truths else 0}"
+                    )
                 return
 
             model = model_parts[0]
@@ -407,60 +465,132 @@ if Validator is not None:
                 or 2048
             )
 
+            # Filter prompts to those with ground truths
+            valid_prompts = [(key, token_ids) for key, token_ids in prompts if ground_truths.get(key)]
+            skipped_no_gt = len(prompts) - len(valid_prompts)
+            
+            if _is_primary_rank():
+                logger.info(
+                    f"Starting numerical validation: {len(valid_prompts)} prompts, step={step}"
+                )
+
             min_rmsds: List[float] = []
             max_rmsds: List[float] = []
             avg_rmsds: List[float] = []
-            failures = 0
+            
+            # Track failure types
+            failure_counts: Dict[str, int] = {
+                FAIL_NO_CLOSING_TAG: 0,
+                FAIL_EMPTY_CONFORMER: 0,
+                FAIL_PARSING_ERROR: 0,
+                FAIL_SMILES_MISMATCH: 0,
+                FAIL_RMSD_NAN: 0,
+                FAIL_NO_GROUND_TRUTH: skipped_no_gt,
+            }
+            sample_failures: List[Tuple[str, str, str]] = []  # (smiles, fail_type, details)
+            all_failed_generations: List[Tuple[str, str, str]] = []  # (prompt, full_generated, fail_type)
+            
             was_training = model.training
             model.eval()
 
             with torch.inference_mode():
-                for key, token_ids in prompts:
-                    gt_confs = ground_truths.get(key)
-                    if not gt_confs:
-                        failures += 1
+                for i, (key, token_ids) in enumerate(valid_prompts):
+                    # Build prompt tensor
+                    prompt = self._build_prompt_tensor(token_ids, device)
+                    if prompt is None:
+                        failure_counts[FAIL_PARSING_ERROR] += 1
+                        if len(sample_failures) < 10:
+                            sample_failures.append((key, FAIL_PARSING_ERROR, "failed to build prompt"))
                         continue
-
-                    prompt_tensor = self._build_prompt_tensor(token_ids, device)
-                    if prompt_tensor is None:
-                        failures += 1
-                        continue
-
-                    available = max(max_seq_len - prompt_tensor.shape[1], 1)
-                    max_new_tokens = min(512, available)
-
-                    generated_ids = self._greedy_decode(
-                        model, prompt_tensor, max_new_tokens, max_seq_len
-                    )
-                    conformer_text = self._extract_conformer_text(generated_ids)
+                    
+                    # Calculate max new tokens
+                    available = max(max_seq_len - prompt.shape[1], 1)
+                    max_new_tokens = min(MAX_CONFORMER_TOKENS, available)
+                    
+                    # Generate
+                    generated = self._greedy_decode(model, prompt, max_new_tokens, max_seq_len)
+                    
+                    # Decode full generated string for logging
+                    tokens = generated[0].tolist()
+                    full_decoded = self._decode_tokens(tokens)
+                    
+                    # Extract conformer text
+                    conformer_text = self._extract_conformer_text(generated)
+                    
+                    # Check for empty/missing conformer
                     if not conformer_text:
-                        failures += 1
+                        # Check if [/CONFORMER] is missing
+                        if "[/CONFORMER]" not in full_decoded and "[/CONFORMERS]" not in full_decoded:
+                            failure_counts[FAIL_NO_CLOSING_TAG] += 1
+                            all_failed_generations.append((key, full_decoded, FAIL_NO_CLOSING_TAG))
+                            if len(sample_failures) < 10:
+                                # Show what was generated after [CONFORMER]
+                                conf_start_idx = full_decoded.find("[CONFORMER]")
+                                if conf_start_idx >= 0:
+                                    gen_part = full_decoded[conf_start_idx:conf_start_idx + 150]
+                                else:
+                                    gen_part = full_decoded[-150:]
+                                sample_failures.append((key, FAIL_NO_CLOSING_TAG, f"generated: {gen_part}"))
+                        else:
+                            failure_counts[FAIL_EMPTY_CONFORMER] += 1
+                            all_failed_generations.append((key, full_decoded, FAIL_EMPTY_CONFORMER))
+                            if len(sample_failures) < 10:
+                                sample_failures.append((key, FAIL_EMPTY_CONFORMER, f"decoded: {full_decoded[-100:]}"))
                         continue
-
+                    
+                    # Try to parse the conformer
                     try:
-                        generated_mol = decode_cartesian_raw(conformer_text)
-                    except Exception:
-                        failures += 1
+                        generated_mol = decode_cartesian_v2(conformer_text)
+                    except Exception as e:
+                        failure_counts[FAIL_PARSING_ERROR] += 1
+                        all_failed_generations.append((key, full_decoded, FAIL_PARSING_ERROR))
+                        if len(sample_failures) < 10:
+                            sample_failures.append((key, FAIL_PARSING_ERROR, f"{e}: {conformer_text[:80]}"))
                         continue
-
+                    
+                    # Check SMILES match using same_molecular_graph
+                    # Extract SMILES from the conformer text using strip_smiles
+                    generated_smiles = strip_smiles(conformer_text)
+                    if not same_molecular_graph(key, generated_smiles):
+                        failure_counts[FAIL_SMILES_MISMATCH] += 1
+                        all_failed_generations.append((key, full_decoded, FAIL_SMILES_MISMATCH))
+                        if len(sample_failures) < 10:
+                            sample_failures.append((key, FAIL_SMILES_MISMATCH, f"got: {generated_smiles}"))
+                        continue
+                    
+                    gt_confs = ground_truths.get(key, [])
                     min_val, max_val, avg_val = self._compute_rmsd_stats(
                         generated_mol, gt_confs
                     )
-
+                    
                     if np.isnan(min_val):
-                        failures += 1
+                        failure_counts[FAIL_RMSD_NAN] += 1
+                        all_failed_generations.append((key, full_decoded, FAIL_RMSD_NAN))
+                        if len(sample_failures) < 10:
+                            sample_failures.append((key, FAIL_RMSD_NAN, f"RMSD returned NaN"))
                     else:
                         min_rmsds.append(min_val)
                         max_rmsds.append(max_val)
                         avg_rmsds.append(avg_val)
+                    
+                    # Progress logging
+                    if _is_primary_rank() and (i + 1) % 5 == 0:
+                        total_failures = sum(failure_counts.values())
+                        logger.info(
+                            f"Numerical validation progress: {i+1}/{len(valid_prompts)}, "
+                            f"successes={len(min_rmsds)}, failures={total_failures}"
+                        )
 
             if was_training:
                 model.train()
 
             if _is_primary_rank():
                 self._log_numerical_metrics(
-                    min_rmsds, max_rmsds, avg_rmsds, failures, step
+                    min_rmsds, max_rmsds, avg_rmsds, failure_counts, step, sample_failures
                 )
+                # Save all failed generations to file
+                if all_failed_generations:
+                    self._save_failed_generations(all_failed_generations, step)
 
         @torch.no_grad()
         def validate(
@@ -472,7 +602,8 @@ if Validator is not None:
             try:
                 self._run_numerical_validation(model_parts, step)
             except Exception as exc:  # pragma: no cover - safety
-                logger.warning("Numerical validation failed: %s", exc)
+                import traceback
+                logger.warning(f"Numerical validation failed: {exc}\n{traceback.format_exc()}")
 
     MolGenValidatorClass = MolGenValidator
 
@@ -517,7 +648,7 @@ def build_molgen_validator(
         num_workers=val_num_workers,
         pin_memory=data_cfg.pin_memory,
         shuffle_lines=False,
-        # Mirror TorchTitan’s default: only allow finite validation when the user
+        # Mirror TorchTitan's default: only allow finite validation when the user
         # explicitly sets steps=-1, otherwise keep the loader infinite so every
         # rank can always advance to the requested step count.
         infinite=infinite_validation,
@@ -545,4 +676,3 @@ def build_molgen_validator(
         pp_has_first_stage=pp_has_first_stage,
         pp_has_last_stage=pp_has_last_stage,
     )
-
