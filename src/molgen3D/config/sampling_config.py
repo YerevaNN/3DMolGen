@@ -175,6 +175,17 @@ min_p_sampling_config12= GenerationConfig(
     temperature=0.8,
     min_p = 0.05,
 )
+
+# Qwen3-recommended sampling config (from official HuggingFace docs)
+# DO NOT use greedy decoding with Qwen3 - causes performance degradation
+# https://huggingface.co/Qwen/Qwen3-0.6B
+qwen3_config = GenerationConfig(
+    do_sample=True,
+    temperature=0.7,
+    top_p=0.8,
+    top_k=20,
+)
+
 sampling_configs = {
     "greedy": greedy_config,
     "beam_search": beam_search_config,
@@ -206,6 +217,7 @@ sampling_configs = {
     "min_p_sampling10": min_p_sampling_config10,
     "min_p_sampling11": min_p_sampling_config11,
     "min_p_sampling12": min_p_sampling_config12,
+    "qwen3": qwen3_config,
 }
 
 gen_num_codes = {

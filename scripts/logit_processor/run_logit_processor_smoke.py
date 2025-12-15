@@ -70,6 +70,10 @@ from molgen3D.evaluation.qwen_vectorized_constraint_lp import (
     build_templates_for_batch as vectorized_build_templates_for_batch,
     build_precomputed_template as vectorized_build_precomputed_template,
 )
+from molgen3D.evaluation.qwen_simple_vectorized_lp import (
+    QwenSimpleVectorizedLogitsProcessor,
+    build_precomputed_template as simple_vectorized_build_precomputed_template,
+)
 from molgen3D.config.paths import get_data_path
 from molgen3D.evaluation.inference import load_model_tokenizer
 from molgen3D.evaluation.utils import extract_between, same_molecular_graph
@@ -113,6 +117,7 @@ def build_templates_parallel(
         "qwen": qwen_build_precomputed_template,
         "vectorized-qwen": vectorized_build_precomputed_template,
         "vectorized-qwen-v2": vectorized_build_precomputed_template,
+        "simple-vectorized": simple_vectorized_build_precomputed_template,
     }
     build_fn = build_fn_map.get(processor_type, build_precomputed_template)
 
@@ -257,7 +262,7 @@ def _parse_args() -> argparse.Namespace:
                         help="Number of conformer generations per SMILES (default: 1). "
                              "Use >1 to simulate inference.py behavior and test tokenizer caching.")
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--model-alias", default="m380_conf_v2")
+    parser.add_argument("--model-alias", default="m380_conf_v2") 
     parser.add_argument("--model-step", default="2e")
     parser.add_argument("--model-path", type=Path)
     parser.add_argument("--tokenizer-name", default="llama3_chem_v1")
@@ -273,11 +278,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--no-logit-processor", action="store_true",
                         help="Disable logit processor for timing comparison")
     parser.add_argument("--processor-type",
-                        choices=["generic", "qwen", "vectorized-qwen", "vectorized-qwen-v2"],
+                        choices=["generic", "qwen", "vectorized-qwen", "vectorized-qwen-v2", "simple-vectorized"],
                         default="generic",
-                        help="Select logit processor type: 'generic' (blocklist), 'qwen' (allowlist v3.3), "
-                             "'vectorized-qwen' (v4.0 torch.compile compatible), "
-                             "'vectorized-qwen-v2' (v4.1 branchless)")
+                        help="Select logit processor type: 'generic' (blocklist), 'qwen' (blocklist v3.7), "
+                             "'vectorized-qwen' (v4.x torch.compile compatible), "
+                             "'simple-vectorized' (v5.0 simple in-place, recommended)")
     # Optimization flags
     parser.add_argument("--kv-cache", choices=["dynamic", "static"], default="dynamic",
                         help="KV cache mode: 'dynamic' (default) or 'static' (~1.8x speedup on H100)")
@@ -437,8 +442,11 @@ def _get_processor_class_and_template_fn(processor_type: str):
     elif processor_type == "qwen":
         return QwenConformerConstraintLogitsProcessor, qwen_build_precomputed_template
     elif processor_type in ("vectorized-qwen", "vectorized-qwen-v2"):
-        # Both map to the same v4.1 implementation (v2 is now an alias)
+        # Both map to the same v4.x implementation (v2 is now an alias)
         return QwenVectorizedConstraintLogitsProcessor, vectorized_build_precomputed_template
+    elif processor_type == "simple-vectorized":
+        # v5.0: Simple in-place modification with pre-stacked templates
+        return QwenSimpleVectorizedLogitsProcessor, simple_vectorized_build_precomputed_template
     else:
         raise ValueError(f"Unknown processor type: {processor_type}")
 
@@ -476,14 +484,12 @@ def _generate(
             profile_output_path = Path(profile_output_path)
         profile_output_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # Profiling a long generate() can explode memory; keep it lightweight
         profiler = torch_profile(
-            activities=[
-                ProfilerActivity.CPU,
-                ProfilerActivity.CUDA,
-            ],
-            record_shapes=True,
-            profile_memory=True,
-            with_stack=True,
+            activities=[ProfilerActivity.CUDA],  # CUDA only to reduce event volume
+            record_shapes=False,
+            profile_memory=False,
+            with_stack=False,
         )
         logger.info(f"Profiling enabled, will save to: {profile_output_path}")
 
@@ -587,7 +593,9 @@ def _run_generation_loop(
 
         batch_decoded = tokenizer.batch_decode(outputs, skip_special_tokens=False)
         for text in batch_decoded:
+            # Strip any special tokens the tokenizer leaves in decoded text so JSONs are readable
             text = text.replace("<|begin_of_text|>", "").replace("<|end_of_text|>", "")
+            text = text.replace("<|endoftext|>", "")  # Qwen-style EOS/pad token
             decoded.append(text)
 
     return decoded
@@ -691,13 +699,23 @@ def run_smoke_test(config: dict) -> int:
             "generic": ConformerConstraintLogitsProcessor.VERSION,
             "qwen": QwenConformerConstraintLogitsProcessor.VERSION,
             "vectorized-qwen": QwenVectorizedConstraintLogitsProcessor.VERSION,
-            "vectorized-qwen-v2": QwenVectorizedConstraintLogitsProcessor.VERSION,  # Same as vectorized-qwen
+            "vectorized-qwen-v2": QwenVectorizedConstraintLogitsProcessor.VERSION,
+            "simple-vectorized": QwenSimpleVectorizedLogitsProcessor.VERSION,
         }
         processor_version = processor_version_map.get(args.processor_type, "unknown")
 
-        # Calculate throughput for comparison
-        total_tokens = sum(len(d) for d in decoded)  # Rough estimate
-        throughput = total_tokens / time_taken if time_taken > 0 else 0
+        # Calculate throughput for comparison (strip special tokens so Qwen padding doesn't inflate)
+        def _strip_special(text: str) -> str:
+            return (
+                text.replace("<|begin_of_text|>", "")
+                    .replace("<|end_of_text|>", "")
+                    .replace("<|endoftext|>", "")
+            )
+
+        total_chars_raw = sum(len(d) for d in decoded)
+        decoded_clean = [_strip_special(d) for d in decoded]
+        total_chars_clean = sum(len(d) for d in decoded_clean)
+        throughput = total_chars_clean / time_taken if time_taken > 0 else 0
 
         # Build pass records with all generations if num_generations > 1
         if num_generations > 1:
@@ -738,6 +756,8 @@ def run_smoke_test(config: dict) -> int:
             },
             "time_taken": time_taken,
             "throughput_chars_per_sec": throughput,
+            "total_chars_raw": total_chars_raw,
+            "total_chars_clean": total_chars_clean,
             "num_passed": result.num_passed,
             "num_failed": len(result.failures),
             "summary": {
@@ -806,7 +826,7 @@ def main():
             timeout_min=60,
             gpus_per_node=1,
             nodes=1,
-            mem_gb=80,
+            mem_gb=40,
             cpus_per_task=4,
             slurm_additional_parameters={"partition": partition},
         )

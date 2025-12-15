@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 import importlib.resources as pkg_resources
@@ -119,6 +120,23 @@ def get_tokenizer_path(name: str) -> Path:
     if name not in tokenizers:
         raise KeyError(f"Unknown tokenizer '{name}', available: {sorted(tokenizers.keys())}")
     return _to_absolute_path(tokenizers[name])
+
+
+def get_model_tokenizer(alias: str) -> str | None:
+    """
+    Get the default tokenizer name for a model alias.
+
+    Args:
+        alias: Model alias from the config
+
+    Returns:
+        Tokenizer name if specified in model config, None otherwise
+    """
+    models = _get_config_section("models")
+    entry = models.get(alias)
+    if entry is None:
+        raise KeyError(f"Unknown model alias '{alias}'.")
+    return entry.get("tokenizer")
 
 
 def get_base_path(key: str) -> Path:

@@ -1,24 +1,25 @@
 """
-Constrained Conformer Generation - Qwen-specific v3.4 (Smart allowlist)
+Constrained Conformer Generation - Qwen-specific v3.9 (Minimal Blocking)
 
-Simple position-based pre-computed mask mirroring the generic LP v2.1:
+Simple position-based pre-computed mask with MINIMAL blocking:
 1. Build reference skeleton with placeholder coordinates
 2. Tokenize once to get ref_ids
 3. Derive is_free mask (True for tokens inside <...>)
-4. Position-based lookup: if is_free[pos], allow coord tokens (ALLOWLIST); else force ref_ids[pos]
+4. Position-based lookup: if is_free[pos], block structural tokens; else force ref_ids[pos]
 
-Key difference from generic LP:
-- Generic uses BLOCKLIST (blocks <, >, special tags) for FREE positions
-- This uses SMART ALLOWLIST for FREE positions:
-  - Single-char tokens: 0-9, ., ,, - (always allowed)
-  - Valid multi-char: ',−' (separator before negative), '−.' (negative decimal)
-  - Invalid multi-char: '...', '..', '--', '.,', ',.', '.-', ',,' (blocked)
+v3.9: MINIMAL BLOCKING with shorter placeholder
+Key changes from v3.8:
+- Shorter placeholder: "0.000,0.000,0.000" (3 decimals, ~18 tokens) instead of 4 decimals (~22 tokens)
+  - Analysis showed median coord length is 21 chars, 4-decimal placeholder is 23 chars
+  - Placeholder mismatch causes position drift → junk tokens
+- Minimal structural blocking: only '<>' (like generic LP)
+  - Removed ()[] from blocked chars (can appear in SMILES atom descriptors)
+- Reduced LOOKAHEAD_RANGE: 2 instead of 4
+  - Shorter placeholder = less drift = shorter lookahead needed
 
-v3.4 improvements over v3.3:
-- v3.3 was TOO restrictive (single-char only), causing 56/1000 failures
-- Missing commas like '3.0212-0.2769' because ',-' token (4999) was blocked
-- v3.4 allows ',-' and '-.' while still blocking problematic tokens
-- Rule: block tokens with repeated punctuation or invalid pairs (.,  ,. .-)
+CRITICAL: Use with qwen3 sampling config (temp=0.7, top_p=0.8, top_k=20)
+- Qwen3 official docs: DO NOT use greedy decoding
+- Greedy causes "performance degradation and endless repetitions"
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -37,8 +38,10 @@ from molgen3D.data_processing.smiles_encoder_decoder import (
 )
 
 
-# Placeholder coordinate string (4 decimal places per spec)
-COORD_PLACEHOLDER = "0.0000,0.0000,0.0000"
+# Placeholder coordinate string (3 decimal places - matches median coord length better)
+# Analysis showed: median coord is 21 chars, 4-decimal placeholder was 23 chars (9.3% match)
+# 3-decimal placeholder is ~19 chars, closer to median
+COORD_PLACEHOLDER = "0.000,0.000,0.000"
 
 # Valid characters for coordinate content (ALLOWLIST approach)
 COORD_VALID_CHARS = set("0123456789.,-")
@@ -118,11 +121,71 @@ class PrecomputedTemplate:
     block_comma_dash: torch.BoolTensor | None = None  # [seq_len] - True if comma/dash should be blocked (look-ahead)
 
 
-# Cache for allowed coordinate token IDs
-_ALLOWED_COORD_TOKEN_IDS_CACHE: dict = {}
+# Cache for blocked token IDs (BLOCKLIST approach - like generic LP)
+_BLOCKED_TOKEN_IDS_CACHE: dict = {}
 
 # Cache for comma/dash token IDs (for look-ahead blocking)
 _COMMA_DASH_TOKEN_IDS_CACHE: dict = {}
+
+# Cache for allowed coordinate token IDs (ALLOWLIST approach)
+_ALLOWED_COORD_TOKEN_IDS_CACHE: dict = {}
+
+
+def _get_blocked_token_ids(tokenizer: PreTrainedTokenizer) -> set:
+    """Get token IDs that should be BLOCKED in FREE positions.
+
+    BLOCKLIST approach (same as generic LP for performance):
+    - Tokens containing '<' or '>' (prevent coordinate bracket leakage)
+    - Special tags: [CONFORMER], [/CONFORMER], [SMILES], [/SMILES]
+    - BOS, EOS, PAD tokens
+    - Problematic coord tokens: '...', '..', '--', ',,', '.,', ',.', '.-', '-,'
+
+    This blocks ~1,200 tokens instead of the ALLOWLIST's ~151,000 tokens.
+    128x fewer writes per FREE position = massive performance gain.
+    """
+    cache_key = id(tokenizer)
+    if cache_key in _BLOCKED_TOKEN_IDS_CACHE:
+        return _BLOCKED_TOKEN_IDS_CACHE[cache_key]
+
+    blocked_ids = set()
+    vocab = tokenizer.get_vocab()
+
+    # 1. Block tokens containing structural characters
+    # MINIMAL: Only block angle brackets (like generic LP)
+    # Removed ()[] - these can appear in SMILES atom descriptors and shouldn't be blocked
+    structural_chars = set('<>')
+    for token_str, token_id in vocab.items():
+        if any(c in structural_chars for c in token_str):
+            blocked_ids.add(token_id)
+
+    # 2. Block special tags
+    special_tags = ["[CONFORMER]", "[/CONFORMER]", "[SMILES]", "[/SMILES]"]
+    for tag in special_tags:
+        try:
+            tokens = tokenizer.encode(tag, add_special_tokens=False)
+            blocked_ids.update(tokens)
+        except:
+            pass
+
+    # 3. Block BOS, EOS, PAD
+    if tokenizer.eos_token_id is not None:
+        blocked_ids.add(tokenizer.eos_token_id)
+    if tokenizer.bos_token_id is not None:
+        blocked_ids.add(tokenizer.bos_token_id)
+    if tokenizer.pad_token_id is not None:
+        blocked_ids.add(tokenizer.pad_token_id)
+
+    # 4. Block problematic multi-char coord tokens (learned from v3.2-v3.4 failures)
+    # These cause parse errors like '1.234...,>' or missing commas
+    for token_str, token_id in vocab.items():
+        if token_str and all(c in COORD_VALID_CHARS for c in token_str):
+            # Block if it has repeated punctuation or invalid pairs
+            if not _is_valid_coord_token(token_str):
+                blocked_ids.add(token_id)
+
+    logger.info(f"QwenLogitProcessor: Blocking {len(blocked_ids)} tokens (BLOCKLIST approach)")
+    _BLOCKED_TOKEN_IDS_CACHE[cache_key] = blocked_ids
+    return blocked_ids
 
 
 def _is_valid_coord_token(token_str: str) -> bool:
@@ -358,12 +421,11 @@ def build_precomputed_template(
             # Token is FREE only if every character in span is FREE.
             is_free.append(all(token_chars))
 
-    # Build EXTENDED look-ahead blocking mask (v3.2 improvement)
+    # Build look-ahead blocking mask
     # Block comma/dash at last N FREE positions before a COPY `>` token
     # This handles position drift where generated coords use fewer tokens than placeholder
-    # Example: template has 20 FREE tokens, actual coord uses 18, positions 18-19 become "extra"
-    #          Without extended look-ahead, comma at position 18 wouldn't be blocked
-    LOOKAHEAD_RANGE = 4  # Block comma/dash up to 4 positions before `>`
+    # v3.9: Reduced to 2 (shorter placeholder = less drift = shorter lookahead needed)
+    LOOKAHEAD_RANGE = 2  # Block comma/dash up to 2 positions before `>`
     block_comma_dash = []
     for pos in range(len(is_free)):
         should_block = False
@@ -393,21 +455,24 @@ def build_precomputed_template(
 
 class QwenConformerConstraintLogitsProcessor(LogitsProcessor):
     """
-    Simple position-based pre-computed mask with ALLOWLIST approach.
+    Simple position-based pre-computed mask with MINIMAL BLOCKLIST approach.
 
     At each position:
-    - If is_free[pos]: allow only coordinate tokens (0-9, ., ,, -)
+    - If is_free[pos]: block only structural tokens (<>) and problematic patterns
     - Else: force ref_ids[pos]
 
-    This mirrors the generic LP v2.1 but uses ALLOWLIST instead of BLOCKLIST.
+    v3.9: Minimal blocking with shorter placeholder for reduced position drift.
+    Use with qwen3 sampling config for best results.
     """
 
-    VERSION = "v3.4_smart_allowlist"
+    VERSION = "v3.9_minimal_blocking_shorter_placeholder"
     CONFIG = {
-        "approach": "pure_position_based_allowlist_extended_lookahead",
+        "approach": "minimal_blocklist",
         "coord_placeholder": COORD_PLACEHOLDER,
-        "lookahead_range": 4,
-        "description": "Position-based COPY/FREE mask with ALLOWLIST for coords and EXTENDED look-ahead (4 positions) comma/dash blocking",
+        "lookahead_range": 2,
+        "structural_chars": "<>",
+        "description": "Minimal blocking with shorter 3-decimal placeholder - reduced drift, fewer junk tokens",
+        "recommended_sampling": "qwen3 (temp=0.7, top_p=0.8, top_k=20)",
     }
 
     def __init__(
@@ -424,10 +489,12 @@ class QwenConformerConstraintLogitsProcessor(LogitsProcessor):
         self.templates = templates
         self.prompt_lengths = list(prompt_lengths)
         self.eos_token_id = eos_token_id
-        self.allowed_coord_ids = _get_allowed_coord_token_ids(tokenizer)
+        # BLOCKLIST approach (like generic LP) - much faster than ALLOWLIST
+        self.blocked_ids = _get_blocked_token_ids(tokenizer)
         self.comma_dash_ids = _get_comma_dash_token_ids(tokenizer)
-        self.allowed_mask = None
-        self.comma_dash_mask = None  # Look-ahead blocking mask for comma/dash tokens
+        # Pre-computed masks (built lazily on first call)
+        self.blocked_mask = None  # Boolean mask for blocked tokens
+        self.comma_dash_mask = None  # Boolean mask for comma/dash (look-ahead blocking)
         self._device = None
         self._prev_lens: List[int | None] = [None] * len(templates)
 
@@ -441,14 +508,11 @@ class QwenConformerConstraintLogitsProcessor(LogitsProcessor):
         device = scores.device
         vocab_size = scores.shape[1]
 
-        # Build masks lazily with correct vocab size
-        # If no mask exists or the device has changed, build the mask.
-        if self.allowed_mask is None or self._device != device:
-            self.allowed_mask = _build_allowed_mask(self.allowed_coord_ids, vocab_size, device)
+        # Build blocked mask lazily (like generic LP)
+        if self.blocked_mask is None or self._device != device:
+            self.blocked_mask = _build_blocked_mask(self.blocked_ids, vocab_size, device)
             self.comma_dash_mask = _build_blocked_mask(self.comma_dash_ids, vocab_size, device)
-            # Move templates to correct device because:
-            # - They are built on the CPU and we want to move them to the GPU.
-            # - Indexing becomes GPU-local (torch tensor of booleans, etc).
+            # Move templates to correct device
             for template in self.templates:
                 template.ref_ids = template.ref_ids.to(device)
                 template.is_free = template.is_free.to(device)
@@ -457,7 +521,6 @@ class QwenConformerConstraintLogitsProcessor(LogitsProcessor):
             self._device = device
 
         # Iterate through the batch and apply the constraints.
-        # Each item has a separate instance of the template (because the input prompt lengths are different).
         for b in range(batch_size):
             template = self.templates[b]
 
@@ -474,16 +537,15 @@ class QwenConformerConstraintLogitsProcessor(LogitsProcessor):
                     scores[b, :] = float('-inf')
                     scores[b, self.eos_token_id] = 0.0
             elif template.is_free[pos]:
-                # FREE position - allow only coordinate tokens (ALLOWLIST)
-                # Block everything NOT in the allowlist
-                scores[b, ~self.allowed_mask] = float('-inf')
-                # Look-ahead blocking: if next position is COPY '>', also block comma/dash
-                # This prevents trailing punctuation patterns like `,>` or `->`
+                # FREE position - BLOCKLIST approach (like generic LP)
+                # Block only structural tokens (~1,200) instead of all non-coord tokens (~151k)
+                # This is 128x fewer writes = MASSIVE performance gain
+                scores[b, self.blocked_mask] = float('-inf')
+                # Look-ahead blocking: also block comma/dash at positions near '>'
                 if template.block_comma_dash is not None and template.block_comma_dash[pos]:
                     scores[b, self.comma_dash_mask] = float('-inf')
             else:
                 # COPY position - force exact token
-                # Core SMILES structure is preserved.
                 scores[b, :] = float('-inf')
                 scores[b, template.ref_ids[pos]] = 0.0
 

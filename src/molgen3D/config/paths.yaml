@@ -47,6 +47,15 @@ tokenizers:
 
 models:
   # ---------- BASE MODELS ----------
+  # Latest Qwen3-0.6B pretrained checkpoint (for benchmarking/testing)
+  # Note: Use checkpoints with -hf suffix (HuggingFace format)
+  qwen3_06b_pre:
+    root: "qwen3_06b/251210-1955-d79f-qwen3_06b_pre_4e_144effb"
+    steps:
+      "20k": "step-20000-hf"
+      "40k": "step-40000-hf"
+    tokenizer: "qwen3_0.6b_custom"
+
   m600_qwen:
     root: "qwen3_06b/251208-1746-61f0-qwen3_06b_pre_4e_108effb"
     steps:
@@ -54,6 +63,7 @@ models:
       "2e": "step-40000-hf"
       "3e": "step-60000-hf"
       "4e": "step-80000-hf"
+    tokenizer: "qwen3_0.6b_custom"
     
   m380_conf:
     root: "Llama-3.2-380M_conformers"
@@ -62,6 +72,7 @@ models:
       "2e": "4291f8157d2f41a3bb9605e8/step-16000"
       "3e": "534162de781f4855bbccb0d6/step-23500"
       "4e": "e184d4d867804fbd8a8c45bf/step-30000"
+    tokenizer: "llama3_chem_v1"
 
   m380_conf_v2:
     root: "Llama-3.2-380M_conformers/fea47a381e4046e4956dc44a"
@@ -70,6 +81,7 @@ models:
       "2e": "step-17400"
       "3e": "step-26100"
       "4e": "step-34800"
+    tokenizer: "llama3_chem_v1"
       
   b1_conf:
     root: "Llama-3.2-1B_conformers"
