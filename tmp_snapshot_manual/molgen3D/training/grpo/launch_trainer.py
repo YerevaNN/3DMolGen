@@ -5,12 +5,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# Ensure the repository's src directory is importable even when running as a script.
-PROJECT_ROOT = Path(__file__).resolve().parents[4]
-SRC_ROOT = PROJECT_ROOT / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-
 import submitit
 import yaml
 from loguru import logger
@@ -28,15 +22,6 @@ from molgen3D.training.grpo.config import (
     TrainerConfig,
 )
 from molgen3D.training.grpo.utils import create_code_snapshot
-def ensure_snapshot_has_grpo_code(snapshot_dir: Path) -> None:
-    """Verify that the GRPO training entry script exists inside the snapshot."""
-    required_path = snapshot_dir / "molgen3D" / "training" / "grpo" / "train_grpo_model.py"
-    if not required_path.exists():
-        raise FileNotFoundError(
-            f"Snapshot is missing GRPO training code at {required_path}. "
-            "Please ensure create_code_snapshot completed successfully."
-        )
-
 
 def setup_launcher_logging():
     logger.remove()
@@ -243,7 +228,6 @@ def main():
         
         # Create code snapshot
         create_code_snapshot(str(project_root), str(output_dir))
-        ensure_snapshot_has_grpo_code(output_dir)
         logger.info(f"Code snapshot created in: {output_dir}")
         
         # Update the config file that was copied in the snapshot

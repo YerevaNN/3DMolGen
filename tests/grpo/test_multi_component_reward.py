@@ -5,10 +5,10 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit.Geometry import Point3D
 
-from molgen3D.grpo.grpo_hf import multi_component_reward as reward_module
-from molgen3D.grpo.grpo_hf.config import AdvancedRewardConfig, AdvancedRewardWeights
-from molgen3D.grpo.grpo_hf.multi_component_reward import MultiComponentRewardCalculator
-from molgen3D.grpo.grpo_hf.stats import RunStatistics
+from molgen3D.training.grpo import multi_component_reward as reward_module
+from molgen3D.training.grpo.config import AdvancedRewardConfig, AdvancedRewardWeights
+from molgen3D.training.grpo.multi_component_reward import MultiComponentRewardCalculator
+from molgen3D.training.grpo.stats import RunStatistics
 
 
 def _build_config(num_generations: int = 3, enable_diversity: bool = True, match_partial: bool = False):

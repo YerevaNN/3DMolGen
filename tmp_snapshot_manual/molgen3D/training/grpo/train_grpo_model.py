@@ -5,16 +5,6 @@ import os
 import sys
 from pathlib import Path
 
-# Ensure the snapshot/repo sources take precedence over any installed package.
-SCRIPT_PATH = Path(__file__).resolve()
-package_container = None
-for parent in SCRIPT_PATH.parents:
-    if (parent / "molgen3D").is_dir():
-        package_container = parent
-        break
-if package_container and str(package_container) not in sys.path:
-    sys.path.insert(0, str(package_container))
-
 # Third-party imports
 from datasets import Dataset
 from loguru import logger

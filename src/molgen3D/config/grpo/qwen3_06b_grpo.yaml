@@ -9,7 +9,7 @@ dataset:
   smiles_mapping_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/smiles_mapping.json
 device:
   device_type: a100
-  num_gpus: 2
+  num_gpus: 4
 generation:
   do_sample: true
   max_completion_length: 1000
@@ -32,7 +32,7 @@ grpo:
   num_iterations: 4
   output_base_dir: ./grpo_outputs
   output_dir: /auto/home/menuab/code/3DMolGen/grpo_outputs/2025-09-30-16:14_380m_1e_lr5e-5_32bs*16comp*6gpu*8ga_1e_full_beta0.05_alignFalse
-  per_device_batch_size: 32
+  per_device_batch_size: 8
   reward_weight_match: 0.15
   reward_weight_rmsd: 0.85
   rmsd_const: 0.75
@@ -42,7 +42,7 @@ grpo:
   warmup_ratio: 0.15
   weight_decay: 0.1
 model:
-  checkpoint_path: /nfs/h100/raid/chem/checkpoints/hf/yerevann/Llama-3.2-380M_conformers/e184d4d867804fbd8a8c45bf/step-30000/
+  checkpoint_path: /nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b/251210-1955-d79f-qwen3_06b_pre_4e_144effb/step-80000-hf/
   conf_tags:
   - '[CONFORMER]'
   - '[/CONFORMER]'
@@ -51,12 +51,12 @@ model:
   - '[SMILES]'
   - '[/SMILES]'
   pad_token: <|finetune_right_pad_id|>
-  tokenizer_path: /auto/home/menuab/code/YNNtitan/torchtitan/tokenizers/Llama-3.2-chem-1B-v1
+  tokenizer_path: /auto/home/menuab/code/3DMolGen/src/molgen3D/training/tokenizers/Qwen3_tokenizer_custom
 processing:
-  eos_token_id: 128329
+  eos_token_id: 151672
 run:
   log_level: INFO
-  name: 380m_4e_lr2e-5_32bs*16comp*4gpu*8ga_4ksteps_beta0_ne4
+  name: qwen3_test
 trainer:
   attn_implementation: flash_attention_2
   log_on_each_node: false
