@@ -74,6 +74,10 @@ from molgen3D.evaluation.qwen_simple_vectorized_lp import (
     QwenSimpleVectorizedLogitsProcessor,
     build_precomputed_template as simple_vectorized_build_precomputed_template,
 )
+from molgen3D.evaluation.qwen_allowlist_logit_processor import (
+    QwenAllowlistLogitsProcessor,
+    build_precomputed_template as allowlist_build_precomputed_template,
+)
 from molgen3D.config.paths import get_data_path
 from molgen3D.evaluation.inference import load_model_tokenizer
 from molgen3D.evaluation.utils import extract_between, same_molecular_graph
@@ -118,6 +122,7 @@ def build_templates_parallel(
         "vectorized-qwen": vectorized_build_precomputed_template,
         "vectorized-qwen-v2": vectorized_build_precomputed_template,
         "simple-vectorized": simple_vectorized_build_precomputed_template,
+        "allowlist-qwen": allowlist_build_precomputed_template,
     }
     build_fn = build_fn_map.get(processor_type, build_precomputed_template)
 
@@ -278,11 +283,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--no-logit-processor", action="store_true",
                         help="Disable logit processor for timing comparison")
     parser.add_argument("--processor-type",
-                        choices=["generic", "qwen", "vectorized-qwen", "vectorized-qwen-v2", "simple-vectorized"],
+                        choices=["generic", "qwen", "vectorized-qwen", "vectorized-qwen-v2", "simple-vectorized", "allowlist-qwen"],
                         default="generic",
-                        help="Select logit processor type: 'generic' (blocklist), 'qwen' (blocklist v3.7), "
+                        help="Select logit processor type: 'generic' (blocklist), 'qwen' (blocklist v4.0), "
                              "'vectorized-qwen' (v4.x torch.compile compatible), "
-                             "'simple-vectorized' (v5.0 simple in-place, recommended)")
+                             "'simple-vectorized' (v5.0 simple in-place), "
+                             "'allowlist-qwen' (v4.1 strict allowlist - only 66 coord tokens)")
     # Optimization flags
     parser.add_argument("--kv-cache", choices=["dynamic", "static"], default="dynamic",
                         help="KV cache mode: 'dynamic' (default) or 'static' (~1.8x speedup on H100)")
@@ -442,11 +448,11 @@ def _get_processor_class_and_template_fn(processor_type: str):
     elif processor_type == "qwen":
         return QwenConformerConstraintLogitsProcessor, qwen_build_precomputed_template
     elif processor_type in ("vectorized-qwen", "vectorized-qwen-v2"):
-        # Both map to the same v4.x implementation (v2 is now an alias)
         return QwenVectorizedConstraintLogitsProcessor, vectorized_build_precomputed_template
     elif processor_type == "simple-vectorized":
-        # v5.0: Simple in-place modification with pre-stacked templates
         return QwenSimpleVectorizedLogitsProcessor, simple_vectorized_build_precomputed_template
+    elif processor_type == "allowlist-qwen":
+        return QwenAllowlistLogitsProcessor, allowlist_build_precomputed_template
     else:
         raise ValueError(f"Unknown processor type: {processor_type}")
 
@@ -694,15 +700,19 @@ def run_smoke_test(config: dict) -> int:
         # Count parse failures (decode_cartesian_v2 errors) - mimics inference.py's "mol_parse_fail" stat
         parse_failures = sum(1 for r in result.failures if r.parse_error is not None)
 
-        # Get the version from the processor actually used
-        processor_version_map = {
-            "generic": ConformerConstraintLogitsProcessor.VERSION,
-            "qwen": QwenConformerConstraintLogitsProcessor.VERSION,
-            "vectorized-qwen": QwenVectorizedConstraintLogitsProcessor.VERSION,
-            "vectorized-qwen-v2": QwenVectorizedConstraintLogitsProcessor.VERSION,
-            "simple-vectorized": QwenSimpleVectorizedLogitsProcessor.VERSION,
-        }
-        processor_version = processor_version_map.get(args.processor_type, "unknown")
+        # Get the version from the processor actually used (or "none" if LP disabled)
+        if use_lp:
+            processor_version_map = {
+                "generic": ConformerConstraintLogitsProcessor.VERSION,
+                "qwen": QwenConformerConstraintLogitsProcessor.VERSION,
+                "vectorized-qwen": QwenVectorizedConstraintLogitsProcessor.VERSION,
+                "vectorized-qwen-v2": QwenVectorizedConstraintLogitsProcessor.VERSION,
+                "simple-vectorized": QwenSimpleVectorizedLogitsProcessor.VERSION,
+                "allowlist-qwen": QwenAllowlistLogitsProcessor.VERSION,
+            }
+            processor_version = processor_version_map.get(args.processor_type, "unknown")
+        else:
+            processor_version = "none"
 
         # Calculate throughput for comparison (strip special tokens so Qwen padding doesn't inflate)
         def _strip_special(text: str) -> str:

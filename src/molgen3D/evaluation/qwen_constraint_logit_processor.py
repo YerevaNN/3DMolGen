@@ -1,25 +1,24 @@
 """
-Constrained Conformer Generation - Qwen-specific v3.9 (Minimal Blocking)
+Constrained Conformer Generation - Qwen-specific v4.0 (Targeted Blocking)
 
-Simple position-based pre-computed mask with MINIMAL blocking:
+Simple position-based pre-computed mask with TARGETED blocking:
 1. Build reference skeleton with placeholder coordinates
 2. Tokenize once to get ref_ids
 3. Derive is_free mask (True for tokens inside <...>)
 4. Position-based lookup: if is_free[pos], block structural tokens; else force ref_ids[pos]
 
-v3.9: MINIMAL BLOCKING with shorter placeholder
-Key changes from v3.8:
-- Shorter placeholder: "0.000,0.000,0.000" (3 decimals, ~18 tokens) instead of 4 decimals (~22 tokens)
-  - Analysis showed median coord length is 21 chars, 4-decimal placeholder is 23 chars
-  - Placeholder mismatch causes position drift → junk tokens
-- Minimal structural blocking: only '<>' (like generic LP)
-  - Removed ()[] from blocked chars (can appear in SMILES atom descriptors)
-- Reduced LOOKAHEAD_RANGE: 2 instead of 4
-  - Shorter placeholder = less drift = shorter lookahead needed
+v4.0: TARGETED BLOCKING - blocks SMILES structural chars that can leak into coordinates
+Key changes from v3.9:
+- Re-added []@+ to blocklist (v3.9 failures showed these leaking into coords)
+  - `@@` chirality markers caused parse errors
+  - `+]` charge/bracket combinations leaked in
+  - `[]` brackets should never appear inside coordinates
+- Keep () unblocked (parentheses can appear in SMILES but not in coord tokens)
+- Shorter placeholder: "0.000,0.000,0.000" (3 decimals, ~18 tokens)
+- LOOKAHEAD_RANGE: 2 (shorter placeholder = less drift)
 
 CRITICAL: Use with qwen3 sampling config (temp=0.7, top_p=0.8, top_k=20)
 - Qwen3 official docs: DO NOT use greedy decoding
-- Greedy causes "performance degradation and endless repetitions"
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -151,9 +150,9 @@ def _get_blocked_token_ids(tokenizer: PreTrainedTokenizer) -> set:
     vocab = tokenizer.get_vocab()
 
     # 1. Block tokens containing structural characters
-    # MINIMAL: Only block angle brackets (like generic LP)
-    # Removed ()[] - these can appear in SMILES atom descriptors and shouldn't be blocked
-    structural_chars = set('<>')
+    # TARGETED: Block chars that should NEVER appear in coordinates
+    # v4.0: Re-added []@+ after v3.9 failures showed these leaking
+    structural_chars = set('<>[]@+')
     for token_str, token_id in vocab.items():
         if any(c in structural_chars for c in token_str):
             blocked_ids.add(token_id)
@@ -455,23 +454,23 @@ def build_precomputed_template(
 
 class QwenConformerConstraintLogitsProcessor(LogitsProcessor):
     """
-    Simple position-based pre-computed mask with MINIMAL BLOCKLIST approach.
+    Simple position-based pre-computed mask with TARGETED BLOCKLIST approach.
 
     At each position:
-    - If is_free[pos]: block only structural tokens (<>) and problematic patterns
+    - If is_free[pos]: block structural tokens (<>[]@+) and problematic patterns
     - Else: force ref_ids[pos]
 
-    v3.9: Minimal blocking with shorter placeholder for reduced position drift.
+    v4.0: Targeted blocking of SMILES chars that leak into coordinates.
     Use with qwen3 sampling config for best results.
     """
 
-    VERSION = "v3.9_minimal_blocking_shorter_placeholder"
+    VERSION = "v4.0_targeted_blocking"
     CONFIG = {
-        "approach": "minimal_blocklist",
+        "approach": "targeted_blocklist",
         "coord_placeholder": COORD_PLACEHOLDER,
         "lookahead_range": 2,
-        "structural_chars": "<>",
-        "description": "Minimal blocking with shorter 3-decimal placeholder - reduced drift, fewer junk tokens",
+        "structural_chars": "<>[]@+",
+        "description": "Targeted blocking of SMILES chars that leak into coords, 3-decimal placeholder",
         "recommended_sampling": "qwen3 (temp=0.7, top_p=0.8, top_k=20)",
     }
 
