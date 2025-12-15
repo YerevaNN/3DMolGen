@@ -17,11 +17,19 @@ from typing import Callable
 
 try:  # TorchTitan is optional for some downstream uses
     from torchtitan.components.dataloader import BaseDataLoader
+    from torchtitan.components.validate import BaseValidator, Validator
+    from torchtitan.tools.logging import logger as titan_logger
 except Exception:  # pragma: no cover - fallback for environments without torchtitan
     class BaseDataLoader:  # type: ignore[too-many-ancestors]
         """Lightweight stand-in so local tooling can import this module."""
 
         pass
+
+    Validator = None  # type: ignore[assignment]
+    titan_logger = None  # type: ignore[assignment]
+    BaseValidator = None  # type: ignore[assignment]
+
+MolGenValidatorClass = None
 
 from molgen3D.training.pretraining.config.custom_job_config import (
     JobConfig as MolGenJobConfig,
@@ -707,5 +715,134 @@ def _resolve_validation_path(job_config: MolGenJobConfig) -> str:
             "in paths.yaml)."
         )
     return validation_path
+
+
+if Validator is not None:
+    class MolGenValidator(Validator):
+        """
+        Base MolGen validator that wraps TorchTitan's Validator with dataloader setup.
+        
+        This class handles the basic validation dataloader setup. For extended functionality
+        like numerical conformer validation, see helpers/validator.py which extends this class.
+        """
+        def __init__(
+            self,
+            job_config: MolGenJobConfig,
+            dp_world_size: int,
+            dp_rank: int,
+            tokenizer,
+            parallel_dims,
+            loss_fn,
+            validation_context,
+            maybe_enable_amp,
+            metrics_processor,
+            validation_dataloader: BaseDataLoader,
+            pp_schedule=None,
+            pp_has_first_stage=None,
+            pp_has_last_stage=None,
+        ):
+            self.job_config = job_config
+            self.tokenizer = tokenizer
+            self.parallel_dims = parallel_dims
+            self.loss_fn = loss_fn
+            self.validation_dataloader = validation_dataloader
+            self.validation_context = validation_context
+            self.maybe_enable_amp = maybe_enable_amp
+            self.metrics_processor = metrics_processor
+            self.pp_schedule = pp_schedule
+            self.pp_has_first_stage = pp_has_first_stage
+            self.pp_has_last_stage = pp_has_last_stage
+
+            if self.job_config.validation.steps == -1 and titan_logger is not None:
+                titan_logger.warning(
+                    "Setting validation steps to -1 might cause hangs because of "
+                    "unequal sample counts across ranks when dataset is exhausted."
+                )
+
+    MolGenValidatorClass = MolGenValidator
+
+
+def build_molgen_validator(
+    job_config: MolGenJobConfig,
+    dp_world_size: int,
+    dp_rank: int,
+    tokenizer,
+    parallel_dims,
+    loss_fn,
+    validation_context,
+    maybe_enable_amp,
+    metrics_processor,
+    pp_schedule=None,
+    pp_has_first_stage=None,
+    pp_has_last_stage=None,
+    validator_class=None,
+) -> BaseValidator:
+    """
+    Build a MolGen validator with the validation dataloader.
+    
+    Args:
+        validator_class: Optional custom validator class to use instead of the base MolGenValidator.
+                        This allows extended validators (like the numerical validator) to reuse
+                        the dataloader setup logic.
+    """
+    if MolGenValidatorClass is None:
+        raise RuntimeError(
+            "Torchtitan validator bindings are unavailable. Install torchtitan "
+            "and ensure the environment exposes torchtitan.components.validate."
+        )
+
+    data_cfg = getattr(job_config, "molgen_data", None)
+    if data_cfg is None:
+        raise ValueError(
+            "Missing 'molgen_data' section in the job config. "
+            "Set job.custom_config_module="
+            "'molgen3D.training.pretraining.config.custom_job_config'."
+        )
+
+    # Use fewer workers for validation to reduce memory usage
+    # Validation doesn't need as many workers as training since it's not as performance-critical
+    val_num_workers = min(data_cfg.num_workers, 2)  # Cap at 2 workers for validation
+    infinite_validation = job_config.validation.steps != -1
+    validation_dataloader = build_dataloader(
+        train_path=_resolve_validation_path(job_config),
+        tokenizer_path=_resolve_tokenizer_path(data_cfg, job_config),
+        tokenizer=tokenizer,
+        seq_len=job_config.validation.seq_len,
+        batch_size=job_config.validation.local_batch_size,
+        num_workers=val_num_workers,
+        pin_memory=data_cfg.pin_memory,
+        shuffle_lines=False,
+        # Mirror TorchTitan's default: only allow finite validation when the user
+        # explicitly sets steps=-1, otherwise keep the loader infinite so every
+        # rank can always advance to the requested step count.
+        infinite=infinite_validation,
+        seed=data_cfg.seed if data_cfg.seed is not None else job_config.training.seed,
+        min_emb_len=data_cfg.min_emb_len,
+        drop_last=False,
+        persistent_workers=False,
+        prefetch_factor=min(data_cfg.prefetch_factor or 2, 2),  # Reduce prefetch for validation
+        world_size=dp_world_size,
+        rank=dp_rank,
+        preview_enabled=False,
+    )
+
+    # Use custom validator class if provided, otherwise use base MolGenValidator
+    cls = validator_class if validator_class is not None else MolGenValidatorClass
+
+    return cls(  # type: ignore[arg-type]
+        job_config=job_config,
+        dp_world_size=dp_world_size,
+        dp_rank=dp_rank,
+        tokenizer=tokenizer,
+        parallel_dims=parallel_dims,
+        loss_fn=loss_fn,
+        validation_context=validation_context,
+        maybe_enable_amp=maybe_enable_amp,
+        metrics_processor=metrics_processor,
+        validation_dataloader=validation_dataloader,
+        pp_schedule=pp_schedule,
+        pp_has_first_stage=pp_has_first_stage,
+        pp_has_last_stage=pp_has_last_stage,
+    )
 
 

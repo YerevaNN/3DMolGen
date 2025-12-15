@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import random
 import cloudpickle
 import numpy as np
 import torch
@@ -12,29 +11,26 @@ from loguru import logger
 
 try:
     from torchtitan.components.dataloader import BaseDataLoader
-    from torchtitan.components.validate import BaseValidator, Validator
-    from torchtitan.tools.logging import logger as titan_logger
+    from torchtitan.components.validate import BaseValidator
 except Exception:
     class BaseDataLoader:  # type: ignore[too-many-ancestors]
         pass
     BaseValidator = None
-    Validator = None
-    titan_logger = None
 
 from transformers import AutoTokenizer
 
 from molgen3D.training.pretraining.config.custom_job_config import (
     JobConfig as MolGenJobConfig,
 )
-from rdkit import Chem
 
 from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2, strip_smiles
 from molgen3D.evaluation.utils import extract_between, same_molecular_graph
 from molgen3D.utils.utils import get_best_rmsd
 from molgen3D.training.pretraining.dataprocessing.dataloader import (
-    build_dataloader,
+    build_molgen_validator as _build_molgen_validator_base,
     _resolve_special_token_id,
     _resolve_tokenizer_path,
+    MolGenValidatorClass as BaseMolGenValidatorClass,
 )
 
 MAX_CONFORMER_TOKENS = 2000  # Typical conformer is 200-500 tokens
@@ -55,20 +51,16 @@ def _is_primary_rank() -> bool:
     """
     return (not dist.is_available()) or (not dist.is_initialized()) or dist.get_rank() == 0
 
-def _resolve_validation_path(job_config: MolGenJobConfig) -> str:
-    validation_path = getattr(job_config.validation, "dataset_path", "")
-    if not validation_path:
-        raise ValueError(
-            "MolGen validation requires a dataset_path. "
-            "Set validation.dataset_path (e.g. molgen_data validation alias "
-            "in paths.yaml)."
-        )
-    return validation_path
+MolGenNumericalValidatorClass = None
 
-MolGenValidatorClass = None
-
-if Validator is not None:
-    class MolGenValidator(Validator):
+if BaseMolGenValidatorClass is not None:
+    class MolGenNumericalValidator(BaseMolGenValidatorClass):
+        """
+        Extended MolGen validator with numerical conformer validation.
+        
+        Extends the base MolGenValidator from dataloader.py with additional
+        functionality for generating conformers and computing RMSD metrics.
+        """
         def __init__(
             self,
             job_config: MolGenJobConfig,
@@ -85,17 +77,22 @@ if Validator is not None:
             pp_has_first_stage=None,
             pp_has_last_stage=None,
         ):
-            self.job_config = job_config
-            self.tokenizer = tokenizer
-            self.parallel_dims = parallel_dims
-            self.loss_fn = loss_fn
-            self.validation_dataloader = validation_dataloader
-            self.validation_context = validation_context
-            self.maybe_enable_amp = maybe_enable_amp
-            self.metrics_processor = metrics_processor
-            self.pp_schedule = pp_schedule
-            self.pp_has_first_stage = pp_has_first_stage
-            self.pp_has_last_stage = pp_has_last_stage
+            # Call base class __init__
+            super().__init__(
+                job_config=job_config,
+                dp_world_size=dp_world_size,
+                dp_rank=dp_rank,
+                tokenizer=tokenizer,
+                parallel_dims=parallel_dims,
+                loss_fn=loss_fn,
+                validation_context=validation_context,
+                maybe_enable_amp=maybe_enable_amp,
+                metrics_processor=metrics_processor,
+                validation_dataloader=validation_dataloader,
+                pp_schedule=pp_schedule,
+                pp_has_first_stage=pp_has_first_stage,
+                pp_has_last_stage=pp_has_last_stage,
+            )
             
             # Store output directory for saving failed generations
             self._output_dir = Path(job_config.job.dump_folder)
@@ -127,11 +124,11 @@ if Validator is not None:
                 has_inner = hasattr(tokenizer, "tokenizer")
                 inner_type = type(tokenizer.tokenizer).__name__ if has_inner else "N/A"
                 logger.info(
-                    f"MolGenValidator tokenizer: type={tok_type}, has_inner={has_inner}, "
+                    f"MolGenNumericalValidator tokenizer: type={tok_type}, has_inner={has_inner}, "
                     f"inner_type={inner_type}"
                 )
                 logger.info(
-                    f"MolGenValidator token resolution: conformer_start_id={self._conformer_start_id}, "
+                    f"MolGenNumericalValidator token resolution: conformer_start_id={self._conformer_start_id}, "
                     f"conformer_end_id={self._conformer_end_id}"
                 )
             self._eos_id = _resolve_special_token_id(
@@ -150,12 +147,6 @@ if Validator is not None:
                     "<|endoftext|>",
                 ),
             )
-
-            if self.job_config.validation.steps == -1 and titan_logger is not None:
-                titan_logger.warning(
-                    "Setting validation steps to -1 might cause hangs because of "
-                    "unequal sample counts across ranks when dataset is exhausted."
-                )
 
         def _resolve_token_id(self, *tokens: str, debug: bool = False) -> Optional[int]:
             # Use the properly loaded AutoTokenizer if available
@@ -605,7 +596,7 @@ if Validator is not None:
                 import traceback
                 logger.warning(f"Numerical validation failed: {exc}\n{traceback.format_exc()}")
 
-    MolGenValidatorClass = MolGenValidator
+    MolGenNumericalValidatorClass = MolGenNumericalValidator
 
 def build_molgen_validator(
     job_config: MolGenJobConfig,
@@ -621,47 +612,19 @@ def build_molgen_validator(
     pp_has_first_stage=None,
     pp_has_last_stage=None,
 ) -> BaseValidator:
-    if MolGenValidatorClass is None:
+    """
+    Build the MolGen numerical validator with conformer generation and RMSD metrics.
+    
+    This uses the base build_molgen_validator from dataloader.py but passes in the
+    extended MolGenNumericalValidator class for numerical validation functionality.
+    """
+    if MolGenNumericalValidatorClass is None:
         raise RuntimeError(
             "Torchtitan validator bindings are unavailable. Install torchtitan "
             "and ensure the environment exposes torchtitan.components.validate."
         )
 
-    data_cfg = getattr(job_config, "molgen_data", None)
-    if data_cfg is None:
-        raise ValueError(
-            "Missing 'molgen_data' section in the job config. "
-            "Set job.custom_config_module="
-            "'molgen3D.training.pretraining.config.custom_job_config'."
-        )
-
-    # Use fewer workers for validation to reduce memory usage
-    # Validation doesn't need as many workers as training since it's not as performance-critical
-    val_num_workers = min(data_cfg.num_workers, 2)  # Cap at 2 workers for validation
-    infinite_validation = job_config.validation.steps != -1
-    validation_dataloader = build_dataloader(
-        train_path=_resolve_validation_path(job_config),
-        tokenizer_path=_resolve_tokenizer_path(data_cfg, job_config),
-        tokenizer=tokenizer,
-        seq_len=job_config.validation.seq_len,
-        batch_size=job_config.validation.local_batch_size,
-        num_workers=val_num_workers,
-        pin_memory=data_cfg.pin_memory,
-        shuffle_lines=False,
-        # Mirror TorchTitan's default: only allow finite validation when the user
-        # explicitly sets steps=-1, otherwise keep the loader infinite so every
-        # rank can always advance to the requested step count.
-        infinite=infinite_validation,
-        seed=data_cfg.seed if data_cfg.seed is not None else job_config.training.seed,
-        min_emb_len=data_cfg.min_emb_len,
-        drop_last=False,
-        persistent_workers=False,
-        prefetch_factor=min(data_cfg.prefetch_factor or 2, 2),  # Reduce prefetch for validation
-        world_size=dp_world_size,
-        rank=dp_rank,
-    )
-
-    return MolGenValidatorClass(  # type: ignore[arg-type]
+    return _build_molgen_validator_base(
         job_config=job_config,
         dp_world_size=dp_world_size,
         dp_rank=dp_rank,
@@ -671,8 +634,8 @@ def build_molgen_validator(
         validation_context=validation_context,
         maybe_enable_amp=maybe_enable_amp,
         metrics_processor=metrics_processor,
-        validation_dataloader=validation_dataloader,
         pp_schedule=pp_schedule,
         pp_has_first_stage=pp_has_first_stage,
         pp_has_last_stage=pp_has_last_stage,
+        validator_class=MolGenNumericalValidatorClass,
     )
