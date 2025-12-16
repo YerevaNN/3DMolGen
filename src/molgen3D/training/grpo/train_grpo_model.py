@@ -3,6 +3,7 @@
 import argparse
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # Ensure the snapshot/repo sources take precedence over any installed package.
@@ -34,14 +35,26 @@ from molgen3D.training.grpo.utils import (
 )
 from molgen3D.training.grpo.rewards import reward_function
 from molgen3D.training.grpo.multi_component_reward import MultiComponentRewardCalculator
+from molgen3D.training.grpo.grpo_reward_v3 import reward_function as reward_function_v3
 
 
 def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
-    # Use the runtime output_dir if available, otherwise use the base directory
+    # Set up output and checkpoint directories if not already configured
+    if output_dir is None and config.grpo.output_dir is None:
+        timestamp = datetime.now().strftime("%y%m%d-%H%M")
+        output_base = Path(config.grpo.output_base_dir)
+        output_base.mkdir(parents=True, exist_ok=True)
+
+        output_dir = output_base / f"{timestamp}_{config.run.name}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        config.grpo.output_dir = str(output_dir)
+
+        # Create checkpoint directory
+        checkpoint_dir = os.path.join(config.grpo.checkpoint_base_dir, f"{timestamp}_{config.run.name}")
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        config.grpo.checkpoint_dir = checkpoint_dir
+
     actual_output_dir = output_dir or config.grpo.output_dir
-    if actual_output_dir is None:
-        raise ValueError("Output directory not specified in config or as parameter")
-    
     setup_logging(actual_output_dir, config.run.log_level)
     
     logger.info(f"Running GRPO")
@@ -100,7 +113,12 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     tokenizer = AutoTokenizer.from_pretrained(
         config.model.tokenizer_path,
     )
-    dataset = Dataset.from_csv(config.dataset.dataset_path)
+
+    # Load dataset from text file and create prompt column
+    with open(config.dataset.dataset_path, 'r') as f:
+        prompts = [line.strip() for line in f if line.strip()]
+    dataset = Dataset.from_dict({"prompt": prompts})
+    logger.info(f"Loaded {len(dataset)} prompts from {config.dataset.dataset_path}")
 
     tokenizer.pad_token_id = tokenizer.convert_tokens_to_ids(config.model.pad_token)
     mol_end_token_id = tokenizer.convert_tokens_to_ids(config.model.mol_tags[1])
@@ -110,13 +128,21 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     logger.info(f"Set model pad_token_id to {model.config.pad_token_id}")
 
     reward_strategy = config.grpo.reward_strategy.lower()
-    if reward_strategy == "multi_component":
+
+    if reward_strategy == "v3":
+        logger.info("Using GRPO reward function v3 (GEOM-Drugs aligned: quality + smooth coverage + hard matching)")
+        def reward_func(prompts, completions, **kwargs):
+            return reward_function_v3(prompts, completions, stats, tokenizer, config)
+
+    elif reward_strategy == "multi_component":
+        logger.info("Using multi-component reward calculator")
         mc_calculator = MultiComponentRewardCalculator(config=config, stats=stats, tokenizer=tokenizer)
 
         def reward_func(prompts, completions, **kwargs):
             return mc_calculator(prompts, completions, **kwargs)
 
     else:
+        logger.info("Using legacy reward function")
         def reward_func(prompts, completions, **kwargs):
             return reward_function(prompts, completions, stats, tokenizer, config)
 

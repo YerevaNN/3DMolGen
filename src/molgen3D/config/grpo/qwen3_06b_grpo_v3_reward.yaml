@@ -6,13 +6,13 @@ dataloader:
   prefetch_factor: 6
 dataset:
   dataset_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/geom_processed/grpo/train_smiles.jsonl
-  smiles_mapping_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/geom_processed/grpo/train_smiles_to_pickle.jsonl
+  smiles_mapping_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/geom_processed/grpo/train_smiles_to_pickle.json
 device:
-  device_type: a100
-  num_gpus: 4
+  device_type: h100
+  num_gpus: 6
 generation:
   do_sample: true
-  max_completion_length: 1000
+  max_completion_length: 2500
   num_return_sequences: 1
   repetition_penalty: 1.0
   temperature: 1.0
@@ -21,23 +21,30 @@ grpo:
   adam_beta2: 0.95
   beta: 0
   checkpoint_base_dir: /nfs/h100/raid/chem/checkpoints/conf_grpo
-  checkpoint_dir: /nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-30-16:14_380m_1e_lr5e-5_32bs*16comp*6gpu*8ga_1e_full_beta0.05_alignFalse
+  delta: 1.5
+  enable_posebusters: false
   grad_acc_steps: 8
+  lambda_match: 1.5
+  lambda_qual: 1.0
+  lambda_smcov: 0.5
   learning_rate: 2.0e-05
   max_grad_norm: 1.0
-  max_ground_truths: 64
-  max_steps: 4000
+  max_ground_truths: 30
+  max_steps: 8000
   num_epochs: 1
   num_generations: 16
   num_iterations: 4
   output_base_dir: ./grpo_outputs
-  output_dir: /auto/home/menuab/code/3DMolGen/grpo_outputs/2025-09-30-16:14_380m_1e_lr5e-5_32bs*16comp*6gpu*8ga_1e_full_beta0.05_alignFalse
   per_device_batch_size: 8
+  r_floor: -1.0
+  reward_strategy: v3
   reward_weight_match: 0.15
   reward_weight_rmsd: 0.85
+  rho: 0.75
   rmsd_const: 0.75
   scheduler: cosine
   seed: 1
+  sigma: 0.3
   temperature: 1.0
   warmup_ratio: 0.15
   weight_decay: 0.1
@@ -56,7 +63,7 @@ processing:
   eos_token_id: 151672
 run:
   log_level: INFO
-  name: qwen3_test
+  name: qwen3_v3_reward_geom_aligned
 trainer:
   attn_implementation: flash_attention_2
   log_on_each_node: false
@@ -65,7 +72,7 @@ trainer:
   save_on_each_node: false
   save_safetensors: true
   save_steps: 1000
-  save_strategy: 'no'
+  save_strategy: steps
   save_total_limit: 8
   torch_dtype: bfloat16
   use_liger_loss: true

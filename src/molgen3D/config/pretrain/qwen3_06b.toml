@@ -21,7 +21,7 @@ custom_import = "molgen3D.training.pretraining.torchtitan_model.qwen3_custom"
 
 [training]
 seq_len = 2048
-local_batch_size = 12
+local_batch_size = 8
 global_batch_size = 144
 steps = 80000
 max_norm = 1.0
