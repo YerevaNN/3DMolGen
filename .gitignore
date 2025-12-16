@@ -4,6 +4,7 @@ venv
 .cursor/ 
 AGENTS.md
 CLAUDE.md
+.claude/*
 
 # Editor files
 *~
@@ -17,6 +18,7 @@ CLAUDE.md
 *.pyo
 *.pyd
 __pycache__/
+
 
 data/
 outputs/
