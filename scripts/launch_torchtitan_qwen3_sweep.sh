@@ -2,10 +2,10 @@
 # Dedicated launcher for hp_sweep runs. Mirrors launch_torchtitan_qwen3.sh
 # but keeps outputs/job names isolated for sweeps.
 #SBATCH --job-name=torchtitan-qwen3-sweep
-#SBATCH --cpus-per-task=64
-#SBATCH --partition=a100
+#SBATCH --cpus-per-task=56
+#SBATCH --partition=h100
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:4
+#SBATCH --gres=gpu:2
 #SBATCH --mem=200G
 #SBATCH --time=20:00:00
 #SBATCH --output=outputs/slurm_jobs/titan_sweep/%j.out

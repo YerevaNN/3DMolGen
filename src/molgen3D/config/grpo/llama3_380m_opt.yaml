@@ -19,38 +19,20 @@ generation:
 grpo:
   adam_beta1: 0.9
   adam_beta2: 0.95
-  advanced_reward:
-    coverage_scale: 0.6
-    delta: 0.75
-    diversity_scale: 1.2
-    enable_diversity: true
-    enable_posebusters: true
-    match_partial_credit: false
-    max_reference_conformers: 30
-    normalization_epsilon: 1.0e-06
-    posebusters_config: mol
-    precision_scale: 0.45
-    weights:
-      coverage: 0.35
-      diversity: 0.05
-      match: 0.15
-      precision: 0.35
-      validity: 0.25
   beta: 0
   checkpoint_base_dir: /nfs/h100/raid/chem/checkpoints/conf_grpo
-  checkpoint_dir: /nfs/h100/raid/chem/checkpoints/conf_grpo/2025-10-01-12:00_380m_mc_reward
+  checkpoint_dir: /nfs/h100/raid/chem/checkpoints/conf_grpo/2025-09-30-16:14_380m_1e_lr5e-5_32bs*16comp*6gpu*8ga_1e_full_beta0.05_alignFalse
   grad_acc_steps: 8
-  learning_rate: 1.0e-05
+  learning_rate: 2.0e-05
   max_grad_norm: 1.0
   max_ground_truths: 64
-  max_steps: 16000
+  max_steps: 4000
   num_epochs: 1
   num_generations: 16
   num_iterations: 4
   output_base_dir: ./grpo_outputs
-  output_dir: /auto/home/menuab/code/3DMolGen/grpo_outputs/2025-10-01-12:00_380m_mc_reward
-  per_device_batch_size: 16
-  reward_strategy: multi_component
+  output_dir: /auto/home/menuab/code/3DMolGen/grpo_outputs/2025-09-30-16:14_380m_1e_lr5e-5_32bs*16comp*6gpu*8ga_1e_full_beta0.05_alignFalse
+  per_device_batch_size: 8
   reward_weight_match: 0.15
   reward_weight_rmsd: 0.85
   rmsd_const: 0.75
@@ -74,7 +56,7 @@ processing:
   eos_token_id: 128329
 run:
   log_level: INFO
-  name: 380m_mc_reward_lr2e-5_32bs_4ksteps
+  name: 380m_4e_lr2e-5_32bs*16comp*4gpu*8ga_4ksteps_beta0_ne4
 trainer:
   attn_implementation: flash_attention_2
   log_on_each_node: false

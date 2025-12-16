@@ -32,20 +32,24 @@ except ModuleNotFoundError as exc:  # pragma: no cover - explicit error
 # ---- Sweep configuration (edit these) ---------------------------------------------------------
 
 # Learning rates to try.
-LRS: list[float] = [1e-4, 2e-4, 3e-4, 4e-4]
+LRS: list[float] = [1e-4, 2e-4, 3e-4, 4e-4, 5e-4, 6e-4]
 
 # Global batch sizes to try (TorchTitan interprets this as total across ranks).
-GLOBAL_BATCH_SIZES: list[int] = [96, 144, 192]
+GLOBAL_BATCH_SIZES: list[int] = [48, 72, 96, 120, 144, 168, 192]
 
 # Training steps keyed by global batch size.
 TRAIN_STEPS_BY_GB: dict[int, int] = {
-    192: 1000,
-    144: 1300,
-    96: 2000,
+    192: 1012,
+    168: 1157,
+    144: 1350,
+    120: 1620,
+    96: 2025,
+    72: 2700,
+    48: 4050
 }
 
 # Warmup steps for the scheduler.
-WARMUP_STEPS: int = 200
+WARMUP_STEPS: int = 300
 
 # Directory to store generated sweep configs (relative to repo root or absolute).
 SWEEP_CONFIG_DIR: Path = Path("outputs/hp_sweep_configs")
@@ -123,8 +127,18 @@ def main() -> None:
                 training_cfg["steps"] = int(TRAIN_STEPS_BY_GB[gb])
             training_steps = int(training_cfg.get("steps", 0)) or None
 
-            # Ensure validation batch size
-            cfg.setdefault("validation", {})["local_batch_size"] = 4
+            # Force HF pretrain init mode for sweep runs
+            molgen_run_cfg = cfg.setdefault("molgen_run", {})
+            molgen_run_cfg["init_mode"] = "hf_pretrain"
+            molgen_run_cfg["base_model_tag"] = molgen_run_cfg.get(
+                "base_model_tag", "base_paths:qwen3_0.6b_base_model"
+            )
+
+            # Ensure validation is enabled with frequency 100
+            validation_cfg = cfg.setdefault("validation", {})
+            validation_cfg["enable"] = True
+            validation_cfg["local_batch_size"] = 4
+            validation_cfg["freq"] = 100
 
             # Update scheduler warmup/decay checkpoints
             wsds_cfg = cfg.setdefault("wsds_scheduler", {})
@@ -135,7 +149,7 @@ def main() -> None:
 
             # Disable checkpointing for sweep runs
             cfg.setdefault("checkpoint", {})["enable"] = False
-            desc = f"lr{lr}_gb{gb}"
+            desc = f"lr{lr}_gb{gb}_pre"
             cfg.setdefault("job", {})["description"] = desc
 
             with tempfile.NamedTemporaryFile(

@@ -8,7 +8,7 @@ from rdkit.Geometry import Point3D
 
 
 def truncate(x, precision=4):
-    """Format a float with at most ``precision`` decimal places (truncation, not rounding)."""
+    """Format a float with exactly ``precision`` decimal places (truncation, not rounding)."""
     if precision < 0:
         raise ValueError("precision must be non-negative")
 
@@ -21,8 +21,9 @@ def truncate(x, precision=4):
     if abs(truncated) < 10 ** (-precision):
         truncated = 0.0  # avoid "-0"
 
-    text = f"{truncated:.{precision}f}".rstrip("0").rstrip(".")
-    return text or "0"
+    # Always produce exactly precision decimal places
+    text = f"{truncated:.{precision}f}"
+    return text
 
 
 _NUMERIC_TOKEN_RE = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")

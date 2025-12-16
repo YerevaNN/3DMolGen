@@ -1,4 +1,4 @@
-from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2
+from molgen3D.data_processing.utils import decode_cartesian_raw
 from molgen3D.utils.utils import get_best_rmsd, load_json, load_pkl
 from pathlib import Path
 from rdkit import Chem
@@ -83,7 +83,7 @@ def load_ground_truths(key_mol_smiles, num_gt: int = 16):
 
 def get_rmsd(ground_truths, generated_conformer, align: bool = False) -> float:
     try:
-        generated_mol = decode_cartesian_v2(generated_conformer)
+        generated_mol = decode_cartesian_raw(generated_conformer)
         rmsds = []
         for ground_truth in ground_truths:
             try:
@@ -115,29 +115,24 @@ def setup_logging(output_dir: str, log_level: str = "INFO"):
     logger.add(lambda msg: print(msg), level=log_level, enqueue=True)  
 
 def create_code_snapshot(project_root: str, snapshot_dir: str):
-    """Copy the GRPO package and its lightweight dependencies into the snapshot directory."""
+    """Copy only the GRPO training package into the snapshot directory."""
     import shutil
     
-    logger.info(f"Creating GRPO code snapshot in {snapshot_dir}")
+    logger.info(f"Creating GRPO-only code snapshot in {snapshot_dir}")
     
     project_root_path = Path(project_root)
     source_root = project_root_path / "src" / "molgen3D"
-    if not source_root.exists():
-        raise FileNotFoundError(f"Expected source directory missing: {source_root}")
+    grpo_source = source_root / "training" / "grpo"
+    if not grpo_source.exists():
+        raise FileNotFoundError(f"GRPO source directory missing: {grpo_source}")
 
     destination_root = Path(snapshot_dir) / "molgen3D"
     if destination_root.exists():
         shutil.rmtree(destination_root)
     destination_root.mkdir(parents=True, exist_ok=True)
 
-    # Ensure package initializers exist for base modules we depend on.
-    for relative_path in [
-        "__init__.py",
-        "training/__init__.py",
-        "data_processing/__init__.py",
-        "utils/__init__.py",
-        "evaluation/__init__.py",
-    ]:
+    # Ensure package initializers exist for molgen3D and molgen3D.training
+    for relative_path in ["__init__.py", "training/__init__.py"]:
         source_file = source_root / relative_path
         destination_file = destination_root / relative_path
         destination_file.parent.mkdir(parents=True, exist_ok=True)
@@ -146,26 +141,15 @@ def create_code_snapshot(project_root: str, snapshot_dir: str):
         else:
             destination_file.touch()
 
-    # Copy the GRPO package plus the specific helper modules it depends on.
-    modules_to_copy = [
-        ("training/grpo", destination_root / "training" / "grpo"),
-        ("data_processing", destination_root / "data_processing"),
-        ("utils", destination_root / "utils"),
-        ("evaluation", destination_root / "evaluation"),
-    ]
-
     ignore_patterns = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
-    for relative_path, destination_dir in modules_to_copy:
-        source_dir = source_root / relative_path
-        if not source_dir.exists():
-            logger.warning(f"Skipping missing module during snapshot: {source_dir}")
-            continue
-        shutil.copytree(
-            source_dir,
-            destination_dir,
-            dirs_exist_ok=True,
-            ignore=ignore_patterns,
-        )
+    destination_grpo = destination_root / "training" / "grpo"
+    destination_grpo.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(
+        grpo_source,
+        destination_grpo,
+        ignore=ignore_patterns,
+        dirs_exist_ok=True,
+    )
 
 def dataclass_to_dict(obj):
     """Convert dataclass objects to dictionary recursively."""

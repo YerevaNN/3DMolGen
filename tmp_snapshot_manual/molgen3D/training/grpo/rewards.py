@@ -9,8 +9,6 @@ import wandb
 
 # Local imports
 from molgen3D.evaluation.utils import extract_between
-from molgen3D.data_processing.smiles_encoder_decoder import strip_smiles
-from molgen3D.evaluation.utils import same_molecular_graph
 from molgen3D.training.grpo.utils import get_rmsd, load_ground_truths
 
 # Global variables
@@ -60,12 +58,12 @@ def reward_function(prompts, completions, stats, tokenizer, config):
                 stats.distinct_prompts += 1
         rmsd_reward, match_reward, combined, rmsd_value, min_index = 0.0, 0.0, 0.0, float('nan'), -2
         generated_conformer = extract_between(completion, "[CONFORMER]", "[/CONFORMER]")
-        generated_smiles = strip_smiles(generated_conformer) if generated_conformer else ""
+        generated_smiles = tag_pattern.sub('', generated_conformer) if generated_conformer else ""
         if not ground_truths:
             stats.failed_ground_truth += 1
         elif not generated_conformer:
             stats.failed_conformer_generation += 1
-        elif not same_molecular_graph(generated_smiles, canoncial_smiles):
+        elif generated_smiles != canoncial_smiles:
             stats.failed_matching_smiles += 1
             logger.info(f"\nGenerated SMILES does not match canonical prompt: {prompt}\nSMILES: {generated_smiles}")
         else:
