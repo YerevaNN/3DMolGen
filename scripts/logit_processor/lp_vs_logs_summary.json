@@ -1,0 +1,2261 @@
+{
+  "metadata": {
+    "generated_at": "2025-12-15T13:22:05.333118+00:00",
+    "log_file": "/auto/home/menuab/code/3DMolGen/outputs/gen_results/20251211_124743_m600_qwen_pre_2e_distinct/logs.txt",
+    "lp_json": "outputs/smoke/qwen_lp_top_p_sampling1_v39_qwen3_sampling_1000.json",
+    "total_lp_passes": 995,
+    "total_lp_failures": 5
+  },
+  "log_failures": {
+    "total_events": 824,
+    "unique_smiles": 829,
+    "by_reason": {
+      "parse_failure": 137,
+      "mismatch": 687
+    }
+  },
+  "intersections": {
+    "lp_caught_failures": [
+      {
+        "smiles": "COC(=O)c1ccc(-c2cc(CC3(C(=O)OC)CCN(C(=O)OC(C)(C)C)CC3)on2)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 03:39:13.325",
+        "lp_source": "prompt",
+        "lp_status": "fail",
+        "smiles_exact_match": null,
+        "parse_success": null,
+        "issues": [
+          "decode_cartesian_v2 failed: Bad coord triplet: -10.4289,-0.243592"
+        ],
+        "parse_error": "Bad coord triplet: -10.4289,-0.243592"
+      },
+      {
+        "smiles": "COC(=O)c1ccc(-c2cc(CC3(C(=O)OC)CCN(C(=O)OC(C)(C)C)CC3)on2)cc1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-12 03:39:46.459",
+        "lp_source": "prompt",
+        "lp_status": "fail",
+        "smiles_exact_match": null,
+        "parse_success": null,
+        "issues": [
+          "decode_cartesian_v2 failed: Bad coord triplet: -10.4289,-0.243592"
+        ],
+        "parse_error": "Bad coord triplet: -10.4289,-0.243592"
+      }
+    ]
+  },
+  "misses": {
+    "lp_missed_failures": [
+      {
+        "smiles": "Cc1ccccc1CNc1nnnn1C",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 12:48:48.334",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1ccccc1CNc1nnnn1C",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 12:48:48.334",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCCCCOc1ccccc1C(=O)NCC(=O)O",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 13:00:59.386",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccsc1C(=O)Nc1ccc(F)cc1F",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 13:03:16.001",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCCCOC(=O)Nc1cccc(C(=O)OCC)c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 13:09:21.908",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCN(Cc1ccccc1)C(=O)CSc1nncn1C",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 13:09:39.697",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCN(Cc1ccccc1)C(=O)CSc1nncn1C",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 13:09:39.697",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOc1ccc(Cl)cc1CSc1n[nH]c(C)n1",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 13:11:30.203",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOc1ccc(Cl)cc1CSc1n[nH]c(C)n1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 13:11:30.203",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(Cc1c(F)cccc1Cl)NCCCn1ccnc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 13:13:12.337",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=S(=O)(Cc1nc2ccccc2s1)c1ccccc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 13:22:09.380",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCCCOC(=O)c1nnc(-c2ccc(Cl)cc2)o1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 13:26:13.081",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1cc(CNC2CCCCCCC2)ccc1OCC(N)=O",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 13:29:07.439",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "NC(=O)C1CCN(CC(=O)NCc2ccccc2)CC1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 13:35:50.405",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(NN=C1CCCCCC1)c1cc2ccccc2cc1O",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 13:38:05.916",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(O)CCCC(=O)N1CCN(c2ncccn2)CC1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 13:38:59.346",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "C=CCOc1ccccc1/C=N/NC(=O)Cc1ccccc1",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 13:42:17.381",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "C=CCOc1ccccc1/C=N/NC(=O)Cc1ccccc1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 13:42:17.381",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCCC[NH2+]c1ccc(C(=O)OCCN(C)C)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 13:48:58.285",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "CC[C@@H](CO)NCC[NH2+][C@@H](CC)CO",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 13:54:21.179",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(Nc1ccccc1N1CCCCC1)c1ccc(F)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 14:00:58.086",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCN1CCN(c2ncnc3c2cnn3-c2ccccc2)CC1",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 14:02:15.094",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCN1CCN(c2ncnc3c2cnn3-c2ccccc2)CC1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 14:02:15.094",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOC(=O)Cc1nnc(NC(=O)CSc2nncn2C)s1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 14:02:15.156",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOC(=O)Cc1nnc(NC(=O)CSc2nncn2C)s1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 14:02:15.180",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOc1ccc2ccccc2c1C[NH2+]CCN1CCOCC1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 14:04:14.680",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1cc(SC)ccc1C(=O)OCC(=O)NC1CCCC1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 14:06:05.846",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1onc(-c2ccccc2Cl)c1C(=O)NCC(=O)O",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 14:08:35.988",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1onc(-c2ccccc2Cl)c1C(=O)NCC(=O)O",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 14:08:35.988",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COCCNC(=O)CSc1nccn1Cc1ccc2c(c1)OCO2",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 14:13:43.734",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1ccc(C)c(N2CCN(C(=O)C3CCC3)CC2)c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 14:15:07.827",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "C=CCNc1nc(N2CCOCC2)c(C#N)c2c1CN(C)CC2",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 14:33:17.885",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccc(S(=O)(=O)N2CCCCC2)cc1-n1cnnn1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 14:48:07.565",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1cccc(NC(=O)CCc2nc(-c3cccs3)no2)c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 14:49:06.794",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(COc1nsnc1N1CCOCC1)N/N=C/c1ccccc1O",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 14:58:15.014",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CC(=O)Nc1ccc(NC(=O)CCOc2cc(C)ccc2C)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 15:03:51.798",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCCCn1c(N)c(C(=O)OCCOC)c2nc3ccccc3nc21",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 15:11:05.595",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCCCn1c(N)c(C(=O)OCCOC)c2nc3ccccc3nc21",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 15:11:05.595",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCN(CC)S(=O)(=O)c1ccc(Oc2ccccc2)c(N)c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 15:14:09.844",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOC(=O)CC(=O)CSc1nc(C)nc2c1oc1ccccc12",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 15:19:45.255",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1cc(C)n(CCc2nc(-c3cc4ccccc4o3)cs2)n1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 15:26:45.878",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOCc1nnc(NC(=O)CCS(=O)(=O)Cc2ccccc2)s1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 15:39:40.972",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COCCCNC(=O)C1CCN(c2ccc(N3CCOCC3)nn2)CC1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 15:45:50.196",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COCCCNC(=O)C1CCN(c2ccc(N3CCOCC3)nn2)CC1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 15:46:38.109",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccc(C(=O)Nc2ccccc2C(=O)N2CCOCC2)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 15:48:56.830",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccc(C(=O)Nc2ccccc2C(=O)N2CCOCC2)cc1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 15:49:40.564",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccc(CNC(=O)CCSCc2cccc(Cl)c2)c(OC)c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 15:50:49.162",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cn1c(CN2CCN(c3cccc(Cl)c3)CC2)nc2ccccc21",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 15:54:17.874",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(CSc1nccn1Cc1ccco1)Nc1ccccc1C(F)(F)F",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 15:56:39.426",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(O)c1ccc(Cl)c(S(=O)(=O)NCc2cccnc2)c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 16:01:25.023",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "c1ccc(COc2ccc(OCCC[NH2+]C3CCCC3)cc2)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 16:03:05.759",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCC(=O)c1ccc(OCC(=O)NCCC2=CCCCC2)c(OC)c1",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 16:08:15.303",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCC(=O)c1ccc(OCC(=O)NCCC2=CCCCC2)c(OC)c1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 16:08:15.303",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCCCCCCN1CCC(=O)N([C@H](CO)Cc2ccccc2)CC1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 16:12:47.763",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCCCCCCN1CCC(=O)N([C@H](CO)Cc2ccccc2)CC1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 16:12:47.826",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCS(=O)(=O)N1CCC(C(=O)NCc2ccc(OC)cc2)CC1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 16:20:51.704",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCSc1nnc(NC(=O)CSC2=NN3CCCC(=O)N=C3S2)s1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 16:23:18.864",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1ccc2c(c1)N(CC(=O)NCCCN1CCCC1)C(=O)CO2",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 16:35:21.066",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(CNC(=O)c1cccs1)OCC(=O)c1ccc2ccccc2c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 16:40:12.985",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "[NH3+]CCCCCc1nnc(SCC(=O)Nc2cccc(Cl)c2)o1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 16:42:14.165",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCCn1c(SCCN2CCOCC2)nc2c1c(=O)n(C)c(=O)n2C",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 16:45:12.029",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "CN(CC(=O)NCCc1ccc(Cl)cc1)S(=O)(=O)c1cccs1",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 16:50:14.567",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CN(CC(=O)NCCc1ccc(Cl)cc1)S(=O)(=O)c1cccs1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 16:50:14.567",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COC(=O)c1ccc(N2CCOCC2)c(NC(=O)c2cccnc2)c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 16:54:50.550",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccc(C(=O)NCc2nnc(SCCOc3ccccc3)n2C)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 16:57:16.674",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccc(CNC(=O)CN2CCN(c3ccc(F)cc3)CC2)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 17:02:50.329",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccc(CNC(=O)CN2CCN(c3ccc(F)cc3)CC2)cc1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 17:03:14.261",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CS(=O)(=O)N1CCN(C(=O)COc2ccc3ccccc3c2)CC1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 17:06:50.924",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1cc(C(=O)OCC(=O)Nc2ccc(F)c(F)c2F)c(C)o1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 17:07:35.291",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(COC(=O)c1ccc(CO)cc1)Nc1ccc(OC(F)F)cc1",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 17:10:42.585",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(COC(=O)c1ccc(CO)cc1)Nc1ccc(OC(F)F)cc1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 17:10:42.585",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(O)CCCCCCCCc1cn(CCc2c[nH]c3ccccc23)nn1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 17:13:05.784",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(c1cccs1)N1CCN(C2CCN(Cc3ccccc3)CC2)CC1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 17:14:25.853",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "COCCN(Cc1cc2ccccc2[nH]c1=O)C(=O)c1ccccc1OC",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 17:26:56.390",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccc(N2CCN(C(=O)c3ccc4c(c3)OCO4)CC2)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 17:33:09.036",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1cc(NC(=O)CSc2ccc3nnc(-c4ccccc4)n3n2)no1",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 17:39:04.296",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1cc(NC(=O)CSc2ccc3nnc(-c4ccccc4)n3n2)no1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 17:39:04.296",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1ccc(C(=O)NC(=S)Nc2ccc(N3CCOCC3)cc2)cc1C",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 17:39:04.404",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1ccc(CNS(=O)(=O)c2cc3c(cc2C)N(C)CCO3)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 17:40:32.446",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cn1c(CCNC(=O)c2ccccc2F)nnc1SCC(=O)Nc1nncs1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 17:41:24.878",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(CN1CCC([NH+]2CCCCC2)CC1)N1CCCc2ccccc21",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 17:41:24.901",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(CNC(=S)N(Cc1ccccc1)Cc1cccnc1)NC1CCCCC1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 17:43:10.497",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(NCCN1CCOCC1)c1ccc(Cl)c([N+](=O)[O-])c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 17:44:21.268",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(O)CCc1ccc(-c2cccs2)n1NC(=O)c1ccc(O)cc1",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 17:46:20.134",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(O)CCc1ccc(-c2cccs2)n1NC(=O)c1ccc(O)cc1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 17:46:20.134",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "C=CCN(c1ccccc1C(=O)O)S(=O)(=O)/C=C/c1ccccc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 17:47:26.253",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "C=CCn1c(SCc2c(C)noc2C)nc2cc(C(=O)O)ccc2c1=O",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 17:50:32.718",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COCCNC(=O)[C@H](CSCc1ccccc1)N1Cc2ccccc2C1=O",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 17:58:15.316",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COCCNC(=O)[C@H](CSCc1ccccc1)N1Cc2ccccc2C1=O",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 17:59:05.927",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COCCNC(=O)c1ccc(CS(=O)(=O)c2c(Cl)cccc2Cl)o1",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 18:01:32.926",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COCCNC(=O)c1ccc(CS(=O)(=O)c2c(Cl)cccc2Cl)o1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 18:01:32.926",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccc(C(=O)NC2CCCCCC2)cc1S(=O)(=O)N1CCCC1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 18:02:19.500",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1ccc(S(=O)(=O)c2c(CO)c(-c3ccccc3)nn2C)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 18:07:52.763",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCCCC(=O)Nc1cccc(NC(=S)NC(=O)COc2ccccc2Cl)c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 18:32:03.432",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCCCC(=O)Nc1cccc(NC(=S)NC(=O)COc2ccccc2Cl)c1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 18:32:56.548",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COCc1cc(C)nc(OCC(=O)N/N=C/c2ccc(O)cc2O)c1C#N",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 18:42:23.532",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cn1cc(C(=O)NS(=O)(=O)Nc2ccc(Br)cc2)c2ccccc21",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 18:54:39.195",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(Nc1cccc(-c2cc3ccccc3oc2=O)c1)c1ccc(Br)o1",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 18:56:21.256",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(Nc1cccc(-c2cc3ccccc3oc2=O)c1)c1ccc(Br)o1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 18:56:21.256",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CC(C)(C)CC(C)(C)NC(=O)Nc1cccc([N+](=O)[O-])c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 18:58:12.845",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOC(=O)C1(Cc2ccccc2)CCN(Cc2cccn2-c2nccs2)CC1",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 19:08:26.399",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOC(=O)C1(Cc2ccccc2)CCN(Cc2cccn2-c2nccs2)CC1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 19:08:26.399",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOc1ccc(N(CC(=O)Nc2cccc(OC)c2)S(C)(=O)=O)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 19:17:49.801",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCc1ccc(S(=O)(=O)Nc2ccc(-c3nc4cccnc4s3)cc2)s1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 19:21:01.565",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCc1ccc2c(COC(=O)c3n[nH]c4ccccc34)cc(=O)oc2c1",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 19:22:00.316",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCc1ccc2c(COC(=O)c3n[nH]c4ccccc34)cc(=O)oc2c1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 19:22:00.316",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCn1c(Cc2ccc(OC)cc2)nnc1SCC(=O)Nc1nc2ccccc2s1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 19:24:59.999",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CN(Cc1ccccc1)C(=O)c1cc(S(=O)(=O)N2CCOCC2)cn1C",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 19:26:17.395",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "COC(=O)[C@@H](NC(=O)N(C1CCCCC1)C1CCCCC1)C(C)C",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 19:29:59.932",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COCCNc1nc(-c2cc(-c3ccc(Cl)cc3)on2)cc(C(C)C)n1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 19:29:59.974",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1cccc(CN(C)C(=O)c2cc(COc3c(F)cccc3F)on2)c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 19:35:08.505",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(O)CN1C(=O)COc2ccc(S(=O)(=O)N3CCCCCC3)cc21",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 19:48:08.208",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(O)CN1C(=O)COc2ccc(S(=O)(=O)N3CCCCCC3)cc21",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 19:48:08.208",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCN(CC)S(=O)(=O)c1ccc(C(=O)Nc2nnc(C(C)C)s2)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 19:57:43.716",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOc1cc(/C=N/NC(=O)COc2nc(C)cc(COC)c2C#N)ccc1O",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 20:00:42.765",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOc1cc(/C=N/NC(=O)COc2nc(C)cc(COC)c2C#N)ccc1O",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 20:02:58.884",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1ccccc1NS(=O)(=O)c1cc(C(=O)NCc2ccncc2)ccc1Cl",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 20:18:01.365",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1sc2nc(CN3CCOCC3)nc(NS(=O)(=O)c3ccccc3)c2c1C",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 20:19:19.838",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1sc2nc(CN3CCOCC3)nc(NS(=O)(=O)c3ccccc3)c2c1C",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 20:19:19.865",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(CNC(=O)c1ccc(-c2ccccc2)cc1)OCc1c(F)cccc1Cl",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 20:23:43.809",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCN(CC)CCNc1ncnc2c1sc1nc(N3CCOCC3)c3c(c12)CCCC3",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 20:34:06.551",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOc1cc(C(=O)NCC(=O)N/N=C/c2sccc2C)cc(OCC)c1OCC",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 20:49:57.581",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOc1cc(C(=O)NCC(=O)N/N=C/c2sccc2C)cc(OCC)c1OCC",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 20:51:23.216",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1cc(OC)cc(C(=O)N2CCN(C(=O)c3cccc(F)c3)CC2)c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 20:58:34.312",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccc(NC(=O)COc2ccccc2Cc2ccccc2)cc1S(N)(=O)=O",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 21:01:50.467",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccc(NC(=O)COc2ccccc2Cc2ccccc2)cc1S(N)(=O)=O",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 21:01:50.467",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1cccc(N(CC(=O)NCCSCc2ccc(C)cc2)S(C)(=O)=O)c1",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 21:03:16.505",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1cccc(N(CC(=O)NCCSCc2ccc(C)cc2)S(C)(=O)=O)c1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 21:03:16.505",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "C[C@H](CCc1ccccc1)NC[C@H](O)c1ccc(O)c(C(N)=O)c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 21:06:12.556",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1cccc(OCCCC(=O)Nc2ccc(S(=O)(=O)N3CCCC3)cc2)c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 21:17:16.770",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(CN(CCO)c1ccccc1)Nc1cccc(S(=O)(=O)N2CCCC2)c1",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 21:21:11.728",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(CN(CCO)c1ccccc1)Nc1cccc(S(=O)(=O)N2CCCC2)c1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 21:21:11.728",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCN(c1ccccc1)S(=O)(=O)c1ccc(C(=O)NCCCn2ccnc2)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 21:27:18.437",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOC(=O)CCc1c(C)c2ccc(OCC(=O)N(CC)CC)c(C)c2oc1=O",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 21:29:34.743",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1cc(Cl)c(C)cc1NC(=O)CSc1nnc(-c2ccco2)n1CC(C)C",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 21:54:39.572",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccc(/C=C/C(=O)Nc2ccccc2)cc1S(=O)(=O)N1CCOCC1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 21:57:32.227",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(CCN1C(=O)[C@@H]2Cc3ccccc3CN2C1=O)NCCc1ccccc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 22:04:10.510",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(Cc1ccc(Cl)cc1)Nc1cccc(S(=O)(=O)Nc2ccccc2F)c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 22:06:33.640",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(O)CSCC(=O)N1CCN(c2ncnc3scc(-c4ccccc4)c23)CC1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 22:08:27.661",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCCc1cc(=O)n2nc(N3CCC(C(=O)NCc4ccc(C)o4)CC3)sc2n1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 22:15:25.041",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1ccccc1C(=O)N[C@H](C(=O)Nc1ccc(Cl)c(Cl)c1)C(C)C",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 22:27:12.046",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1ccccc1C(=O)N[C@H](C(=O)Nc1ccc(Cl)c(Cl)c1)C(C)C",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 22:27:12.046",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(CN1C(=O)CCC1=O)Nc1nc(-c2ccc(Oc3ccccc3)cc2)cs1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 22:30:10.673",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(NCc1cccc(Cl)c1)C1CCN(S(=O)(=O)c2ccc(F)cc2)CC1",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 22:33:43.208",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(NCc1cccc(Cl)c1)C1CCN(S(=O)(=O)c2ccc(F)cc2)CC1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 22:33:43.208",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(NCc1nc2ccccc2[nH]1)c1cccc(S(=O)(=O)N2CCCC2)c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 22:37:07.625",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(NCc1nc2ccccc2[nH]1)c1cccc(S(=O)(=O)N2CCCC2)c1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 22:37:32.459",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(Nc1cc(S(=O)(=O)N2CCCCC2)ccc1N1CCCCC1)c1ccncc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 22:38:59.483",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCc1nnc(NS(=O)(=O)c2ccc(NC(=O)Nc3ccc(Cl)cc3)cc2)s1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 22:45:12.305",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCn1cc([N+](=O)[O-])c(C(=O)Nc2ccn(Cc3ccccc3F)n2)n1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 22:47:23.702",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CN(CCNC(=O)C1CCN(S(=O)(=O)c2cnc[nH]2)CC1)Cc1ccccc1",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 22:48:15.491",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CN(CCNC(=O)C1CCN(S(=O)(=O)c2cnc[nH]2)CC1)Cc1ccccc1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 22:48:15.491",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COC(=O)c1ccc2c(=O)n(CCCCCC(=O)NC(C)C)c(=O)[nH]c2c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 22:55:14.759",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccc(N(CC(=O)NC2CCCCCC2)S(=O)(=O)c2ccccc2)cc1Cl",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 23:02:25.104",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CS(=O)(=O)N(CC(=O)N1CCN(c2ccccc2)CC1)Cc1ccc(Cl)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 23:10:35.565",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1cc(NS(=O)(=O)c2ccc(NC(=S)Nc3ccc(Cl)cc3C)cc2)no1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 23:13:02.025",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1ccc(C(=O)NCc2ccc3c(c2)OCO3)cc1S(=O)(=O)N1CCCCC1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 23:15:52.890",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1ccc2nc(N(CCC[NH+](C)C)C(=O)COc3ccc(Cl)cc3)sc2c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 23:18:09.956",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(CSc1nnc(-c2ccccc2)n1Cc1ccco1)Nc1ccc2c(c1)OCCO2",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 23:20:31.747",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CC(=O)COc1ccc2c(-c3cccc([N+](=O)[O-])c3)cc(=O)oc2c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 23:24:08.347",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCN(CC)S(=O)(=O)c1cccc(NC(=O)Nc2cccc(C(F)(F)F)c2)c1",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 23:32:05.298",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCN(CC)S(=O)(=O)c1cccc(NC(=O)Nc2cccc(C(F)(F)F)c2)c1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-11 23:32:05.298",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOc1cccc(C(=O)NC(=S)Nc2cccc(NC(=O)c3ccccc3Cl)c2)c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 23:37:51.785",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccccc1N1CCN(C(=O)c2ccc(S(=O)(=O)N3CCCC3)cc2)CC1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 23:47:21.514",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1cccn2c(CN3CCNC(=O)CC3)c(C(=O)N(C)CCc3ccccc3)nc12",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 23:52:12.359",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(CSCC(=O)N1CCCCC1)Nc1nc(-c2ccccc2)c(-c2ccccc2)s1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-11 23:53:44.504",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCCCOc1ccc(C(=O)Nc2ccc(S(=O)(=O)Nc3onc(C)c3C)cc2)cc1",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-12 00:05:02.359",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCCCOc1ccc(C(=O)Nc2ccc(S(=O)(=O)Nc3onc(C)c3C)cc2)cc1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-12 00:05:02.359",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCN1CCN(C(=O)C(=O)c2cn(CC(=O)N3CCCCCC3)c3ccccc23)CC1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 00:12:05.171",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "CNS(=O)(=O)c1cccc(C(=O)OCc2cc(=O)oc3c(C)c(O)ccc23)c1",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-12 00:17:36.266",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CNS(=O)(=O)c1cccc(C(=O)OCc2cc(=O)oc3c(C)c(O)ccc23)c1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-12 00:17:36.266",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COC(=O)c1[nH]c2cc(C)ccc2c1NC(=O)CN1CCN(c2ccccc2OC)CC1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 00:47:43.914",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1cc2c(cc1OC)CN(C(=O)[C@@H](NCc1ccncc1)C(C)(C)C)CC2",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-12 00:49:11.811",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1cc2c(cc1OC)CN(C(=O)[C@@H](NCc1ccncc1)C(C)(C)C)CC2",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-12 00:49:11.811",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccc(-c2cnc(SCC(=O)Nc3ccc4c(c3)OCO4)n2Cc2ccco2)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 00:50:50.127",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(CSc1cn(CCNC(=O)c2ccc3ccccc3c2)c2ccccc12)NCc1ccco1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 00:57:23.309",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=c1[nH]c2cc3c(cc2cc1CN(Cc1nnnn1C1CCCC1)C1CCCC1)OCCO3",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 00:59:29.656",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "CC[C@H](CO)Nc1nc(Nc2cccc(-c3ccccn3)c2)c2ncn(C(C)C)c2n1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 01:09:16.239",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CC[C@H](CO)Nc1nc(Nc2cccc(-c3ccccn3)c2)c2ncn(C(C)C)c2n1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-12 01:09:16.252",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COCCn1c(=O)[nH]c2cc(C(=O)N3CCN(c4ccccc4OC)CC3)ccc2c1=O",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 01:10:22.079",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccc(NC(=O)C/C(C)=N/NC(=O)c2ccco2)c([N+](=O)[O-])c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 01:14:11.858",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccc(NS(=O)(=O)c2cc(NC(=O)c3ccncc3)ccc2N2CCOCC2)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 01:15:18.060",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CC(=O)c1ccc(S(=O)(=O)N(CCCO)Cc2cc3cc(C)ccc3[nH]c2=O)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 01:27:19.596",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOC(=O)Cc1csc(N/C(=N/S(=O)(=O)c2ccc(F)cc2F)c2ccccc2)n1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 01:32:38.760",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOc1cc(C)ccc1OCc1nnc(SCC(=O)c2cccc([N+](=O)[O-])c2)n1C",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-12 01:34:39.239",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOc1cc(C)ccc1OCc1nnc(SCC(=O)c2cccc([N+](=O)[O-])c2)n1C",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-12 01:34:39.239",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "COC(=O)Oc1ccc(/C=N/NC(=O)CN(c2ccccc2Cl)S(C)(=O)=O)cc1OC",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 01:39:55.158",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COCCOC(=O)c1c(C)nc(SCC(=O)Nc2ccc(C)cc2)c(C#N)c1-c1ccco1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 01:44:26.462",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COCCOC(=O)c1c(C)nc(SCC(=O)Nc2ccc(C)cc2)c(C#N)c1-c1ccco1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-12 01:46:05.549",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=[N+]([O-])c1cccc(NC(=S)N2CCN(S(=O)(=O)c3ccccc3)CC2)c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 01:58:06.095",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOC(=O)CCCCCN(Cc1ccccc1)S(=O)(=O)c1ccc([N+](=O)[O-])cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 02:06:39.232",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1nc2c(c(=O)n1CCC1=CCCCC1)c1nc3ccccc3nc1n2/N=C/c1ccccc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 02:16:16.108",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccccc1-c1nc2c(c(SCC(=O)N3CCCCC3)n1)Cc1c(CO)cnc(C)c1O2",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-12 02:29:33.024",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccccc1-c1nc2c(c(SCC(=O)N3CCCCC3)n1)Cc1c(CO)cnc(C)c1O2",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-12 02:29:33.024",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1ccc(CSCCNC(=O)CN(c2cccc([N+](=O)[O-])c2)S(C)(=O)=O)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 02:32:53.033",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1ccnc(SCc2cc(=O)c(OC(=O)c3ccc(S(=O)(=O)N(C)C)cc3)co2)n1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 02:38:41.454",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "O=C(NCc1cccc(Cl)c1)c1ccc(S(=O)(=O)Nc2cccc(C(F)(F)F)c2)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 02:43:57.770",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCC(=O)Nc1cccc(NC(=O)CSc2nnc(-c3ccc(NS(C)(=O)=O)cc3)n2C)c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 02:45:07.541",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOC(=O)c1c(CN2CCOCC2)n(-c2ccccc2)c2cc(Br)c(O)c(CN(C)C)c12",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-12 02:46:17.297",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOC(=O)c1c(CN2CCOCC2)n(-c2ccccc2)c2cc(Br)c(O)c(CN(C)C)c12",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-12 02:46:17.297",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1onc(-c2ccccc2)c1C(=O)Nc1ccccc1NC(=O)c1c(-c2ccccc2)noc1C",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 03:07:08.148",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "C#CCNC(=O)C1=C[C@@H](c2ccc(Br)cc2)C[C@@H](OCc2ccc(CO)cc2)O1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 03:09:14.652",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOC(=O)C1=C(CC)Nc2ccccc2N=C1NC(=O)c1ccc(S(=O)(=O)N(C)C)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 03:10:58.772",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1ccc2nc(C)cc(C(=O)OCC(=O)Nc3c(C)n(C)n(-c4ccccc4)c3=O)c2c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 03:18:37.448",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCN(CC)c1ccc(NC(=O)COc2ccc(C#N)cc2)cc1S(=O)(=O)Nc1ccc(OC)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 03:31:08.036",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "C[C@H](NC(=O)c1nc[nH]c1C(=O)N[C@H](C)c1ccccc1)C(=O)OC(C)(C)C",
+        "log_source": "canonical",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-12 03:34:09.485",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "C[C@H](NC(=O)c1nc[nH]c1C(=O)N[C@H](C)c1ccccc1)C(=O)OC(C)(C)C",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-12 03:34:09.485",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCN(CC)S(=O)(=O)c1cccc(C(=O)NNC(=O)C2=NN(c3ccccc3)C(=O)CC2)c1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 03:35:45.867",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "Cc1cc(C(C2C(=O)CC(C)(C)CC2=O)C2C(=O)CC(C)(C)CC2=O)cc(C)c1OC(F)F",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 04:04:02.004",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccc(CCN(Cc2cccs2)S(=O)(=O)c2ccc(S(=O)(=O)N3CCCCCC3)cc2)cc1OC",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 04:11:13.000",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "COc1ccc(CCN(Cc2cccs2)S(=O)(=O)c2ccc(S(=O)(=O)N3CCCCCC3)cc2)cc1OC",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-12 04:13:14.787",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": true,
+        "parse_success": true
+      },
+      {
+        "smiles": "CC(C)(C)OC(=O)CNC(=O)c1[nH]cnc1C(=O)N[C@@H](Cc1ccccc1)C(=O)OCc1ccccc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 04:40:12.109",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CC(C)(C)OC(=O)CNC(=O)c1[nH]cnc1C(=O)N[C@@H](Cc1ccccc1)C(=O)OCc1ccccc1",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-12 04:45:27.983",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CCOc1ccc(Cc2cc([C@@]34OC[C@@](CO)(O3)[C@@H](O)[C@H](O)[C@H]4O)ccc2Cl)cc1",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 04:47:32.324",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CC(C)(C)OC(=O)NCCCC[C@H](NC(=O)c1nc[nH]c1C(=O)NC(c1ccccc1)c1ccccc1)C(=O)OC(C)(C)C",
+        "log_source": "canonical",
+        "log_reason": "mismatch",
+        "timestamp": "2025-12-12 05:02:42.052",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      },
+      {
+        "smiles": "CC(C)(C)OC(=O)NCCCC[C@H](NC(=O)c1nc[nH]c1C(=O)NC(c1ccccc1)c1ccccc1)C(=O)OC(C)(C)C",
+        "log_source": "generated",
+        "log_reason": "parse_failure",
+        "timestamp": "2025-12-12 05:03:53.552",
+        "lp_source": "prompt",
+        "lp_status": "pass",
+        "smiles_exact_match": false,
+        "parse_success": true
+      }
+    ]
+  },
+  "lp_only": {
+    "lp_new_failures": [
+      {
+        "smiles": "CCCN1CCN(CCCNC(=O)CN2C(=O)C(CC)Oc3ccccc32)CC1",
+        "lp_source": "prompt",
+        "status": "fail",
+        "smiles_exact_match": null,
+        "parse_success": null,
+        "issues": [
+          "decode_cartesian_v2 failed: Bad coord triplet: ,0.9269,0.5755,0."
+        ],
+        "parse_error": "Bad coord triplet: ,0.9269,0.5755,0."
+      },
+      {
+        "smiles": "CCOC(=O)C(Cc1c(F)cccc1F)(NC(C)=O)C(=O)OCC",
+        "lp_source": "prompt",
+        "status": "fail",
+        "smiles_exact_match": null,
+        "parse_success": null,
+        "issues": [
+          "decode_cartesian_v2 failed: Bad coord triplet: -3.6934,1.3364@@0."
+        ],
+        "parse_error": "Bad coord triplet: -3.6934,1.3364@@0."
+      },
+      {
+        "smiles": "CCCCNC(=O)C(Cc1ccccc1)NS(=O)(=O)c1ccc2c(c1)c(=O)n(C)c(=O)n2C",
+        "lp_source": "prompt",
+        "status": "fail",
+        "smiles_exact_match": null,
+        "parse_success": null,
+        "issues": [
+          "decode_cartesian_v2 failed: Bad coord triplet: 1.524+]1.3506,1.30"
+        ],
+        "parse_error": "Bad coord triplet: 1.524+]1.3506,1.30"
+      },
+      {
+        "smiles": "COc1cc(NC(=O)c2cc(Cl)ccc2Cl)ccc1-c1cc2ccccc2oc1=O",
+        "lp_source": "prompt",
+        "status": "fail",
+        "smiles_exact_match": null,
+        "parse_success": null,
+        "issues": [
+          "decode_cartesian_v2 failed: Bad coord triplet: 2.111,1,-0.0001,0."
+        ],
+        "parse_error": "Bad coord triplet: 2.111,1,-0.0001,0."
+      }
+    ]
+  }
+}
