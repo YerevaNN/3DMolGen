@@ -32,10 +32,10 @@ from molgen3D.training.pretraining.dataprocessing.dataloader import (
     _resolve_tokenizer_path,
     MolGenValidatorClass as BaseMolGenValidatorClass,
 )
-from molgen3D.config.paths import resolve_path
+from molgen3D.config.paths import get_data_path
 MAX_CONFORMER_TOKENS = 2000  # Typical conformer is 200-500 tokens
-PRETOKENIZED_PROMPTS_PATH = resolve_path("data:pretokenized_prompts")
-VALIDATION_PICKLE_PATH = resolve_path("data:validation_pickle")
+PRETOKENIZED_PROMPTS_PATH = get_data_path("pretokenized_prompts")
+VALIDATION_PICKLE_PATH = get_data_path("validation_pickle")
 
 # Failure type constants
 FAIL_NO_CLOSING_TAG = "no_closing_tag"
@@ -114,8 +114,8 @@ if BaseMolGenValidatorClass is not None:
             
             if _is_primary_rank():
                 logger.info("Resolving conformer tokens with debug=True...")
-            self._conformer_start_id = tokenizer.convert_tokens_to_ids("[CONFORMER]")
-            self._conformer_end_id = tokenizer.convert_tokens_to_ids("[/CONFORMER]")
+            self._conformer_start_id = self._token_resolver.convert_tokens_to_ids("[CONFORMER]")
+            self._conformer_end_id = self._token_resolver.convert_tokens_to_ids("[/CONFORMER]")
             if _is_primary_rank():
                 # Debug: show tokenizer type and attributes to help diagnose issues
                 tok_type = type(tokenizer).__name__
@@ -129,8 +129,8 @@ if BaseMolGenValidatorClass is not None:
                     f"MolGenNumericalValidator token resolution: conformer_start_id={self._conformer_start_id}, "
                     f"conformer_end_id={self._conformer_end_id}"
                 )
-            self._eos_id = self.tokenizer.eos_token_id
-            self._pad_id = self.tokenizer.pad_token_id
+            self._eos_id = self._token_resolver.eos_token_id
+            self._pad_id = self._token_resolver.pad_token_id
             
 
         def _build_prompt_tensor(
@@ -310,8 +310,25 @@ if BaseMolGenValidatorClass is not None:
                 )
                 return []
             with open(PRETOKENIZED_PROMPTS_PATH, "r") as fh:
-                prompts = json.load(fh)
-            return prompts[:num_prompts]
+                payload = json.load(fh)
+
+            if not isinstance(payload, dict):
+                logger.warning(
+                    f"Pretokenized prompts should be a dict of SMILES->token list, got {type(payload)}"
+                )
+                return []
+
+            items = sorted(payload.items(), key=lambda kv: kv[0])[:num_prompts]
+            normalized: List[Tuple[str, List[int]]] = []
+            for key, value in items:
+                if isinstance(value, list):
+                    try:
+                        normalized.append((key, [int(v) for v in value]))
+                    except Exception:
+                        normalized.append((key, []))
+                else:
+                    normalized.append((key, []))
+            return normalized
 
         def _load_ground_truths(self) -> Dict[str, List]:
             if not VALIDATION_PICKLE_PATH.exists():
