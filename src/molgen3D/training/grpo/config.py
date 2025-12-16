@@ -67,7 +67,7 @@ class GRPOConfig:
     enable_diversity: bool = True
     diversity_scale: float = 1.0
     precision_scale: float = 0.5
-    enable_posebusters: bool = False
+    enable_posebusters: bool = True
     match_partial_credit: bool = False
     weight_precision: float = 0.4
     weight_coverage: float = 0.3
@@ -83,6 +83,7 @@ class GRPOConfig:
     lambda_smcov: float = 1.0  # Weight for smooth coverage term
     lambda_match: float = 1.0  # Weight for matching term
     r_floor: float = -1.0      # Reward for invalid samples
+    hard_rmsd_gate: bool = True  # Drop PoseBusters-valid but RMSD-invalid rollouts
 
     # Runtime parameters (set during execution)
     output_dir: Optional[str] = None

@@ -10,7 +10,8 @@ design, how it maps to code, default hyperparameters, and operational guidance.
 - **Goal**: Provide a dense, group-aware reward that aligns with all four
   GEOM-Drugs metrics (AMR-P, AMR-R, COV-P, COV-R) under small rollout counts.
 - **Key ideas**
-  - Hard validity gate keeps PoseBusters/RDKit failures from leaking signal.
+  - Hard validity gate now requires (i) SMILES graph equality with the prompt
+    and (ii) optional PoseBusters success before any reward terms are computed.
   - Dense quality term rewards every valid rollout for approaching any reference.
   - Smooth coverage term grants marginal value for covering new references even
     before reaching the benchmark threshold.
@@ -23,72 +24,77 @@ design, how it maps to code, default hyperparameters, and operational guidance.
 
 For each canonical SMILES (one GRPO group):
 
-- Reference conformers: \(G=\{g_j\}_{j=1}^M\) (up to 30 cached GEOM conformers).
-- Rollouts: \(Y=\{y_i\}_{i=1}^K\) generated conformers.
-- Distances: \(D_{ij}=d(y_i,g_j)\) = heavy-atom RMSD (Å) after Kabsch alignment.
-- Hard threshold: \(\delta = 0.75\) Å (GEOM-Drugs benchmark).
-- Validity gate: \(v_i\in\{0,1\}\) via RDKit sanity + optional PoseBusters.
-- Nearest reference per rollout: \(d_i = \min_j D_{ij}\).
+- Reference conformers: $G=\{g_j\}_{j=1}^M$ (up to 30 cached GEOM conformers).
+- Rollouts: $Y=\{y_i\}_{i=1}^K$ generated conformers.
+- Distances: $D_{ij}=d(y_i,g_j)$ = heavy-atom RMSD (Å) after Kabsch alignment.
+- Hard threshold: $\delta = 0.75$ Å (GEOM-Drugs benchmark).
+- Validity gate: $v_i\in\{0,1\}$ via RDKit sanity + optional PoseBusters.
+- Nearest reference per rollout: $d_i = \min_j D_{ij}$.
 
 ## 3. Reward Terms
 
 ### Term 0 – Hard validity gate
-\[
+$$
 r_i =
 \begin{cases}
 r_{\text{floor}}, & v_i = 0\\
 \tilde r_i, & v_i = 1
 \end{cases}
 \qquad r_{\text{floor}}=-1.0
-\]
-Invalid samples immediately receive the floor; valid ones move on.
+$$
+Rollouts are only considered valid if they **first** pass a graph-equality
+check: the generated SMILES (after stripping) must encode the same molecular
+graph as the prompt’s canonical SMILES (via `same_molecular_graph`). Any
+mismatch (or parsing failure) immediately receives $r_{\text{floor}}$. If
+`enable_posebusters` is true, the RDKit molecule must also pass PoseBusters;
+failures are likewise assigned the floor reward.
 
 ### Term 1 – Dense quality (AMR-P / COV-P aligned)
-\[
+$$
 r_i^{\text{qual}} = \exp\!\left(-\frac{d_i}{\sigma}\right), \qquad \sigma = 0.25 \text{ Å}
-\]
+$$
 Reward decays smoothly with distance to the nearest reference; dense signal for
 all valid conformers.
 
 ### Term 2 – Smooth marginal coverage (COV-R precursor)
-\[
+$$
 \begin{aligned}
 k(d) &= \exp\!\left(-\left(\frac{d}{\rho}\right)^2\right), \quad \rho = 0.75 \text{ Å}\\
 u_j &= 1 - \prod_{i=1}^K \big(1 - k(D_{ij})\big)\\
 \Delta_{ij} &= k(D_{ij})\prod_{\ell\ne i} \big(1 - k(D_{\ell j})\big)\\
 r_i^{\text{smcov}} &= \frac{1}{M}\sum_{j=1}^M \Delta_{ij}
 \end{aligned}
-\]
-Interpretation: \(\Delta_{ij}\) is the marginal contribution of rollout \(i\) to
-covering reference \(j\). Early explorers get the highest reward; duplicates are
+$$
+Interpretation: $\Delta_{ij}$ is the marginal contribution of rollout $i$ to
+covering reference $j$. Early explorers get the highest reward; duplicates are
 naturally discounted.
 
 ### Term 3 – Hard unique-coverage bonus (COV-R aligned)
-\[
+$$
 \begin{aligned}
 E &= \{(i,j) : v_i = 1 \wedge D_{ij} < \delta\}\\
 M^\star &= \arg\max_{M\subseteq E}\ |M| \quad \text{(break ties by } \sum D_{ij})\\
 c_i &= \mathbf{1}\big[\exists j:(i,j)\in M^\star\big]
 \end{aligned}
-\]
+$$
 Optional shaping (enabled in code):
-\[
+$$
 r_i^{\text{match}} =
 \begin{cases}
 1 - D_{ij}/\delta, & (i,j)\in M^\star\\
 0, & \text{otherwise}
 \end{cases}
-\]
-This enforces one-to-one coverage under \(\delta\), mirroring GEOM-Drugs COV-R.
+$$
+This enforces one-to-one coverage under $\delta$, mirroring GEOM-Drugs COV-R.
 
 ### Final combination (valid samples)
-\[
+$$
 \tilde r_i = \lambda_{\text{qual}} r_i^{\text{qual}}
             + \lambda_{\text{smcov}} r_i^{\text{smcov}}
             + \lambda_{\text{match}} r_i^{\text{match}}
-\]
-Default weights: \(\lambda_{\text{qual}} = \lambda_{\text{smcov}} =
-\lambda_{\text{match}} = 1.0\).
+$$
+Default weights: $\lambda_{\text{qual}} = \lambda_{\text{smcov}} =
+\lambda_{\text{match}} = 1.0$.
 
 ## 4. Implementation Flow
 
@@ -96,19 +102,24 @@ Located in `src/molgen3D/training/grpo/grpo_reward_v3.py`.
 
 1. **Group samples** by canonical SMILES (GRPO prompts carry SMILES tags).
 2. **Load reference conformers** for the group (cached pickles, max 30).
-3. **Parse rollouts** into RDKit molecules, apply RDKit/PoseBusters validity.
-4. **Compute RMSD matrix** \(D\) (K × M) with Kabsch alignment (heavy atoms).
+3. **Parse rollouts** into RDKit molecules, ensure the parsed SMILES matches
+   the prompt’s graph, and optionally run PoseBusters. Invalid rollouts never
+   reach the RMSD or reward stages.
+4. **Compute RMSD matrix** $D$ (K × M) with Kabsch alignment (heavy atoms).
 5. **Compute term rewards** (`compute_quality_reward`, `compute_smooth_coverage_reward`,
    `compute_matching_reward`).
 6. **Combine terms** with weights + validity gate.
 7. **Return per-sample rewards** in original order and log batch statistics.
 
 ### Validity gate (`compute_validity`)
-- RDKit parse success + PoseBusters (if `enable_posebusters`).
-- Logs failure types via `RunStatistics`.
+- Ensures SMILES/graph equality and pose sanity before any RMSD work.
+- PoseBusters is only run if `enable_posebusters` is true. Otherwise, the gate
+  is determined solely by SMILES parsing and graph equality.
+- Invalid rollouts are masked from all later computation and receive
+  `r_floor`.
 
 ### RMSD matrix (`compute_distance_matrix`)
-- Skips invalid rollouts (sets \(D_{ij}=\infty\)).
+- Skips invalid rollouts (sets $D_{ij}=\infty$).
 - Uses heavy-atom ordering consistent with benchmark alignment.
 
 ### Dense quality (`compute_quality_reward`)
@@ -199,11 +210,11 @@ grpo:
 
 ## 7. Computational Considerations
 
-- Validity: \(O(K)\) + optional PoseBusters cost.
-- RMSD: \(O(K \times M \times N)\) (N = atoms, Kabsch alignment dominates).
-- Smooth coverage: \(O(K^2 \times M)\) due to marginal products.
-- Matching: \(O(K^3)\) from Hungarian algorithm (small K keeps this manageable).
-- Typical regime: \(K=16\), \(M=30\), \(N≈40\).
+- Validity: $O(K)$ + optional PoseBusters cost.
+- RMSD: $O(K \times M \times N)$ (N = atoms, Kabsch alignment dominates).
+- Smooth coverage: $O(K^2 \times M)$ due to marginal products.
+- Matching: $O(K^3)$ from Hungarian algorithm (small K keeps this manageable).
+- Typical regime: $K=16$, $M=30$, $N≈40$.
 - Use vectorized NumPy + cached reference loading to stay within wall-clock.
 
 ## 8. Edge Cases & Robustness
@@ -213,7 +224,7 @@ grpo:
 - **All invalid rollouts**: Entire group receives `r_floor`; downstream stats
   show 0 validity and 0 matches.
 - **Numerical stability**: Smooth coverage uses log-space products and clamps
-  kernel values to \([0,1]\) to prevent `nan`.
+  kernel values to $[0,1]$ to prevent `nan`.
 - **SMILES parsing errors**: Invalid RDKit molecules are treated as invalid
   rollouts; errors are logged for debugging.
 - **PoseBusters optionality**: Keep disabled for throughput unless training
