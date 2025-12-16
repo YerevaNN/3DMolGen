@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 from loguru import logger
 
 try:
@@ -32,10 +32,10 @@ from molgen3D.training.pretraining.dataprocessing.dataloader import (
     _resolve_tokenizer_path,
     MolGenValidatorClass as BaseMolGenValidatorClass,
 )
-
+from molgen3D.config.paths import resolve_path
 MAX_CONFORMER_TOKENS = 2000  # Typical conformer is 200-500 tokens
-PRETOKENIZED_PROMPTS_PATH = Path("/auto/home/vover/3DMolGen/data/pretokenized_prompts.json")
-VALIDATION_PICKLE_PATH = Path("/auto/home/vover/3DMolGen/data/valid_set.pickle")
+PRETOKENIZED_PROMPTS_PATH = resolve_path("data:pretokenized_prompts")
+VALIDATION_PICKLE_PATH = resolve_path("data:validation_pickle")
 
 # Failure type constants
 FAIL_NO_CLOSING_TAG = "no_closing_tag"
@@ -114,10 +114,8 @@ if BaseMolGenValidatorClass is not None:
             
             if _is_primary_rank():
                 logger.info("Resolving conformer tokens with debug=True...")
-            self._conformer_start_id = self._resolve_token_id("[CONFORMER]", "[CONFORMERS]", debug=True)
-            self._conformer_end_id = self._resolve_token_id(
-                "[/CONFORMER]", "[/CONFORMERS]", debug=True
-            )
+            self._conformer_start_id = tokenizer.convert_tokens_to_ids("[CONFORMER]")
+            self._conformer_end_id = tokenizer.convert_tokens_to_ids("[/CONFORMER]")
             if _is_primary_rank():
                 # Debug: show tokenizer type and attributes to help diagnose issues
                 tok_type = type(tokenizer).__name__
@@ -131,71 +129,16 @@ if BaseMolGenValidatorClass is not None:
                     f"MolGenNumericalValidator token resolution: conformer_start_id={self._conformer_start_id}, "
                     f"conformer_end_id={self._conformer_end_id}"
                 )
-            self._eos_id = _resolve_special_token_id(
-                tokenizer,
-                "eos_id",
-                (
-                    getattr(tokenizer, "eos_token", None),
-                    "<|endoftext|>",
-                ),
-            )
-            self._pad_id = _resolve_special_token_id(
-                tokenizer,
-                "pad_id",
-                (
-                    getattr(tokenizer, "pad_token", None),
-                    "<|endoftext|>",
-                ),
-            )
-
-        def _resolve_token_id(self, *tokens: str, debug: bool = False) -> Optional[int]:
-            # Use the properly loaded AutoTokenizer if available
-            # This has added_tokens.json loaded correctly
-            tokenizer = self._token_resolver if self._token_resolver is not None else self.tokenizer
+            self._eos_id = self.tokenizer.eos_token_id
+            self._pad_id = self.tokenizer.pad_token_id
             
-            if debug and _is_primary_rank():
-                logger.info(f"  Using tokenizer: {type(tokenizer).__name__}")
-            
-            for token in tokens:
-                if not token:
-                    continue
-                
-                token_id = None
-                
-                # Method 1: convert_tokens_to_ids (HuggingFace PreTrainedTokenizer)
-                if hasattr(tokenizer, "convert_tokens_to_ids"):
-                    token_id = tokenizer.convert_tokens_to_ids(token)
-                    if debug and _is_primary_rank():
-                        logger.info(f"  convert_tokens_to_ids('{token}') = {token_id}")
-                
-                # Method 2: token_to_id (tokenizers.Tokenizer)
-                if token_id is None and hasattr(tokenizer, "token_to_id"):
-                    token_id = tokenizer.token_to_id(token)
-                    if debug and _is_primary_rank():
-                        logger.info(f"  token_to_id('{token}') = {token_id}")
-
-                if isinstance(token_id, int) and token_id >= 0:
-                    return int(token_id)
-            return None
 
         def _build_prompt_tensor(
             self, token_ids: Sequence[Union[int, float]], device: torch.device
         ) -> Optional[torch.Tensor]:
-            ids: List[int] = []
-            for tid in token_ids:
-                try:
-                    ids.append(int(tid))
-                except (TypeError, ValueError):
-                    continue
-
-            if self._conformer_start_id is None:
-                logger.warning(
-                    "Skipping numerical validation because conformer start token is missing."
-                )
-                return None
-
-            ids.append(self._conformer_start_id)
+            ids = token_ids + [self._conformer_start_id]
             return torch.tensor(ids, device=device, dtype=torch.long).unsqueeze(0)
+
 
         def _greedy_decode(
             self,
@@ -212,9 +155,9 @@ if BaseMolGenValidatorClass is not None:
                 generated = torch.cat([generated, next_token.unsqueeze(-1)], dim=-1)
 
                 token_id = int(next_token.item())
-                if self._conformer_end_id is not None and token_id == self._conformer_end_id:
+                if token_id == self._conformer_end_id:
                     break
-                if self._eos_id is not None and token_id == self._eos_id:
+                if token_id == self._eos_id:
                     break
                 if generated.shape[1] >= max_total_len:
                     break
@@ -236,10 +179,7 @@ if BaseMolGenValidatorClass is not None:
             else:
                 tokens = token_tensor.tolist()
             decoded = self._decode_tokens(tokens)
-            # Try [CONFORMER] first (primary format), fall back to [CONFORMERS]
             conformer = extract_between(decoded, "[CONFORMER]", "[/CONFORMER]")
-            if not conformer:
-                conformer = extract_between(decoded, "[CONFORMERS]", "[/CONFORMERS]")
             return conformer.strip() if conformer else ""
 
         def _compute_rmsd_stats(
@@ -369,32 +309,9 @@ if BaseMolGenValidatorClass is not None:
                     f"Numerical validation prompts file not found at {PRETOKENIZED_PROMPTS_PATH}"
                 )
                 return []
-            try:
-                with open(PRETOKENIZED_PROMPTS_PATH, "r") as fh:
-                    payload = json.load(fh)
-            except Exception as exc:  # pragma: no cover - runtime safety
-                logger.warning(
-                    f"Failed to load pretokenized prompts from {PRETOKENIZED_PROMPTS_PATH}: {exc}"
-                )
-                return []
-
-            if not isinstance(payload, dict):
-                logger.warning(
-                    f"Pretokenized prompts should be a dict of SMILES->token list, got {type(payload)}"
-                )
-                return []
-
-            items = sorted(payload.items(), key=lambda kv: kv[0])[:num_prompts]
-            normalized: List[Tuple[str, List[int]]] = []
-            for key, value in items:
-                if isinstance(value, list):
-                    try:
-                        normalized.append((key, [int(v) for v in value]))
-                    except Exception:
-                        normalized.append((key, []))
-                else:
-                    normalized.append((key, []))
-            return normalized
+            with open(PRETOKENIZED_PROMPTS_PATH, "r") as fh:
+                prompts = json.load(fh)
+            return prompts[:num_prompts]
 
         def _load_ground_truths(self) -> Dict[str, List]:
             if not VALIDATION_PICKLE_PATH.exists():
@@ -402,40 +319,23 @@ if BaseMolGenValidatorClass is not None:
                     f"Ground truth conformers not found at {VALIDATION_PICKLE_PATH}"
                 )
                 return {}
-            try:
-                with open(VALIDATION_PICKLE_PATH, "rb") as fh:
-                    data = cloudpickle.load(fh)
-            except Exception as exc:  # pragma: no cover - runtime safety
-                logger.warning(
-                    f"Failed to load ground truth conformers from {VALIDATION_PICKLE_PATH}: {exc}"
-                )
-                return {}
 
-            if not isinstance(data, dict):
-                logger.warning(
-                    f"Expected dict[str, list[Mol]] in {VALIDATION_PICKLE_PATH}, got {type(data)}"
-                )
-                return {}
-            return data
+            with open(VALIDATION_PICKLE_PATH, "rb") as fh:
+                ground_truths = cloudpickle.load(fh)
+            return ground_truths
 
         def _run_numerical_validation(
             self, model_parts: List[torch.nn.Module], step: int
         ) -> None:
             if not getattr(self.job_config.validation, "numerical_validation", False):
                 return
-            # Removed primary rank check to support FSDP synchronization
             if self.parallel_dims.pp_enabled or len(model_parts) != 1:
                 if _is_primary_rank():
                     logger.warning(
                         "Numerical validation currently supports single-stage models; skipping."
                     )
                 return
-            if self._conformer_start_id is None or self._conformer_end_id is None:
-                if _is_primary_rank():
-                    logger.warning(
-                        "Conformer tokens missing from tokenizer; numerical validation skipped."
-                    )
-                return
+
 
             num_val_molecules = getattr(self.job_config.validation, "num_val_molecules", 10)
             prompts = self._load_prompts(num_val_molecules)
@@ -511,7 +411,7 @@ if BaseMolGenValidatorClass is not None:
                     # Check for empty/missing conformer
                     if not conformer_text:
                         # Check if [/CONFORMER] is missing
-                        if "[/CONFORMER]" not in full_decoded and "[/CONFORMERS]" not in full_decoded:
+                        if "[/CONFORMER]" not in full_decoded:
                             failure_counts[FAIL_NO_CLOSING_TAG] += 1
                             all_failed_generations.append((key, full_decoded, FAIL_NO_CLOSING_TAG))
                             if len(sample_failures) < 10:
@@ -611,7 +511,7 @@ def build_molgen_validator(
     pp_schedule=None,
     pp_has_first_stage=None,
     pp_has_last_stage=None,
-) -> BaseValidator:
+) -> Any:
     """
     Build the MolGen numerical validator with conformer generation and RMSD metrics.
     
