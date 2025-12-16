@@ -341,6 +341,14 @@ class QwenAllowlistLogitsProcessor(LogitsProcessor):
             self.comma_dash_mask = _build_blocked_mask(self.comma_dash_ids, vocab_size, device)
             self.comma_only_mask = _build_blocked_mask(self.comma_only_ids, vocab_size, device)
             for template in self.templates:
+                # Check for vocab size mismatch
+                max_ref_id = template.ref_ids.max().item()
+                if max_ref_id >= vocab_size:
+                    raise ValueError(
+                        f"QwenAllowlistLP: Token ID {max_ref_id} in template exceeds model vocab_size {vocab_size}. "
+                        f"This usually means the tokenizer vocab is larger than the model's embedding layer. "
+                        f"Ensure model.resize_token_embeddings(tokenizer.vocab_size) was called during training."
+                    )
                 template.ref_ids = template.ref_ids.to(device)
                 template.is_free = template.is_free.to(device)
                 if template.block_comma_dash is not None:
@@ -357,10 +365,12 @@ class QwenAllowlistLogitsProcessor(LogitsProcessor):
 
             pos = cur_len - self._prev_lens[b]
 
+            # Past expected length → force EOS
             if pos >= template.seq_len:
                 if self.eos_token_id is not None:
                     scores[b, :] = float('-inf')
                     scores[b, self.eos_token_id] = 0.0
+            # FREE position - Allow only subset of tokens (from Allowed_Mask)
             elif template.is_free[pos]:
                 scores[b, ~self.allowed_mask] = float('-inf')
                 if template.is_first_free is not None and template.is_first_free[pos]:

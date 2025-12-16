@@ -1,0 +1,35 @@
+Traceback (most recent call last):
+  File "stdin" line 1 col 1
+    LIMIT 20
+    ^
+syntax error
+
+Query executed in 0.009 ms
+
+
+Query executed in 0.011 ms
+
+
+Query executed in 0.011 ms
+
+
+Query executed in 0.011 ms
+
+
+Query executed in 0.005 ms
+
+
+Query executed in 0.009 ms
+
+
+Query executed in 0.008 ms
+
+
+Query executed in 0.004 ms
+
+
+Query executed in 0.007 ms
+
+
+Query executed in 0.007 ms
+
