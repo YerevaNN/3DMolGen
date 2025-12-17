@@ -24,22 +24,20 @@ grpo:
   delta: 0.75
   enable_posebusters: false
   grad_acc_steps: 2
-  lambda_match: 2.5
-  lambda_qual: 1.2
-  lambda_smcov: 3.0
-  learning_rate: 1.0e-05
-  max_grad_norm: 1.0
+  lambda_match: 0.0
+  lambda_qual: 20.0
+  lambda_smcov: 0.0
+  learning_rate: 5.0e-05
+  max_grad_norm: 2.0
   max_ground_truths: 30
   max_steps: 2000
   num_epochs: 1
   num_generations: 16
   num_iterations: 2
   output_base_dir: ./grpo_outputs
-  per_device_batch_size: 16
+  per_device_batch_size: 32
   r_floor: -1.0
   reward_strategy: v3
-  reward_weight_match: 0.15
-  reward_weight_rmsd: 0.85
   rho: 0.75
   rmsd_const: 0.75
   scheduler: cosine
@@ -47,7 +45,7 @@ grpo:
   sigma: 0.3
   temperature: 1.0
   warmup_ratio: 0.15
-  weight_decay: 0.1
+  weight_decay: 0.0
 model:
   checkpoint_path: /nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b/251210-1955-d79f-qwen3_06b_pre_4e_144effb/step-80000-hf/
   conf_tags:
@@ -63,7 +61,7 @@ processing:
   eos_token_id: 151672
 run:
   log_level: INFO
-  name: qwen3_v3_default_params_ni2
+  name: qwen3_v3_default_params_ni2_32bs
 trainer:
   attn_implementation: flash_attention_2
   log_on_each_node: false

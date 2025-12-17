@@ -93,7 +93,7 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         logging_steps=config.trainer.logging_steps,
         max_steps=config.grpo.max_steps,
         # num_train_epochs=config.grpo.num_epochs,
-        use_liger_loss=config.trainer.use_liger_loss,
+        use_liger_kernel=config.trainer.use_liger_loss,
         loss_type=config.trainer.loss_type,
         num_iterations=config.grpo.num_iterations,
     )

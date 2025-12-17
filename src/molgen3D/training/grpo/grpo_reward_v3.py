@@ -1,7 +1,7 @@
 """GRPO Reward Function - GEOM-Drugs Aligned Implementation.
 
 This implements the reward specification from docs/grpo_reward.md with:
-- Hard PoseBusters validity gate
+- Hard graph-match validity gate
 - Dense quality term (AMR-P proxy)
 - Smooth marginal coverage (group-aware, pre-threshold signal)
 - Hard unique-coverage matching bonus (max-cardinality under δ)
@@ -12,7 +12,6 @@ Design targets all four GEOM-Drugs metrics under small-K constraints.
 from __future__ import annotations
 
 import os
-import math
 from typing import List, Optional, Tuple, Dict
 from collections import OrderedDict
 
@@ -27,75 +26,33 @@ from molgen3D.training.grpo.utils import load_ground_truths
 from molgen3D.utils.utils import get_best_rmsd
 
 
-# ============================================================================
-# PoseBusters Integration
-# ============================================================================
-
-_POSEBUSTERS_INSTANCE = None
-_POSEBUSTERS_AVAILABLE = None
-
 # Toggle for the optional RMSD hard validity gate (overridable via config).
-# When enabled, PoseBusters-valid rollouts that lack finite RMSD are dropped.
+# When enabled, rollouts that pass the graph-match gate but lack finite RMSD are dropped.
 DEFAULT_ENABLE_HARD_RMSD_GATE = True
 
 
 # Small LRU cache for reference conformers to avoid repeated disk hits.
 GROUND_TRUTH_CACHE_SIZE = 256
 _GROUND_TRUTH_CACHE: "OrderedDict[Tuple[str, int], List[Chem.Mol]]" = OrderedDict()
-_POSEBUSTERS_DISABLED_WARNING_EMITTED = False
 
 
-def _dummy_posebusters_checker(_: Optional[Chem.Mol]) -> bool:
-    return False
+# ============================================================================
+# Step A: Graph Validity Gate
+# ============================================================================
 
+def compute_validity(
+    graph_matches: Optional[np.ndarray],
+    num_rollouts: int,
+) -> np.ndarray:
+    """Compute validity indicators using only graph-matching information."""
+    if graph_matches is None:
+        return np.ones(num_rollouts, dtype=np.int32)
 
-def get_posebusters_checker():
-    """Lazy-load PoseBusters instance with per-process caching."""
-    global _POSEBUSTERS_INSTANCE, _POSEBUSTERS_AVAILABLE
+    graph_matches = np.asarray(graph_matches, dtype=bool)
+    if graph_matches.shape[0] != num_rollouts:
+        raise ValueError("graph_matches length must equal number of rollouts")
 
-    if _POSEBUSTERS_AVAILABLE is False:
-        return _dummy_posebusters_checker
-
-    if _POSEBUSTERS_INSTANCE is None:
-        try:
-            from posebusters import PoseBusters
-            _POSEBUSTERS_INSTANCE = PoseBusters(config="mol")
-            _POSEBUSTERS_AVAILABLE = True
-            logger.info("PoseBusters initialized successfully")
-        except Exception as exc:
-            logger.warning(f"PoseBusters unavailable, validity disabled: {exc}")
-            _POSEBUSTERS_AVAILABLE = False
-            _POSEBUSTERS_INSTANCE = None
-
-    if _POSEBUSTERS_INSTANCE is None:
-        return _dummy_posebusters_checker
-
-    def checker(mol: Chem.Mol) -> bool:
-        if mol is None:
-            return False
-        try:
-            df = _POSEBUSTERS_INSTANCE.bust([mol], None, None, full_report=False)
-            return bool(df.all(axis=1).iloc[0])
-        except Exception as exc:
-            logger.debug(f"PoseBusters check failed: {exc}")
-            return False
-
-    return checker
-
-
-def ensure_posebusters_available(enable_posebusters: bool):
-    """Return a PoseBusters checker or raise if required but unavailable."""
-    if not enable_posebusters:
-        return _dummy_posebusters_checker
-
-    checker = get_posebusters_checker()
-    if _POSEBUSTERS_AVAILABLE is False:
-        raise RuntimeError(
-            "PoseBusters was requested (enable_posebusters=True) but could not be initialized. "
-            "Install and configure the posebusters package or set enable_posebusters=False intentionally."
-        )
-    return checker
-
+    return graph_matches.astype(np.int32)
 
 # ============================================================================
 # Parsing
@@ -142,58 +99,6 @@ def get_cached_ground_truths(
         if len(_GROUND_TRUTH_CACHE) > GROUND_TRUTH_CACHE_SIZE:
             _GROUND_TRUTH_CACHE.popitem(last=False)
     return references
-
-
-# ============================================================================
-# Step A: PoseBusters Gate
-# ============================================================================
-
-def compute_validity(
-    rollout_mols: List[Optional[Chem.Mol]],
-    posebusters_checker,
-    enable_posebusters: bool,
-    graph_matches: Optional[np.ndarray] = None,
-) -> np.ndarray:
-    """Compute validity indicators v_i ∈ {0,1} for each rollout.
-
-    Args:
-        rollout_mols: K generated conformers
-        posebusters_checker: PoseBusters checker callable
-        enable_posebusters: Whether PoseBusters is enabled
-        graph_matches: Boolean mask indicating canonical graph agreement
-
-    Returns:
-        Array of shape (K,) with validity indicators
-    """
-    K = len(rollout_mols)
-    validity = np.zeros(K, dtype=np.int32)
-
-    if graph_matches is None:
-        graph_matches = np.ones(K, dtype=bool)
-    else:
-        graph_matches = np.asarray(graph_matches, dtype=bool)
-        if graph_matches.shape[0] != K:
-            raise ValueError("graph_matches length must equal number of rollouts")
-
-    for i, mol in enumerate(rollout_mols):
-        if not graph_matches[i]:
-            continue  # Fails hard gate if molecular graph mismatches canonical prompt
-
-        if mol is None:
-            continue
-
-        if enable_posebusters:
-            try:
-                if not posebusters_checker(mol):
-                    continue
-            except Exception as exc:
-                logger.debug(f"PoseBusters check exception for rollout {i}: {exc}")
-                continue
-
-        validity[i] = 1
-
-    return validity
-
 
 # ============================================================================
 # Step B: RMSD Matrix
@@ -517,8 +422,6 @@ def compute_group_reward(
     completions: List[str],
     config,
     stats,
-    posebusters_checker,
-    enable_posebusters: bool,
 ) -> Tuple[np.ndarray, Dict]:
     """Compute rewards for a single prompt group (K rollouts).
 
@@ -527,7 +430,6 @@ def compute_group_reward(
         completions: List of K completion strings
         config: GRPO config
         stats: RunStatistics object
-        posebusters_checker: PoseBusters checker
 
     Returns:
         Tuple of (rewards, debug_info)
@@ -561,7 +463,7 @@ def compute_group_reward(
         return np.full(K, r_floor, dtype=np.float32), {
             'M': 0,
             'K': K,
-            'validity_rate_posebusters': 0.0,
+            'graph_match_rate': 0.0,
             'finite_rmsd_rate': 0.0,
             'validity_rate': 0.0,
             'mean_d_i': float('nan'),
@@ -579,6 +481,7 @@ def compute_group_reward(
             'valid_r_qual_values': np.array([], dtype=np.float32),
             'valid_r_smcov_values': np.array([], dtype=np.float32),
             'valid_r_match_values': np.array([], dtype=np.float32),
+            'valid_advantage_values': np.array([], dtype=np.float32),
         }
 
     M = len(reference_mols)
@@ -627,23 +530,16 @@ def compute_group_reward(
 
     # Step A: Compute validity
     graph_match_array = np.array(graph_match_flags, dtype=bool)
-    validity = compute_validity(
-        rollout_mols,
-        posebusters_checker,
-        enable_posebusters,
-        graph_matches=graph_match_array,
-    )
+    validity = compute_validity(graph_match_array, K)
     validity_before_rmsd_gate = validity.copy()
+    graph_match_rate = float(np.mean(validity_before_rmsd_gate)) if K > 0 else 0.0
 
     # Early exit if all invalid before RMSD computation
     if np.sum(validity) == 0:
-        if enable_posebusters:
-            stats.posebusters_failures += K
-        validity_rate_posebusters = float(np.mean(validity_before_rmsd_gate)) if K > 0 else 0.0
         return np.full(K, r_floor, dtype=np.float32), {
             'M': M,
             'K': K,
-            'validity_rate_posebusters': validity_rate_posebusters,
+            'graph_match_rate': graph_match_rate,
             'finite_rmsd_rate': 0.0,
             'validity_rate': 0.0,
             'mean_d_i': float('nan'),
@@ -661,12 +557,13 @@ def compute_group_reward(
             'valid_r_qual_values': np.array([], dtype=np.float32),
             'valid_r_smcov_values': np.array([], dtype=np.float32),
             'valid_r_match_values': np.array([], dtype=np.float32),
+            'valid_advantage_values': np.array([], dtype=np.float32),
         }
 
     # Step B: Compute RMSD matrix
     D = compute_distance_matrix(rollout_mols, reference_mols, validity)
 
-    # HARD CONSISTENCY: treat PoseBusters-valid rollouts with no finite RMSD as invalid
+    # HARD CONSISTENCY: treat graph-valid rollouts with no finite RMSD as invalid
     d_i_all = np.min(D, axis=1) if M > 0 else np.full(K, np.inf, dtype=np.float32)
     finite_mask = np.isfinite(d_i_all)
 
@@ -678,7 +575,7 @@ def compute_group_reward(
         num_dropped = num_valid_before - num_valid_after
         if num_dropped > 0:
             logger.warning(
-                f"[reward_v3] RMSD-gate dropped {num_dropped}/{num_valid_before} PoseBusters-valid rollouts "
+                f"[reward_v3] RMSD-gate dropped {num_dropped}/{num_valid_before} graph-valid rollouts "
                 f"(no finite RMSD)."
             )
             stats.failed_rmsd += num_dropped
@@ -688,7 +585,7 @@ def compute_group_reward(
             return np.full(K, r_floor, dtype=np.float32), {
                 'M': M,
                 'K': K,
-                'validity_rate_posebusters': float(np.mean(validity_before_rmsd_gate)) if K > 0 else 0.0,
+                'graph_match_rate': graph_match_rate,
                 'finite_rmsd_rate': finite_rmsd_rate,
                 'validity_rate': 0.0,
                 'mean_d_i': float('nan'),
@@ -706,12 +603,13 @@ def compute_group_reward(
                 'valid_r_qual_values': np.array([], dtype=np.float32),
                 'valid_r_smcov_values': np.array([], dtype=np.float32),
                 'valid_r_match_values': np.array([], dtype=np.float32),
+                'valid_advantage_values': np.array([], dtype=np.float32),
             }
     else:
         num_problematic = int(np.sum((validity_before_rmsd_gate == 1) & (~finite_mask)))
         if num_problematic > 0:
             logger.warning(
-                f"[reward_v3] RMSD-gate disabled — {num_problematic} PoseBusters-valid rollouts have no finite RMSD."
+                f"[reward_v3] RMSD-gate disabled — {num_problematic} graph-valid rollouts have no finite RMSD."
             )
 
     # Step C: Quality reward
@@ -734,15 +632,7 @@ def compute_group_reward(
     match_efficiency = (
         float(num_matched) / max_possible_matches if max_possible_matches > 0 else 0.0
     )
-    if max_possible_matches > 0 and num_matched < 0.8 * max_possible_matches:
-        logger.warning(
-            "[reward_v3] Matching underperformed for SMILES {smiles}: matched={matched}, "
-            "max_possible={max_possible}, efficiency={eff:.3f}",
-            smiles=canonical_smiles if canonical_smiles else "<missing>",
-            matched=num_matched,
-            max_possible=max_possible_matches,
-            eff=match_efficiency,
-        )
+    # Matching efficiency warning disabled per request.
 
     # Step F: Combine rewards
     rewards = combine_rewards(
@@ -756,7 +646,6 @@ def compute_group_reward(
         group_advantages = np.zeros_like(rewards)
 
     # Diagnostics
-    validity_rate_posebusters = float(np.mean(validity_before_rmsd_gate)) if K > 0 else 0.0
     finite_rmsd_rate = float(np.mean(finite_mask)) if K > 0 else 0.0
     validity_rate = float(np.mean(validity)) if K > 0 else 0.0
 
@@ -767,10 +656,28 @@ def compute_group_reward(
 
     mean_r_match_group = float(np.mean(r_match[valid_idx])) if valid_idx.size > 0 else 0.0
 
+    pre_rmsd_valid_count = int(np.sum(validity_before_rmsd_gate))
+    final_valid_count = int(np.sum(validity))
+    graph_match_pct = (
+        100.0 * num_graph_matches / num_graph_checked if num_graph_checked > 0 else 0.0
+    )
+    mean_reward = float(np.mean(rewards)) if rewards.size > 0 else 0.0
+    rewards_list = [float(val) for val in rewards] if rewards.size > 0 else []
+
+    if valid_idx.size > 0:
+        valid_adv_values = group_advantages[valid_idx].astype(np.float32)
+        adv_mean_group = float(np.mean(valid_adv_values))
+        adv_std_group = float(np.std(valid_adv_values))
+    else:
+        valid_adv_values = np.array([], dtype=np.float32)
+        adv_mean_group = float('nan')
+        adv_std_group = float('nan')
+
     debug_info = {
+        'smiles': canonical_smiles if canonical_smiles else "<missing>",
         'M': M,
         'K': K,
-        'validity_rate_posebusters': validity_rate_posebusters,
+        'graph_match_rate': graph_match_rate,
         'finite_rmsd_rate': finite_rmsd_rate,
         'validity_rate': validity_rate,
         'mean_d_i': float(np.mean(finite_d_valid)) if finite_d_valid.size > 0 else float('nan'),
@@ -785,37 +692,29 @@ def compute_group_reward(
         'valid_r_qual_values': r_qual[valid_idx].astype(np.float32) if valid_idx.size > 0 else np.array([], dtype=np.float32),
         'valid_r_smcov_values': r_smcov[valid_idx].astype(np.float32) if valid_idx.size > 0 else np.array([], dtype=np.float32),
         'valid_r_match_values': r_match[valid_idx].astype(np.float32) if valid_idx.size > 0 else np.array([], dtype=np.float32),
-        'valid_advantage_values': group_advantages[valid_idx].astype(np.float32) if valid_idx.size > 0 else np.array([], dtype=np.float32),
+        'valid_advantage_values': valid_adv_values,
+        'advantage_mean': adv_mean_group,
+        'advantage_std': adv_std_group,
+        'prompt_log_data': {
+            'smiles': canonical_smiles if canonical_smiles else "<missing>",
+            'rollouts': K,
+            'parsed': num_parsed_success,
+            'pre_rmsd_valid': pre_rmsd_valid_count,
+            'final_valid': final_valid_count,
+            'graph_match': num_graph_matches,
+            'graph_checked': num_graph_checked,
+            'graph_pct': graph_match_pct,
+            'missing_conformer': num_missing_conformer,
+            'empty_strip': num_empty_stripped,
+            'mean_r_match_group': mean_r_match_group if np.isfinite(mean_r_match_group) else 0.0,
+            'mean_reward': mean_reward,
+            'min_d_i': float(np.min(finite_d_valid)) if finite_d_valid.size > 0 else float('nan'),
+            'fraction_under_delta': under_threshold,
+            'advantage_mean': adv_mean_group,
+            'advantage_std': adv_std_group,
+            'rewards_list': rewards_list,
+        },
     }
-
-    posebusters_valid_count = int(np.sum(validity_before_rmsd_gate))
-    final_valid_count = int(np.sum(validity))
-    graph_match_pct = (
-        100.0 * num_graph_matches / num_graph_checked if num_graph_checked > 0 else 0.0
-    )
-    mean_reward = float(np.mean(rewards)) if rewards.size > 0 else 0.0
-
-    logger.info(
-        "[PID {pid}] [reward_v3] Prompt SMILES: {smiles}\n"
-        "[PID {pid}] [reward_v3] Stats | rollouts={rollouts}, parsed={parsed}, "
-        "posebusters_valid={posebusters_valid}, final_valid={final_valid}, "
-        "graph_match={graph_match}/{graph_checked} ({graph_pct:.2f}%), "
-        "missing_conformer={missing}, empty_strip={empty}, "
-        "mean_r_match={mean_r_match_group:.3f}, mean_reward={mean_reward:.3f}",
-        pid=os.getpid(),
-        smiles=canonical_smiles if canonical_smiles else "<missing>",
-        rollouts=K,
-        parsed=num_parsed_success,
-        posebusters_valid=posebusters_valid_count,
-        final_valid=final_valid_count,
-        graph_match=num_graph_matches,
-        graph_checked=num_graph_checked,
-        graph_pct=graph_match_pct,
-        missing=num_missing_conformer,
-        empty=num_empty_stripped,
-        mean_r_match_group=mean_r_match_group if np.isfinite(mean_r_match_group) else 0.0,
-        mean_reward=mean_reward,
-    )
 
     # Update stats for finite RMSDs
     for i in range(K):
@@ -846,7 +745,7 @@ def group_by_prompt(
 
         key = (prompt, canonical_smiles)
 
-        if key not in active_groups or len(active_groups[key]['completions']) >= expected_k:
+        if key not in active_groups:
             group = {
                 'prompt': prompt,
                 'canonical_smiles': canonical_smiles,
@@ -859,9 +758,6 @@ def group_by_prompt(
         group = active_groups[key]
         group['completions'].append(completion)
         group['indices'].append(idx)
-
-        if len(group['completions']) >= expected_k:
-            active_groups.pop(key, None)
 
     return groups
 
@@ -876,7 +772,7 @@ def reward_function(
     """Main GRPO reward function (TRL-compatible).
 
     Implements GEOM-Drugs-aligned reward with:
-    - Hard PoseBusters gate
+    - Hard graph-match gate
     - Dense quality (AMR-P proxy)
     - Smooth marginal coverage (group-aware)
     - Hard matching bonus (COV-R under δ)
@@ -892,17 +788,6 @@ def reward_function(
         List of reward scalars (B*K)
     """
     expected_k = config.grpo.num_generations
-    enable_posebusters = getattr(config.grpo, 'enable_posebusters', True)
-
-    posebusters_checker = ensure_posebusters_available(enable_posebusters)
-
-    global _POSEBUSTERS_DISABLED_WARNING_EMITTED
-    if not enable_posebusters and not _POSEBUSTERS_DISABLED_WARNING_EMITTED:
-        logger.warning(
-            "[reward_v3] PoseBusters disabled; validity gate will only check RDKit parsing. "
-            "This deviates from the intended reward spec."
-        )
-        _POSEBUSTERS_DISABLED_WARNING_EMITTED = True
 
     groups = group_by_prompt(prompts, completions, expected_k)
 
@@ -910,7 +795,7 @@ def reward_function(
 
     # Aggregate diagnostics
     all_validity_rates = []
-    all_validity_rates_posebusters = []
+    all_graph_match_rates = []
     all_finite_rmsd_rates = []
     all_mean_d_i = []
     all_num_matched = []
@@ -923,6 +808,7 @@ def reward_function(
     valid_r_smcov_arrays = []
     valid_r_match_arrays = []
     valid_advantage_arrays = []
+    prompt_log_data = []
     group_sizes = []
     total_M = 0
     total_K = 0
@@ -936,8 +822,6 @@ def reward_function(
             completions=group['completions'],
             config=config,
             stats=stats,
-            posebusters_checker=posebusters_checker,
-            enable_posebusters=enable_posebusters,
         )
 
         # Assign back to flat batch
@@ -946,7 +830,7 @@ def reward_function(
 
         # Collect diagnostics
         all_validity_rates.append(debug_info['validity_rate'])
-        all_validity_rates_posebusters.append(debug_info['validity_rate_posebusters'])
+        all_graph_match_rates.append(debug_info['graph_match_rate'])
         all_finite_rmsd_rates.append(debug_info['finite_rmsd_rate'])
         all_mean_d_i.append(debug_info['mean_d_i'])
         all_num_matched.append(debug_info['num_matched'])
@@ -963,10 +847,11 @@ def reward_function(
         total_M += debug_info['M']
         total_K += debug_info['K']
         total_max_possible += debug_info['max_possible_matches']
+        prompt_log_data.append(debug_info.get('prompt_log_data'))
 
     # Step G: Logging
     mean_validity = float(np.nanmean(all_validity_rates)) if all_validity_rates else 0.0
-    mean_posebusters = float(np.nanmean(all_validity_rates_posebusters)) if all_validity_rates_posebusters else 0.0
+    mean_graph_match = float(np.nanmean(all_graph_match_rates)) if all_graph_match_rates else 0.0
     mean_finite_rmsd = float(np.nanmean(all_finite_rmsd_rates)) if all_finite_rmsd_rates else 0.0
     mean_d_i = float(np.nanmean(all_mean_d_i)) if all_mean_d_i else float('nan')
     mean_fraction_under_delta = float(np.nanmean(all_fraction_under_delta)) if all_fraction_under_delta else 0.0
@@ -1019,7 +904,7 @@ def reward_function(
         }
 
         complementary_metrics = {
-            "reward_v3_extra/validity_rate_posebusters": mean_posebusters,
+            "reward_v3_extra/graph_match_rate": mean_graph_match,
             "reward_v3_extra/mean_d_i": mean_d_i,
             "reward_v3_extra/eligible_edges": total_eligible_edges,
             "reward_v3_extra/matched_per_valid": float(total_matched) / valid_denominator,
@@ -1040,16 +925,58 @@ def reward_function(
         wandb.log({**main_metrics, **complementary_metrics})
 
     total_valid_final_int = int(round(total_valid_final)) if np.isfinite(total_valid_final) and total_valid_final > 0 else 1
+    batch_unique_prompts = len(groups)
+    batch_total_prompts = total_K
+
     batch_log = (
         f"[PID {os.getpid()}] [reward_v3] Batch summary\n"
-        f"  validity: posebusters={mean_posebusters:.3f}, finite_rmsd={mean_finite_rmsd:.3f}, "
+        f"  validity: graph_match={mean_graph_match:.3f}, finite_rmsd={mean_finite_rmsd:.3f}, "
         f"final={mean_validity:.3f}\n"
-        f"  coverage: d_i={mean_d_i:.3f}, fraction_under_delta={mean_fraction_under_delta:.3f}\n"
+        f"  prompts: unique={batch_unique_prompts}, total={batch_total_prompts}\n"
+        f"  coverage: mean_d_i={mean_d_i:.3f}, fraction_under_delta={mean_fraction_under_delta:.3f}\n"
         f"  rewards: r_total_mean={r_total_mean:.3f}, r_qual={r_qual_mean:.3f}, "
         f"r_smcov={r_smcov_mean:.3f}, r_match={r_match_mean:.3f}\n"
+        f"  advantages: mean={adv_mean:.3f}, std={adv_std:.3f}\n"
         f"  matching: eligible_edges={total_eligible_edges}, max_possible={total_max_possible}, "
         f"matched={total_matched}/{total_valid_final_int} (valid), match_eff={match_efficiency_total:.3f}"
     )
-    logger.info(batch_log)
+    if prompt_log_data:
+        prompts_lines = []
+        for log_data in prompt_log_data:
+            if log_data is None:
+                continue
+            min_d_val = log_data.get('min_d_i')
+            fraction_val = log_data.get('fraction_under_delta')
+            adv_mean_val = log_data.get('advantage_mean')
+            adv_std_val = log_data.get('advantage_std')
+            rewards_vals = log_data.get('rewards_list', [])
+
+            def _fmt(val):
+                return "nan" if val is None or not np.isfinite(val) else f"{val:.3f}"
+
+            rewards_str = ", ".join(f"{val:.3f}" for val in rewards_vals) if rewards_vals else ""
+
+            prompts_lines.append(
+                "    SMILES: {smiles}\n"
+                "      min_d_i={min_d}, fraction_under_delta={fraction}, "
+                "advantage_mean={adv_mean}, advantage_std={adv_std}\n"
+                "      rewards=[{rewards_str}]\n"
+                "      rollouts={rollouts}, parsed={parsed}, "
+                "pre_rmsd_valid={pre_rmsd_valid}, final_valid={final_valid}, "
+                "graph_match={graph_match}/{graph_checked} ({graph_pct:.2f}%), "
+                "missing_conformer={missing_conformer}, empty_strip={empty_strip}, "
+                "mean_r_match={mean_r_match_group:.3f}, mean_reward={mean_reward:.3f}".format(
+                    min_d=_fmt(min_d_val),
+                    fraction=_fmt(fraction_val),
+                    adv_mean=_fmt(adv_mean_val),
+                    adv_std=_fmt(adv_std_val),
+                    rewards_str=rewards_str,
+                    **log_data
+                )
+            )
+        prompts_block = "\n".join(prompts_lines)
+        logger.info(f"{batch_log}\n  prompts_detail:\n{prompts_block}")
+    else:
+        logger.info(batch_log)
 
     return final_rewards
