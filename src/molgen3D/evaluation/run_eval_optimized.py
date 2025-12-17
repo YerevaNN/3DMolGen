@@ -1,7 +1,9 @@
 import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import logging
 import os
 from pathlib import Path
+import sys
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -12,7 +14,7 @@ from tqdm import tqdm
 from molgen3D.config.paths import get_base_path, get_data_path
 from molgen3D.data_processing.utils import load_pkl
 from molgen3D.evaluation import rdkit_utils
-from molgen3D.evaluation.rdkit_utils import compute_rmsd_row
+from molgen3D.evaluation.rdkit_utils import compute_key_matrix
 from molgen3D.evaluation.posebusters_check import bust_full_gens
 from molgen3D.evaluation.utils import (
     DEFAULT_THRESHOLDS,
@@ -22,53 +24,73 @@ from molgen3D.evaluation.utils import (
 )
 from molgen3D.evaluation.write_eval_results import save_evaluation_results
 
+# Configure logging
+logger = logging.getLogger(__name__)
+
+
+def _setup_logging(verbose: bool = False) -> None:
+    """Configure logging for both local and Slurm execution."""
+    level = logging.DEBUG if verbose else logging.INFO
+    fmt = "%(asctime)s | %(levelname)-8s | %(message)s"
+    datefmt = "%Y-%m-%d %H:%M:%S"
+
+    # Configure root logger
+    logging.basicConfig(
+        level=level,
+        format=fmt,
+        datefmt=datefmt,
+        stream=sys.stdout,
+        force=True,  # Override any existing configuration
+    )
+    # Also configure our module logger
+    logger.setLevel(level)
+
+
+def _log_args(args: argparse.Namespace) -> None:
+    """Log all CLI arguments for debugging."""
+    logger.info("=" * 60)
+    logger.info("EVALUATION CONFIG")
+    logger.info("=" * 60)
+    for key, value in sorted(vars(args).items()):
+        logger.info("  %-20s: %s", key, value)
+    logger.info("=" * 60)
+
 
 def compute_rmsd_matrix(true_data: Dict, gen_data: Dict[str, List], args: argparse.Namespace) -> Tuple[Dict, List[str], List[str]]:
-    """Compute RMSD matrices with row-level parallelization for load balancing."""
-    missing, all_nan_keys = [], []
+    """Compute RMSD matrices with molecule-level parallelization.
 
-    # Build per-molecule metadata and collect all row tasks
-    mol_info: Dict[str, Dict] = {}  # key -> {n_true, n_gen, gen_mols}
-    row_tasks: List[Tuple[str, int, object, List, bool]] = []
+    Uses one task per molecule (not per row) for better performance.
+    Row-level parallelization was tested but the overhead of 100x more tasks killed performance.
+    """
+    missing, all_nan_keys = [], []
+    rmsd_results = {}
+    work_items: List[Tuple[str, List, List]] = []
 
     for key in true_data.keys():
         gen_mols = gen_data.get(key, [])
         if not gen_mols:
             missing.append(key)
             continue
-        true_confs = true_data[key]["confs"]
-        mol_info[key] = {"n_true": len(true_confs), "n_gen": len(gen_mols)}
-        # Create one task per row (true conformer)
-        for row_idx, ref_mol in enumerate(true_confs):
-            row_tasks.append((key, row_idx, ref_mol, gen_mols, args.use_alignmol))
+        work_items.append((key, true_data[key]["confs"], gen_mols))
 
-    if not row_tasks:
-        return {}, missing, all_nan_keys
+    if not work_items:
+        return rmsd_results, missing, all_nan_keys
 
-    # Initialize result matrices
-    rmsd_matrices: Dict[str, np.ndarray] = {}
-    for key, info in mol_info.items():
-        rmsd_matrices[key] = np.full((info["n_true"], info["n_gen"]), np.nan, dtype=float)
+    # Track progress by total conformer rows (for tqdm display)
+    total_rows = int(sum(len(confs) for _, confs, _ in work_items))
+    logger.info("RMSD computation: %d molecules, %d total rows, %d workers",
+                len(work_items), total_rows, args.num_workers)
 
-    # Process all rows in parallel with fine-grained load balancing
-    total_rows = len(row_tasks)
     with ProcessPoolExecutor(max_workers=args.num_workers) as ex:
-        futures = [ex.submit(compute_rmsd_row, *task) for task in row_tasks]
+        futures = [ex.submit(compute_key_matrix, key, confs, gen_mols, args.use_alignmol)
+                   for key, confs, gen_mols in work_items]
         with tqdm(total=total_rows, desc="RMSD rows", unit="row") as pbar:
             for fut in as_completed(futures):
-                key, row_idx, row_data = fut.result()
-                if row_data.shape[0] == mol_info[key]["n_gen"]:
-                    rmsd_matrices[key][row_idx] = row_data
-                pbar.update(1)
-
-    # Build final results
-    rmsd_results = {}
-    for key, mat in rmsd_matrices.items():
-        info = mol_info[key]
-        all_nan = bool(np.isnan(mat).all())
-        if all_nan:
-            all_nan_keys.append(key)
-        rmsd_results[key] = {"n_true": info["n_true"], "n_model": info["n_gen"], "rmsd": mat}
+                key, res, all_nan = fut.result()
+                rmsd_results[key] = res
+                if all_nan:
+                    all_nan_keys.append(key)
+                pbar.update(int(res["n_true"]))
 
     return rmsd_results, missing, all_nan_keys
 
@@ -137,7 +159,7 @@ def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers:
     """
 
     if not gen_data:
-        print("PoseBusters: No data to process")
+        logger.warning("PoseBusters: No data to process")
         return None, None, None
 
     num_molecules = len(gen_data)
@@ -148,37 +170,56 @@ def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers:
     if chunk_size <= 0:
         target_tasks_per_worker = 4
         chunk_size = max(50, min(600, num_conformers // (max_workers * target_tasks_per_worker)))
-        print(f"Auto-tuned PoseBusters chunk_size={chunk_size} for {num_conformers} conformers / {max_workers} workers")
+        logger.info(
+            "Auto-tuned PoseBusters chunk_size=%d for %d conformers / %d workers",
+            chunk_size, num_conformers, max_workers
+        )
 
-    print(f"Starting PoseBusters evaluation on {num_molecules} molecules with {num_conformers} total conformers")
-    
+    logger.info("-" * 60)
+    logger.info("POSEBUSTERS EVALUATION")
+    logger.info("-" * 60)
+    logger.info("  Molecules:   %d", num_molecules)
+    logger.info("  Conformers:  %d", num_conformers)
+    logger.info("  Workers:     %d", max_workers)
+    logger.info("  Chunk size:  %d", chunk_size)
+    logger.info("  Config:      %s", config)
+    logger.info("-" * 60)
+
     # Validate data
     empty_keys = [k for k, v in gen_data.items() if not v]
     if empty_keys:
-        print(f"Warning: {len(empty_keys)} molecules have no conformers: {empty_keys[:5]}...")
-    
+        logger.warning(
+            "%d molecules have no conformers (showing first 5): %s",
+            len(empty_keys), empty_keys[:5]
+        )
+
     invalid_mols = []
     for k, mols in gen_data.items():
         for i, mol in enumerate(mols):
             if mol is None:
                 invalid_mols.append(f"{k}_conf{i}")
     if invalid_mols:
-        print(f"Warning: {len(invalid_mols)} invalid molecules found")
-    
+        logger.warning("%d invalid (None) molecules found", len(invalid_mols))
+
     if num_conformers == 0:
-        print("No conformers to evaluate, skipping PoseBusters")
+        logger.warning("No conformers to evaluate, skipping PoseBusters")
         return None, None, None
-    
+
+    pb_start = time.time()
     try:
         df_by_smiles, df_summary, pass_rate = bust_full_gens(
-            smiles_to_confs=gen_data, config=config, full_report=False, num_workers=max_workers, task_chunk_size=chunk_size
+            smiles_to_confs=gen_data, config=config, full_report=False,
+            num_workers=max_workers, task_chunk_size=chunk_size
         )
-        print("PoseBusters completed successfully")
+        elapsed = time.time() - pb_start
+        logger.info("PoseBusters completed in %.1f seconds (%.1f min)", elapsed, elapsed / 60)
+        if pass_rate is not None:
+            logger.info("Overall pass rate: %.2f%%", pass_rate)
         return df_by_smiles, df_summary, pass_rate
     except Exception as e:
-        print(f"PoseBusters failed with error: {e}")
         import traceback
-        traceback.print_exc()
+        logger.error("PoseBusters failed with error: %s", e)
+        logger.error(traceback.format_exc())
         return None, None, None
 
 def get_missing_evaluation_dirs(gen_base: str, eval_base: str, max_recent: Optional[int]) -> List[str]:
@@ -212,6 +253,8 @@ def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
                               results_path: str, args: argparse.Namespace) -> bool:
 
     t0 = time.time()
+    logger.info("Processing generation pickle: %s", gens_path)
+
     # Process generated molecules and calculate total count
     processed_gen_data = rdkit_utils.process_molecules_remove_hs(gens_dict)
 
@@ -239,7 +282,7 @@ def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
     cov_df, matching = summarize_metrics(agg)
     
     posebusters_duration = 0.0
-    posebusters_summary = None 
+    posebusters_summary = None
     posebusters_by_smiles = None
     pass_rate = None
     if args.posebusters != "None":
@@ -247,8 +290,6 @@ def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
         posebusters_by_smiles, posebusters_summary, pass_rate = run_posebusters_wrapper(
             processed_gen_data, args.posebusters, args.num_workers, args.pb_chunk_size
         )
-        if pass_rate is not None:
-            print(f"Overall Pass percentage: {pass_rate:2f}%\n")
         posebusters_duration = time.time() - pb_start
         
     durations = {
@@ -277,49 +318,68 @@ def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
 
 
 def run_evaluation(directory_name: str, gen_base: str, eval_base: str, args: argparse.Namespace) -> bool:
-    print(f"Starting evaluation for: {directory_name}")
-    
+    # Setup logging when running as Slurm job (submitit calls this function directly)
+    _setup_logging(verbose=getattr(args, 'verbose', False))
+    _log_args(args)
+
+    logger.info("=" * 60)
+    logger.info("Starting evaluation for: %s", directory_name)
+    logger.info("=" * 60)
+
     gens_path = os.path.join(gen_base, directory_name)
     if not os.path.exists(gens_path):
-        print(f"Directory does not exist: {gens_path}")
+        logger.error("Directory does not exist: %s", gens_path)
         return False
     gen_pickle_path = find_generation_pickles_path(gens_path)
     if not gen_pickle_path:
-        print(f"No pickle files found in {directory_name}")
+        logger.error("No pickle files found in %s", directory_name)
         return False
-    gens_dict = load_pkl(gen_pickle_path)
 
-    gt_dict = load_pkl(get_data_path(f"{args.test_set}_smi"))
-    print(f"Loaded {len(gt_dict)} ground truth geom_smiles")
-    
+    logger.info("Loading generation pickle: %s", gen_pickle_path)
+    gens_dict = load_pkl(gen_pickle_path)
+    logger.info("Loaded %d generated molecules", len(gens_dict))
+
+    gt_path = get_data_path(f"{args.test_set}_smi")
+    logger.info("Loading ground truth: %s", gt_path)
+    gt_dict = load_pkl(gt_path)
+    logger.info("Loaded %d ground truth molecules", len(gt_dict))
+
     results_path = os.path.join(eval_base, f"{directory_name}")
+    logger.info("Results will be saved to: %s", results_path)
+
     process_generation_pickle(gens_dict, gt_dict, gens_path, results_path, args)
+    return True
 
 def run_directory_mode(args) -> None:
     gen_base = get_base_path("gen_results_root")
     eval_base = derive_eval_base_from_gen(gen_base)
 
+    logger.info("Generation base: %s", gen_base)
+    logger.info("Evaluation base: %s", eval_base)
+
     if args.specific_dir:
         # Check if the specific directory exists before proceeding
         gens_path = os.path.join(gen_base, args.specific_dir)
         if not os.path.exists(gens_path):
-            print(f"Error: Specified directory does not exist: {gens_path}")
+            logger.error("Specified directory does not exist: %s", gens_path)
             return
         directories = [args.specific_dir]
     else:
         directories = get_missing_evaluation_dirs(gen_base, eval_base, args.max_recent)
     if not directories:
-        print("All recent generation directories have been evaluated")
+        logger.info("All recent generation directories have been evaluated")
         return
+
+    logger.info("Directories to evaluate: %s", directories)
 
     if args.device == "local":
         # Run locally without submitit to avoid RDKit pickling issues
-        print(f"Running {len(directories)} evaluations locally")
+        logger.info("Running %d evaluations locally", len(directories))
         for directory in directories:
-            print(f"Processing: {directory}")
+            logger.info("Processing: %s", directory)
             success = run_evaluation(directory, gen_base, eval_base, args)
             if not success:
-                print(f"Failed to evaluate: {directory}")
+                logger.error("Failed to evaluate: %s", directory)
     else:
         # Use submitit for remote execution
         executor = create_slurm_executor(device=args.device, job_type="eval", num_gpus=0, num_cpus=args.num_workers, memory_gb=args.memory_gb)
@@ -333,9 +393,9 @@ def run_directory_mode(args) -> None:
                 args=args,
             )
             jobs.append((directory, job))
-        print(f"Submitted {len(jobs)} jobs to {args.device}")
+        logger.info("Submitted %d jobs to %s", len(jobs), args.device)
         for directory, job in jobs:
-            print(f"  - {directory}: Job ID {job.job_id}")
+            logger.info("  - %s: Job ID %s", directory, job.job_id)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="High-performance evaluation for 3DMolGen with dictionary ground truth")
@@ -349,9 +409,15 @@ def main() -> None:
     parser.add_argument("--max-recent", type=int, default=3, help="Max recent missing directories to evaluate")
     parser.add_argument("--specific-dir", type=str, default=None, help="Specific directory to evaluate")
     parser.add_argument("--test_set", type=str, default="distinct", choices=["clean", "distinct", "xl", "qm9"], help="Test set to evaluate")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose (DEBUG) logging")
     args = parser.parse_args()
-    
+
+    # Setup logging first thing
+    _setup_logging(verbose=args.verbose)
+    _log_args(args)
+
     run_directory_mode(args)
+
 
 if __name__ == "__main__":
     main()
