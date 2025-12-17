@@ -121,20 +121,35 @@ def summarize_metrics(agg: Dict[str, np.ndarray]) -> Tuple[pd.DataFrame, Dict[st
     }
     return df, stats
 
-def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers: int, chunk_size: int = 300) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[float]]:
+def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers: int, chunk_size: int = 0) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[float]]:
     """Wrapper for PoseBusters evaluation.
+
+    Args:
+        gen_data: Dict mapping SMILES to list of conformers
+        config: PoseBusters config ("mol" or "redock")
+        max_workers: Number of parallel workers
+        chunk_size: Conformers per task. If 0 (default), auto-tunes based on
+                    num_conformers and max_workers to achieve ~4 tasks/worker.
 
     Returns:
         Tuple of (df_by_smiles, df_summary, pass_rate).
         Note: fail_smiles and error_smiles removed - users can filter by_smiles_df by pass_percentage.
     """
-    
+
     if not gen_data:
         print("PoseBusters: No data to process")
         return None, None, None
-    
+
     num_molecules = len(gen_data)
     num_conformers = sum(len(mols) for mols in gen_data.values())
+
+    # Auto-tune chunk size if not specified (chunk_size=0)
+    # Goal: ~4 tasks per worker for good load balancing without excessive overhead
+    if chunk_size <= 0:
+        target_tasks_per_worker = 4
+        chunk_size = max(50, min(600, num_conformers // (max_workers * target_tasks_per_worker)))
+        print(f"Auto-tuned PoseBusters chunk_size={chunk_size} for {num_conformers} conformers / {max_workers} workers")
+
     print(f"Starting PoseBusters evaluation on {num_molecules} molecules with {num_conformers} total conformers")
     
     # Validate data
@@ -330,7 +345,7 @@ def main() -> None:
     parser.add_argument("--device", type=str, choices=["local", "a100", "h100", "all"], default="local", help="Slurm partition")
     parser.add_argument("--num-workers", type=int, default=10, help="Number of workers for evaluation")
     parser.add_argument("--memory-gb", type=int, default=80, help="Memory in GB to request from Slurm")
-    parser.add_argument("--pb-chunk-size", type=int, default=300, help="PoseBusters conformers per task (smaller=better load balance)")
+    parser.add_argument("--pb-chunk-size", type=int, default=0, help="PoseBusters conformers per task (0=auto-tune based on workers)")
     parser.add_argument("--max-recent", type=int, default=3, help="Max recent missing directories to evaluate")
     parser.add_argument("--specific-dir", type=str, default=None, help="Specific directory to evaluate")
     parser.add_argument("--test_set", type=str, default="distinct", choices=["clean", "distinct", "xl", "qm9"], help="Test set to evaluate")

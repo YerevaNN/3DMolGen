@@ -632,3 +632,35 @@ export FLASH_ATTN_CUDA_ARCHS="80;90"
 ```
 
 **Trade-off:** Faster build and smaller binary, but won't work on GPUs not included.
+
+### Where can I find prebuilt wheels for newer PyTorch versions?
+
+The official flash-attn releases often lag behind PyTorch releases. A community member maintains prebuilt wheels for newer combinations:
+
+**Repository:** https://github.com/mjun0812/flash-attention-prebuild-wheels
+
+**Install directly from URL:**
+```bash
+# Example: Python 3.10, PyTorch 2.9, CUDA 12.8
+pip install https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.5.4/flash_attn-2.8.3+cu128torch2.9-cp310-cp310-linux_x86_64.whl
+```
+
+**How to find your wheel:**
+1. Go to the [packages page](https://github.com/mjun0812/flash-attention-prebuild-wheels/blob/main/docs/packages.md)
+2. Find your Python version, PyTorch version, and CUDA version
+3. Download or install directly from the URL
+
+**Wheel naming convention:**
+```
+flash_attn-[version]+cu[CUDA]torch[PyTorch]-cp[Python]-cp[Python]-linux_x86_64.whl
+
+Example breakdown:
+flash_attn-2.8.3+cu128torch2.9-cp310-cp310-linux_x86_64.whl
+           │      │       │     │
+           │      │       │     └── Python 3.10
+           │      │       └── PyTorch 2.9
+           │      └── CUDA 12.8
+           └── flash-attn version 2.8.3
+```
+
+This is **much faster** than building from source (seconds vs hours) and avoids all the compiler/ABI issues.

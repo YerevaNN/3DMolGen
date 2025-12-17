@@ -53,8 +53,8 @@ if [ "$HAVE_FLASH_ATTN" = true ]; then
     echo "Running with flash_attention_2"
     python scripts/diagnostics/benchmark_inference_attention.py \
         --model m600_qwen \
-        --num-samples 64 \
-        --batch-size 16 \
+        --num-samples 1024 \
+        --batch-size 128 \
         --attention sdpa sdpa_cudnn sdpa_efficient eager flash_attention_2 \
         --device local
 else
