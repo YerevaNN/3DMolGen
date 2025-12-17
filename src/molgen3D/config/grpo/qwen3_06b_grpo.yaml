@@ -9,7 +9,7 @@ dataset:
   smiles_mapping_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/smiles_mapping.json
 device:
   device_type: a100
-  num_gpus: 1
+  num_gpus: 4
 generation:
   do_sample: true
   max_completion_length: 1000
@@ -58,7 +58,7 @@ run:
   log_level: INFO
   name: qwen3_test
 trainer:
-  attn_implementation: sdpa
+  attn_implementation: flash_attention_2
   log_on_each_node: false
   logging_steps: 1
   loss_type: grpo
