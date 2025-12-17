@@ -27,3 +27,11 @@ dist/
 # Log files
 *.log
 *.csv
+
+# linter
+.flake8
+
+# AI agents/tools
+.claude/*
+AGENTS.md
+CLAUDE.md

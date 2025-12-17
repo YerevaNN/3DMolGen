@@ -66,6 +66,16 @@ cd 3DMolGen
 pip install -e .
 ```
 
+4. **(Optional) Install flash-attn for faster attention**:
+
+   A pre-built wheel for PyTorch 2.9.1 + CUDA 12.8 + Python 3.10 is available:
+   ```bash
+   cp /auto/home/aram.dovlatyan/flash_attn-2.8.3+cu128torch2.9-cp310-cp310-linux_x86_64.whl ~/
+   pip install ~/flash_attn-2.8.3+cu128torch2.9-cp310-cp310-linux_x86_64.whl
+   ```
+
+   For different environments, download from [flash-attention-prebuild-wheels](https://github.com/mjun0812/flash-attention-prebuild-wheels). See [`docs/python_cuda_packaging_guide.md`](docs/python_cuda_packaging_guide.md) for details.
+
 ### Option 2: Minimal Installation
 
 ```bash
