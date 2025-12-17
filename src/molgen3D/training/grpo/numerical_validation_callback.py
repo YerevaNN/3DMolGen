@@ -3,11 +3,9 @@ Callback for numerical validation during GRPO training.
 """
 
 from typing import Optional
+
 from transformers import TrainerCallback, TrainingArguments, TrainerState, TrainerControl
 from transformers.utils import logging
-
-from molgen3D.training.grpo.numerical_validator import GRPONumericalValidator
-from molgen3D.training.grpo.stats import RunStatistics
 
 logger = logging.get_logger(__name__)
 
@@ -22,8 +20,8 @@ class NumericalValidationCallback(TrainerCallback):
 
     def __init__(
         self,
-        validator: GRPONumericalValidator,
-        stats: RunStatistics,
+        validator,
+        stats,
         validation_steps: Optional[int] = None,
         max_seq_len: int = 4096,
     ):
@@ -50,21 +48,21 @@ class NumericalValidationCallback(TrainerCallback):
         **kwargs
     ) -> TrainerControl:
         """Run numerical validation at the beginning of training (step 0)."""
-        try:
-            current_step = state.global_step # Should be 0 at this point
-            logger.info(f"Running numerical validation at train start (step {current_step})")
-            metrics = self.validator.run_validation(
-                model=kwargs.get("model"),
-                step=current_step,
-                max_seq_len=self.max_seq_len
+        current_step = state.global_step
+        logger.info(
+            f"Running numerical validation at train start (step {current_step})"
+        )
+        metrics = self.validator.run_validation(
+            model=kwargs.get("model"),
+            step=current_step,
+            max_seq_len=self.max_seq_len,
+        )
+
+        if metrics:
+            self.stats.update_numerical_validation_stats(metrics)
+            logger.info(
+                f"Numerical validation completed at train start (step {current_step})"
             )
-
-            if metrics:
-                self.stats.update_numerical_validation_stats(metrics)
-                logger.info(f"Numerical validation completed at train start (step {current_step})")
-
-        except Exception as e:
-            logger.warning(f"Numerical validation failed at train start (step {current_step}): {e}")
 
         return control
 
@@ -81,22 +79,18 @@ class NumericalValidationCallback(TrainerCallback):
 
         current_step = state.global_step
         if current_step - self.last_validation_step >= self.validation_steps:
-            try:
-                logger.info(f"Running numerical validation at step {current_step}")
-                metrics = self.validator.run_validation(
-                    model=kwargs.get("model"),
-                    step=current_step,
-                    max_seq_len=self.max_seq_len
-                )
+            logger.info(f"Running numerical validation at step {current_step}")
+            metrics = self.validator.run_validation(
+                model=kwargs.get("model"),
+                step=current_step,
+                max_seq_len=self.max_seq_len,
+            )
 
-                if metrics:
-                    self.stats.update_numerical_validation_stats(metrics)
-                    logger.info(f"Numerical validation completed at step {current_step}")
+            if metrics:
+                self.stats.update_numerical_validation_stats(metrics)
+                logger.info(f"Numerical validation completed at step {current_step}")
 
-                self.last_validation_step = current_step
-
-            except Exception as e:
-                logger.warning(f"Numerical validation failed at step {current_step}: {e}")
+            self.last_validation_step = current_step
 
         return control
 
@@ -108,20 +102,16 @@ class NumericalValidationCallback(TrainerCallback):
         **kwargs
     ) -> TrainerControl:
         """Run final numerical validation at the end of training."""
-        try:
-            current_step = state.global_step
-            logger.info(f"Running final numerical validation at step {current_step}")
-            metrics = self.validator.run_validation(
-                model=kwargs.get("model"),
-                step=current_step,
-                max_seq_len=self.max_seq_len
-            )
+        current_step = state.global_step
+        logger.info(f"Running final numerical validation at step {current_step}")
+        metrics = self.validator.run_validation(
+            model=kwargs.get("model"),
+            step=current_step,
+            max_seq_len=self.max_seq_len,
+        )
 
-            if metrics:
-                self.stats.update_numerical_validation_stats(metrics)
-                logger.info(f"Final numerical validation completed: {metrics}")
-
-        except Exception as e:
-            logger.warning(f"Final numerical validation failed: {e}")
+        if metrics:
+            self.stats.update_numerical_validation_stats(metrics)
+            logger.info(f"Final numerical validation completed: {metrics}")
 
         return control

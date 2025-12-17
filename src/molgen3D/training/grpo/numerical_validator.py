@@ -9,19 +9,20 @@ RMSD metrics against ground truth conformers.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
+
 import numpy as np
+from datasets import Dataset
 from loguru import logger
 import torch
-from transformers import AutoTokenizer, StoppingCriteria, StoppingCriteriaList
 
-from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2, strip_smiles
+from molgen3D.data_processing.smiles_encoder_decoder import (
+    decode_cartesian_v2,
+    strip_smiles,
+)
 from molgen3D.evaluation.utils import extract_between, same_molecular_graph
-from molgen3D.training.grpo.config import Config
-from molgen3D.training.grpo.stats import RunStatistics
-from molgen3D.training.grpo.utils import load_ground_truths, load_smiles_mapping
+from molgen3D.training.grpo.utils import load_ground_truths
 from molgen3D.utils.utils import get_best_rmsd
 
 # Failure type constants
@@ -43,10 +44,10 @@ class GRPONumericalValidator:
 
     def __init__(
         self,
-        config: Config,
-        tokenizer: AutoTokenizer,
-        stats: RunStatistics,
-        output_dir: str
+        config,
+        tokenizer,
+        stats,
+        output_dir: str,
     ):
         """
         Initialize the numerical validator.
@@ -62,109 +63,62 @@ class GRPONumericalValidator:
         self.stats = stats
         self.output_dir = Path(output_dir)
 
-        # Load validation data
-        self._smiles_mapping = None
-        self._validation_prompts = None
-        self._ground_truths = None
+        self._validation_prompts: List[str] = []
+        self._ground_truths: Dict[str, List] = {}
 
-        # Token IDs for conformer extraction
         self._conformer_start_id = self.tokenizer.convert_tokens_to_ids("[CONFORMER]")
         self._conformer_end_id = self.tokenizer.convert_tokens_to_ids("[/CONFORMER]")
         self._eos_id = self.tokenizer.eos_token_id
-        self._pad_id = self.tokenizer.pad_token_id
 
-    def _load_validation_data(self) -> bool:
-        """Load SMILES mapping and ground truths for validation."""
-        try:
-            # Load SMILES mapping if not already loaded
-            if self._smiles_mapping is None:
-                self._smiles_mapping = load_smiles_mapping(self.config.dataset.smiles_mapping_path)
+        self._pad_id = self.tokenizer.pad_token_id or self._eos_id or 0
 
-            # Load validation prompts (sample from dataset)
-            if self._validation_prompts is None:
-                self._validation_prompts = self._load_validation_prompts()
-
-            # Load ground truths
-            if self._ground_truths is None:
-                self._ground_truths = {}
-                for smiles in self._validation_prompts:
-                    ground_truths = load_ground_truths(smiles, num_gt=self.config.grpo.max_ground_truths)
-                    if ground_truths:
-                        self._ground_truths[smiles] = ground_truths
-
-            return bool(self._validation_prompts and self._ground_truths)
-
-        except Exception as e:
-            logger.warning(f"Failed to load validation data: {e}")
-            return False
+        if self._conformer_start_id is None or self._conformer_end_id is None:
+            raise ValueError("Tokenizer must define [CONFORMER] and [/CONFORMER] tokens.")
 
     def _load_validation_prompts(self) -> List[str]:
         """Load a sample of SMILES strings for validation."""
-        try:
-            from datasets import Dataset
-            dataset = Dataset.from_csv(self.config.dataset.dataset_path)
+        dataset = Dataset.from_csv(self.config.dataset.dataset_path)
 
-            # Sample prompts for validation
-            num_samples = min(self.config.validation.num_val_molecules, len(dataset))
-            indices = np.random.choice(len(dataset), num_samples, replace=False)
+        num_samples = min(self.config.validation.num_val_molecules, len(dataset))
+        indices = np.random.choice(len(dataset), num_samples, replace=False)
 
-            prompts = []
-            for idx in indices:
-                row = dataset[int(idx)]
-                # Extract SMILES from the prompt format
-                smiles = extract_between(row['prompt'], "[SMILES]", "[/SMILES]")
-                if smiles:
-                    prompts.append(smiles.strip())
+        prompts: List[str] = []
+        for idx in indices:
+            row = dataset[int(idx)]
+            smiles = extract_between(row["prompt"], "[SMILES]", "[/SMILES]")
+            if smiles:
+                prompts.append(smiles.strip())
 
-            logger.info(f"Loaded {len(prompts)} validation prompts")
-            return prompts
-
-        except Exception as e:
-            logger.warning(f"Failed to load validation prompts: {e}")
-            return []
+        logger.info(f"Loaded {len(prompts)} validation prompts")
+        return prompts
 
     def _build_prompt_tensor(
         self, smiles: str, device: torch.device
-    ) -> Optional[torch.Tensor]:
+    ) -> torch.Tensor:
         """Build a prompt tensor for conformer generation."""
-        try:
-            # Create prompt in the expected format
-            prompt_text = f"[SMILES]{smiles}[/SMILES][CONFORMER]"
-            tokens = self.tokenizer.encode(prompt_text, add_special_tokens=False)
-            return torch.tensor(tokens, device=device, dtype=torch.long).unsqueeze(0)
-        except Exception as e:
-            logger.warning(f"Failed to build prompt tensor for {smiles}: {e}")
-            return None
+        prompt_text = f"[SMILES]{smiles}[/SMILES][CONFORMER]"
+        tokens = self.tokenizer.encode(prompt_text, add_special_tokens=False)
+        return torch.tensor(tokens, device=device, dtype=torch.long).unsqueeze(0)
 
 
     def _extract_conformer_text(self, token_tensor: torch.Tensor) -> str:
         """Extract conformer text directly from token tensor."""
-        tokens = token_tensor[0].tolist() if token_tensor.dim() == 2 else token_tensor.tolist()
+        tokens = (
+            token_tensor[0].tolist()
+            if token_tensor.dim() == 2
+            else token_tensor.tolist()
+        )
         decoded = self.tokenizer.decode(tokens, skip_special_tokens=False)
 
-        # Try [CONFORMER] first (primary format), fall back to [CONFORMERS]
         conformer = extract_between(decoded, "[CONFORMER]", "[/CONFORMER]")
-        if not conformer:
-            conformer = extract_between(decoded, "[CONFORMERS]", "[/CONFORMERS]")
+
         return conformer.strip() if conformer else ""
-
-    def _create_stopping_criteria(self, device: torch.device):
-        """Create stopping criteria for generation."""
-        end_token_ids = []
-        if self._conformer_end_id is not None:
-            end_token_ids.append(self._conformer_end_id)
-        # Don't include EOS in stopping criteria - we want to generate complete conformers
-
-        if end_token_ids:
-            return StoppingCriteriaList([_ConformerStoppingCriteria(end_token_ids)])
-        else:
-            return None
 
     def _compute_rmsd_stats(
         self, generated_mol, ground_truths: List
     ) -> Tuple[float, float, float]:
         """Compute RMSD statistics against ground truths."""
-        rmsds = []
+        rmsds: List[float] = []
         for gt in ground_truths:
             try:
                 rmsd = float(get_best_rmsd(generated_mol, gt, use_alignmol=False))
@@ -238,7 +192,6 @@ class GRPONumericalValidator:
             "numerical_val/successes": float(valid_min.size),
         }
 
-        # Add per-failure-type metrics
         for fail_type, count in failure_counts.items():
             metrics[f"numerical_val/fail_{fail_type}"] = float(count)
 
@@ -261,7 +214,6 @@ class GRPONumericalValidator:
             else ""
         )
 
-        # Log failure breakdown
         failure_str = ", ".join(f"{k}={v}" for k, v in sorted(failure_counts.items()) if v > 0)
         logger.info(
             f"Numerical validation (step {step}): successes={successes} failures={total_failures} "
@@ -279,8 +231,8 @@ class GRPONumericalValidator:
             import wandb
             if wandb.run is not None:
                 wandb.log(metrics, step=step)
-        except (ModuleNotFoundError, Exception) as e:
-            logger.debug(f"Could not log to W&B: {e}")
+        except ModuleNotFoundError:
+            logger.debug("Could not log numerical validation metrics to W&B (not installed).")
 
         return metrics
 
@@ -305,23 +257,18 @@ class GRPONumericalValidator:
         if not self.config.validation.enable_numerical_validation:
             return {}
 
-        # Load validation data
-        if not self._load_validation_data():
-            logger.warning("Numerical validation skipped: no validation data available")
-            return {}
-
-        if not self._validation_prompts or not self._ground_truths:
-            logger.warning("Numerical validation skipped: validation data not loaded")
-            return {}
-
-        # Check if required tokens are available
-        if self._conformer_start_id is None or self._conformer_end_id is None:
-            logger.warning("Numerical validation skipped: conformer tokens not found in tokenizer")
-            return {}
+        if not self._validation_prompts:
+            self._validation_prompts = self._load_validation_prompts()
+        if not self._ground_truths:
+            for smiles in self._validation_prompts:
+                ground_truths = load_ground_truths(
+                    smiles, num_gt=self.config.grpo.max_ground_truths
+                )
+                if ground_truths:
+                    self._ground_truths[smiles] = ground_truths
 
         device = next(model.parameters()).device
 
-        # Filter prompts to those with ground truths
         valid_prompts = [
             smiles for smiles in self._validation_prompts
             if smiles in self._ground_truths
@@ -338,7 +285,6 @@ class GRPONumericalValidator:
         max_rmsds: List[float] = []
         avg_rmsds: List[float] = []
 
-        # Track failure types
         failure_counts: Dict[str, int] = {
             FAIL_NO_CLOSING_TAG: 0,
             FAIL_EMPTY_CONFORMER: 0,
@@ -593,7 +539,6 @@ class GRPONumericalValidator:
             if was_training:
                 model.train()
 
-        # Log metrics and save failed generations
         metrics = self._log_validation_metrics(
             min_rmsds, max_rmsds, avg_rmsds, failure_counts, step, sample_failures
         )
@@ -603,14 +548,3 @@ class GRPONumericalValidator:
 
         return metrics
 
-
-class _ConformerStoppingCriteria(StoppingCriteria):
-    """Stopping criteria for conformer generation."""
-
-    def __init__(self, end_token_ids):
-        self.end_token_ids = end_token_ids
-
-    def __call__(self, input_ids, scores, **kwargs):
-        # Check if any sequence has generated an end token in the last position
-        last_tokens = input_ids[:, -1]
-        return torch.any(torch.isin(last_tokens, torch.tensor(self.end_token_ids, device=input_ids.device)))
