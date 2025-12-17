@@ -344,7 +344,8 @@ def run_evaluation(directory_name: str, gen_base: str, eval_base: str, args: arg
     gt_dict = load_pkl(gt_path)
     logger.info("Loaded %d ground truth molecules", len(gt_dict))
 
-    results_path = os.path.join(eval_base, f"{directory_name}")
+    output_dir_name = args.output_dir if args.output_dir else directory_name
+    results_path = os.path.join(eval_base, output_dir_name)
     logger.info("Results will be saved to: %s", results_path)
 
     process_generation_pickle(gens_dict, gt_dict, gens_path, results_path, args)
@@ -408,6 +409,7 @@ def main() -> None:
     parser.add_argument("--pb-chunk-size", type=int, default=0, help="PoseBusters conformers per task (0=auto-tune based on workers)")
     parser.add_argument("--max-recent", type=int, default=3, help="Max recent missing directories to evaluate")
     parser.add_argument("--specific-dir", type=str, default=None, help="Specific directory to evaluate")
+    parser.add_argument("--output-dir", type=str, default=None, help="Output directory name in eval_results (default: same as input dir)")
     parser.add_argument("--test_set", type=str, default="distinct", choices=["clean", "distinct", "xl", "qm9"], help="Test set to evaluate")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose (DEBUG) logging")
     args = parser.parse_args()
