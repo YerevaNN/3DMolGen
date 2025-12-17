@@ -4,6 +4,7 @@ from typing import Callable, Literal, Optional
 from torchtitan.config.job_config import (
     JobConfig as TorchTitanJobConfig,
     Checkpoint as TorchTitanCheckpoint,
+    Validation as TorchTitanValidation,
 )
 
 from molgen3D.config.paths import (
@@ -117,6 +118,16 @@ class MolGenRunConfig:
 
 
 @dataclass
+class MolGenValidationConfig(TorchTitanValidation):
+    """
+    Extend validation settings with optional numerical conformer evaluation.
+    """
+
+    numerical_validation: bool = False
+    num_val_molecules: int = 10
+
+
+@dataclass
 class JobConfig(TorchTitanJobConfig):
     """
     Custom JobConfig that surfaces MolGen-specific dataloader settings and WSDS
@@ -126,6 +137,7 @@ class JobConfig(TorchTitanJobConfig):
     molgen_data: MolGenDataConfig = field(default_factory=MolGenDataConfig)
     molgen_run: MolGenRunConfig = field(default_factory=MolGenRunConfig)
     wsds_scheduler: WSDSSchedulerConfig = field(default_factory=WSDSSchedulerConfig)
+    validation: MolGenValidationConfig = field(default_factory=MolGenValidationConfig)
 
     def __post_init__(self) -> None:  # pragma: no cover - simple wiring
         if self.wsds_scheduler.enable:

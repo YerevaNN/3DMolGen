@@ -27,3 +27,4 @@ dist/
 # Log files
 *.log
 *.csv
+*.ipynb
