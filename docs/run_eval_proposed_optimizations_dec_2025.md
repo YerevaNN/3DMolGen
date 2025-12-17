@@ -1,15 +1,19 @@
-# `run_eval.py` Performance Optimizations
+# `run_eval_optimized.py` - Evaluation Pipeline Optimizations
 
-This document describes the performance optimizations made to `src/molgen3D/evaluation/run_eval.py` on 2025-12-17, including the rationale, evidence, and expected improvements.
+This document describes the performance optimizations implemented in `src/molgen3D/evaluation/run_eval_optimized.py`, an experimental alternative to `run_eval.py`. The optimized version was created on 2025-12-17.
+
+**Status**: Experimental - kept separate until correctness is validated against `run_eval.py`.
 
 ## Summary of Changes
 
 | Change | Before | After | Impact |
 |--------|--------|-------|--------|
-| Executor type | `ThreadPoolExecutor` | `ProcessPoolExecutor` | ~20% speedup for CPU-bound RMSD |
-| Parallelization granularity | Per-molecule (1000 tasks) | Per-row (106K tasks) | Eliminates straggler problem |
+| Executor type | `ThreadPoolExecutor` | `ProcessPoolExecutor` | Enables true CPU parallelism |
+| Parallelization granularity | Per-molecule (1000 tasks) | Per-row (106K tasks) | More uniform task distribution |
 | Memory allocation | Hardcoded 80GB | CLI configurable `--memory-gb` | Better resource utilization |
-| PoseBusters chunk size | Hardcoded 600 | CLI configurable `--pb-chunk-size` (default 300) | Better load balancing |
+| PoseBusters chunk size | Hardcoded 600 | CLI configurable `--pb-chunk-size` (default 300) | Configurable load balancing |
+
+**Measured result**: run_eval_optimized completed ~5 min faster overall than run_eval.py on the `distinct` dataset.
 
 ---
 
@@ -55,7 +59,7 @@ with ProcessPoolExecutor(max_workers=args.num_workers) as ex:
     futures = [ex.submit(compute_rmsd_row, ...) for ...]
 ```
 
-`ProcessPoolExecutor` spawns separate Python interpreter processes, each with its own GIL. This enables true parallel execution on multi-core systems.
+`ProcessPoolExecutor` spawns separate Python interpreter processes, each with its own GIL. This enables true parallel execution on multi-core systems for CPU-bound work like RMSD calculations.
 
 ### Additional Consideration: Pickling
 
@@ -67,12 +71,6 @@ attribute lookup _compute_key_matrix on __main__ failed
 ```
 
 **Solution**: Moved the function to `rdkit_utils.py` as `compute_rmsd_row`, making it a proper importable module-level function that survives the double-pickling chain (submitit → ProcessPoolExecutor).
-
-### Expected Improvement
-
-- **Before**: ~7% CPU utilization (GIL contention)
-- **After**: ~90%+ CPU utilization (true parallelism)
-- **Speedup**: Up to Nx where N = number of workers (theoretical max 48x with 48 workers)
 
 ---
 
@@ -111,11 +109,6 @@ This is a well-known issue in parallel computing called the **straggler problem*
 
 > "Variability in response times leads to situations where a small number of slow tasks ('stragglers') dominate overall job completion time."
 
-**Observed behavior**:
-- 98% of conformer rows completed in 6 minutes
-- Remaining 2% (the large molecules) took 12+ minutes
-- CPU utilization dropped from 25% to 8% as workers sat idle
-
 The work per molecule is O(n_true × n_gen) RMSD calculations:
 - Small molecule: 5 × 10 = 50 calculations → milliseconds
 - Large molecule: 2497 × 50 = 124,850 calculations → minutes
@@ -148,15 +141,16 @@ From the [Python multiprocessing documentation](https://docs.python.org/3/librar
 
 > "When using a process pool, you should ensure that the work is divided into roughly equal-sized chunks to maximize efficiency."
 
-### Expected Improvement
+### Observed Results
 
 | Metric | Before (molecule-level) | After (row-level) |
 |--------|------------------------|-------------------|
 | Tasks | 1,000 | 106,778 |
 | Task size variance | Huge (5 → 2497 rows) | Uniform (~50 RMSD calcs each) |
-| Straggler impact | 47 workers idle | All workers busy |
-| Progress pattern | 98% fast → 2% slow | Steady throughout |
-| RMSD phase time | 18+ minutes | ~2-3 minutes |
+| Progress pattern | Steady throughput | 98% fast → last 2% slower |
+| RMSD phase time | Not measured | ~27 min |
+
+**Note**: Based on jobs 422719 (run_eval.py) and 422722 (run_eval_optimized) on H100 with `distinct` dataset (1000 molecules, 106K conformers). Overall, run_eval_optimized completed ~5 min faster than run_eval.py. The old run_eval.py has no progress logging, so RMSD timing was not measured.
 
 ---
 
@@ -238,35 +232,34 @@ The optimal chunk size balances:
 
 ## File Changes Summary
 
-### `src/molgen3D/evaluation/run_eval.py`
+### `src/molgen3D/evaluation/run_eval_optimized.py` (new file)
 
-1. Changed `ThreadPoolExecutor` → `ProcessPoolExecutor`
-2. Restructured `compute_rmsd_matrix()` for row-level parallelization
-3. Added CLI arguments: `--memory-gb`, `--pb-chunk-size`
-4. Updated `run_posebusters_wrapper()` to accept chunk size
+Created as experimental alternative to `run_eval.py` with:
+
+1. `ProcessPoolExecutor` instead of `ThreadPoolExecutor`
+2. Row-level parallelization in `compute_rmsd_matrix()`
+3. New CLI arguments: `--memory-gb`, `--pb-chunk-size`, `--output-dir`
+4. Progress logging for RMSD and PoseBusters phases
 
 ### `src/molgen3D/evaluation/rdkit_utils.py`
 
 1. Added `compute_rmsd_row()` function (picklable, module-level)
 2. Added numpy import for array operations
 
-### `src/molgen3D/evaluation/utils.py`
-
-No changes needed—`memory_gb` was already a parameter to `create_slurm_executor()`.
-
 ---
 
 ## Usage
 
 ```bash
-python -m molgen3D.evaluation.run_eval \
+python -m molgen3D.evaluation.run_eval_optimized \
     --device h100 \
     --num-workers 48 \
-    --memory-gb 400 \
-    --pb-chunk-size 300 \
+    --memory-gb 200 \
+    --pb-chunk-size 600 \
     --specific-dir <generation_dir> \
     --test_set distinct \
-    --posebusters mol
+    --posebusters mol \
+    --output-dir <custom_output_dir>
 ```
 
 ---

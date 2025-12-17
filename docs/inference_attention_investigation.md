@@ -58,7 +58,7 @@
 
 | Optimization | Effect | When to Use |
 |--------------|--------|-------------|
-| `--parallel-templates` | 24% speedup | Always |
+| `--parallel-templates` | Not measured | Template building is fast; unlikely to be bottleneck |
 | `--cache-tokenizer` | No benefit in smoke tests | Only for multi-gen per molecule |
 
 ---
@@ -88,7 +88,6 @@ model = AutoModelForCausalLM.from_pretrained(
 ### With Logit Processor
 ```bash
 python scripts/logit_processor/run_logit_processor_smoke.py \
-    --parallel-templates \
     --kv-cache dynamic
 ```
 
