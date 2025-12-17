@@ -12,7 +12,7 @@ from tqdm import tqdm
 from molgen3D.config.paths import get_base_path, get_data_path
 from molgen3D.data_processing.utils import load_pkl
 from molgen3D.evaluation import rdkit_utils
-from molgen3D.evaluation.rdkit_utils import compute_key_matrix
+from molgen3D.evaluation.rdkit_utils import compute_rmsd_row
 from molgen3D.evaluation.posebusters_check import bust_full_gens
 from molgen3D.evaluation.utils import (
     DEFAULT_THRESHOLDS,
@@ -24,27 +24,52 @@ from molgen3D.evaluation.write_eval_results import save_evaluation_results
 
 
 def compute_rmsd_matrix(true_data: Dict, gen_data: Dict[str, List], args: argparse.Namespace) -> Tuple[Dict, List[str], List[str]]:
+    """Compute RMSD matrices with row-level parallelization for load balancing."""
     missing, all_nan_keys = [], []
-    rmsd_results = {}
-    work_items: List[Tuple[str, List, List]] = []
+
+    # Build per-molecule metadata and collect all row tasks
+    mol_info: Dict[str, Dict] = {}  # key -> {n_true, n_gen, gen_mols}
+    row_tasks: List[Tuple[str, int, object, List, bool]] = []
+
     for key in true_data.keys():
         gen_mols = gen_data.get(key, [])
         if not gen_mols:
             missing.append(key)
             continue
-        work_items.append((key, true_data[key]["confs"], gen_mols))
-    if not work_items:
-        return rmsd_results, missing, all_nan_keys
-    total_rows = int(sum(len(confs) for _, confs, _ in work_items))
+        true_confs = true_data[key]["confs"]
+        mol_info[key] = {"n_true": len(true_confs), "n_gen": len(gen_mols)}
+        # Create one task per row (true conformer)
+        for row_idx, ref_mol in enumerate(true_confs):
+            row_tasks.append((key, row_idx, ref_mol, gen_mols, args.use_alignmol))
+
+    if not row_tasks:
+        return {}, missing, all_nan_keys
+
+    # Initialize result matrices
+    rmsd_matrices: Dict[str, np.ndarray] = {}
+    for key, info in mol_info.items():
+        rmsd_matrices[key] = np.full((info["n_true"], info["n_gen"]), np.nan, dtype=float)
+
+    # Process all rows in parallel with fine-grained load balancing
+    total_rows = len(row_tasks)
     with ProcessPoolExecutor(max_workers=args.num_workers) as ex:
-        futures = [ex.submit(compute_key_matrix, key, confs, gen_mols, args.use_alignmol) for key, confs, gen_mols in work_items]
+        futures = [ex.submit(compute_rmsd_row, *task) for task in row_tasks]
         with tqdm(total=total_rows, desc="RMSD rows", unit="row") as pbar:
             for fut in as_completed(futures):
-                key, res, all_nan = fut.result()
-                rmsd_results[key] = res
-                if all_nan:
-                    all_nan_keys.append(key)
-                pbar.update(int(res["n_true"]))
+                key, row_idx, row_data = fut.result()
+                if row_data.shape[0] == mol_info[key]["n_gen"]:
+                    rmsd_matrices[key][row_idx] = row_data
+                pbar.update(1)
+
+    # Build final results
+    rmsd_results = {}
+    for key, mat in rmsd_matrices.items():
+        info = mol_info[key]
+        all_nan = bool(np.isnan(mat).all())
+        if all_nan:
+            all_nan_keys.append(key)
+        rmsd_results[key] = {"n_true": info["n_true"], "n_model": info["n_gen"], "rmsd": mat}
+
     return rmsd_results, missing, all_nan_keys
 
 def aggregate_metrics(rmsd_results: Dict[str, Dict[str, object]], thresholds: np.ndarray) -> Dict[str, np.ndarray]:
@@ -96,9 +121,9 @@ def summarize_metrics(agg: Dict[str, np.ndarray]) -> Tuple[pd.DataFrame, Dict[st
     }
     return df, stats
 
-def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers: int) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[float]]:
+def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers: int, chunk_size: int = 300) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[float]]:
     """Wrapper for PoseBusters evaluation.
-    
+
     Returns:
         Tuple of (df_by_smiles, df_summary, pass_rate).
         Note: fail_smiles and error_smiles removed - users can filter by_smiles_df by pass_percentage.
@@ -131,7 +156,7 @@ def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers:
     
     try:
         df_by_smiles, df_summary, pass_rate = bust_full_gens(
-            smiles_to_confs=gen_data, config=config, full_report=False, num_workers=max_workers
+            smiles_to_confs=gen_data, config=config, full_report=False, num_workers=max_workers, task_chunk_size=chunk_size
         )
         print("PoseBusters completed successfully")
         return df_by_smiles, df_summary, pass_rate
@@ -205,7 +230,7 @@ def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
     if args.posebusters != "None":
         pb_start = time.time()
         posebusters_by_smiles, posebusters_summary, pass_rate = run_posebusters_wrapper(
-            processed_gen_data, args.posebusters, args.num_workers
+            processed_gen_data, args.posebusters, args.num_workers, args.pb_chunk_size
         )
         if pass_rate is not None:
             print(f"Overall Pass percentage: {pass_rate:2f}%\n")
@@ -305,6 +330,7 @@ def main() -> None:
     parser.add_argument("--device", type=str, choices=["local", "a100", "h100", "all"], default="local", help="Slurm partition")
     parser.add_argument("--num-workers", type=int, default=10, help="Number of workers for evaluation")
     parser.add_argument("--memory-gb", type=int, default=80, help="Memory in GB to request from Slurm")
+    parser.add_argument("--pb-chunk-size", type=int, default=300, help="PoseBusters conformers per task (smaller=better load balance)")
     parser.add_argument("--max-recent", type=int, default=3, help="Max recent missing directories to evaluate")
     parser.add_argument("--specific-dir", type=str, default=None, help="Specific directory to evaluate")
     parser.add_argument("--test_set", type=str, default="distinct", choices=["clean", "distinct", "xl", "qm9"], help="Test set to evaluate")
