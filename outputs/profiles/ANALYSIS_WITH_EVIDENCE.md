@@ -111,7 +111,7 @@ LLaMA-3.2-chem          128,330       No (multi-char sequences)
 ### 2.2 Coordinate Tokenization Examples
 
 **Source:** Direct tokenization of sample coordinates
-
+{}
 ```python
 # Placeholder coordinate
 '<0.0000,0.0000,0.0000>'

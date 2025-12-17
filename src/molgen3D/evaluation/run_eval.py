@@ -1,5 +1,5 @@
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import os
 from pathlib import Path
 import time
@@ -12,6 +12,7 @@ from tqdm import tqdm
 from molgen3D.config.paths import get_base_path, get_data_path
 from molgen3D.data_processing.utils import load_pkl
 from molgen3D.evaluation import rdkit_utils
+from molgen3D.evaluation.rdkit_utils import compute_key_matrix
 from molgen3D.evaluation.posebusters_check import bust_full_gens
 from molgen3D.evaluation.utils import (
     DEFAULT_THRESHOLDS,
@@ -21,16 +22,6 @@ from molgen3D.evaluation.utils import (
 )
 from molgen3D.evaluation.write_eval_results import save_evaluation_results
 
-def _compute_key_matrix(key: str, true_confs: List, gen_mols: List, use_alignmol: bool) -> Tuple[str, Dict[str, object], bool]:
-    n_true = len(true_confs)
-    n_gen = len(gen_mols)
-    mat = np.full((n_true, n_gen), np.nan, dtype=float)
-    for i_true, ref_mol in enumerate(true_confs):
-        row = np.array([rdkit_utils._best_rmsd(gen_mol, ref_mol, use_alignmol) for gen_mol in gen_mols], dtype=float)
-        if row.shape == (n_gen,):
-            mat[i_true] = row
-    all_nan = bool(np.isnan(mat).all())
-    return key, {"n_true": n_true, "n_model": n_gen, "rmsd": mat}, all_nan
 
 def compute_rmsd_matrix(true_data: Dict, gen_data: Dict[str, List], args: argparse.Namespace) -> Tuple[Dict, List[str], List[str]]:
     missing, all_nan_keys = [], []
@@ -45,8 +36,8 @@ def compute_rmsd_matrix(true_data: Dict, gen_data: Dict[str, List], args: argpar
     if not work_items:
         return rmsd_results, missing, all_nan_keys
     total_rows = int(sum(len(confs) for _, confs, _ in work_items))
-    with ThreadPoolExecutor(max_workers=args.num_workers) as ex:
-        futures = [ex.submit(_compute_key_matrix, key, confs, gen_mols, args.use_alignmol) for key, confs, gen_mols in work_items]
+    with ProcessPoolExecutor(max_workers=args.num_workers) as ex:
+        futures = [ex.submit(compute_key_matrix, key, confs, gen_mols, args.use_alignmol) for key, confs, gen_mols in work_items]
         with tqdm(total=total_rows, desc="RMSD rows", unit="row") as pbar:
             for fut in as_completed(futures):
                 key, res, all_nan = fut.result()
@@ -291,7 +282,7 @@ def run_directory_mode(args) -> None:
                 print(f"Failed to evaluate: {directory}")
     else:
         # Use submitit for remote execution
-        executor = create_slurm_executor(device=args.device, job_type="eval", num_gpus=0, num_cpus=args.num_workers)
+        executor = create_slurm_executor(device=args.device, job_type="eval", num_gpus=0, num_cpus=args.num_workers, memory_gb=args.memory_gb)
         jobs = []
         for directory in directories:
             job = executor.submit(
@@ -313,6 +304,7 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=64, help="Batch size of true-conformer rows per worker task")
     parser.add_argument("--device", type=str, choices=["local", "a100", "h100", "all"], default="local", help="Slurm partition")
     parser.add_argument("--num-workers", type=int, default=10, help="Number of workers for evaluation")
+    parser.add_argument("--memory-gb", type=int, default=80, help="Memory in GB to request from Slurm")
     parser.add_argument("--max-recent", type=int, default=3, help="Max recent missing directories to evaluate")
     parser.add_argument("--specific-dir", type=str, default=None, help="Specific directory to evaluate")
     parser.add_argument("--test_set", type=str, default="distinct", choices=["clean", "distinct", "xl", "qm9"], help="Test set to evaluate")

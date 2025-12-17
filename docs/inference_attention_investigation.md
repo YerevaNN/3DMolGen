@@ -116,8 +116,9 @@ Math: ✓ available
 **Script**: `scripts/diagnostics/attention_diagnostic.py`
 **Job ID**: 421088
 **Date**: 2025-12-09
+**Log**: `~/slurm_jobs/diagnostics/archive/421088_attn_diag.out` (lines 45-53)
 
-**Methodology**: Direct SDPA kernel benchmark with test tensors (batch=2, heads=32, seq=2048, dim=64, bfloat16)
+**Methodology**: Direct SDPA kernel benchmark with test tensors (batch=4, heads=16, seq=2048, dim=64, bfloat16)
 
 **Results**:
 
@@ -127,6 +128,15 @@ Math: ✓ available
 | Flash (PyTorch) | 0.161 | 44.1x |
 | Memory-Efficient | 0.335 | 21.2x |
 | Math (baseline) | 7.094 | 1.0x |
+
+**Direct evidence** (log lines 49-53):
+```
+All backends (auto)           : 0.161 ms/iter
+cuDNN only                    : 0.119 ms/iter
+Flash only (built-in)         : 0.161 ms/iter
+Memory-efficient only         : 0.335 ms/iter
+Math only (baseline)          : 7.094 ms/iter
+```
 
 **Conclusion**: cuDNN backend is fastest on H100 for kernel-level attention.
 
@@ -155,12 +165,25 @@ Math: ✓ available
 
 ### Experiment 3: Forced Backend Testing (Failed)
 
-**Job ID**: 421125
+**Job ID**: 421125, 421191
 **Date**: 2025-12-09
+**Log**: `~/slurm_jobs/diagnostics/job_421191/421191_0_log.out` (lines 71-89)
 
 Attempted to force specific SDPA backends during model inference:
+
 - `sdpa_backend_flash`: Failed with "No available kernel"
 - `sdpa_backend_cudnn`: Hung indefinitely (100% CPU, 3% GPU)
+
+**Direct evidence** (log lines 79, 89):
+```text
+Testing: sdpa_flash
+...
+  FAILED: No available kernel. Aborting execution.
+...
+Testing: sdpa_cudnn
+...
+submitit WARNING (2025-12-09 18:14:15,206) - Bypassing signal SIGTERM
+```
 
 **Conclusion**: Forcing specific backends via `torch.nn.attention.sdpa_kernel()` is unreliable for full model inference. PyTorch's auto-selection is recommended.
 
@@ -168,6 +191,7 @@ Attempted to force specific SDPA backends during model inference:
 
 **Job ID**: 421150
 **Date**: 2025-12-09
+**Log**: `~/slurm_jobs/diagnostics/job_421150/421150_0_log.out` (lines 30-111)
 
 After successfully installing flash-attn 2.8.3, we ran comprehensive benchmarks comparing FA3 with SDPA and eager attention.
 
@@ -180,6 +204,14 @@ After successfully installing flash-attn 2.8.3, we ran comprehensive benchmarks 
 | float16 | 0.102 | 168.35 |
 | bfloat16 | 0.102 | 168.14 |
 
+**Direct evidence** (log lines 35-38):
+```text
+  Testing float16...
+    float16: 0.102 ms, 168.35 TFLOPS
+  Testing bfloat16...
+    bfloat16: 0.102 ms, 168.14 TFLOPS
+```
+
 **Observation**: FA3 kernel achieves excellent performance at 168 TFLOPS on H100.
 
 #### Full Model Inference Results
@@ -191,6 +223,15 @@ After successfully installing flash-attn 2.8.3, we ran comprehensive benchmarks 
 | **sdpa** | 29.17s | 56,480 | **1936.3 tok/s** | **1.01x 🏆** |
 | eager | 25.67s | 49,280 | 1919.9 tok/s | 1.00x |
 | flash_attention_2 | 47.05s | 54,240 | 1152.8 tok/s | **0.60x** |
+
+**Direct evidence** (log lines 106-111):
+```text
+SUMMARY
+Implementation       Time (s)     Tokens/sec      Speedup
+sdpa                 29.17        1936.3          1.01      x 🏆
+eager                25.67        1919.9          1.00      x
+flash_attention_2    47.05        1152.8          0.60      x
+```
 
 **⚠️ SURPRISING RESULT**: `flash_attention_2` is **40% SLOWER** than SDPA in full model inference!
 
@@ -308,16 +349,22 @@ Since attention isn't the bottleneck, consider:
 
 ### Raw Job Outputs
 
-- Job 421088: `/auto/home/aram.dovlatyan/slurm_jobs/diagnostics/421088_attn_diag.out` (SDPA backends)
-- Job 421106: `/auto/home/aram.dovlatyan/slurm_jobs/diagnostics/job_421106/` (early inference test)
-- Job 421125: `/auto/home/aram.dovlatyan/slurm_jobs/diagnostics/job_421125/` (forced backends - failed)
-- Job 421135: `/auto/home/aram.dovlatyan/slurm_jobs/diagnostics/job_421135/` (sdpa vs eager)
-- Job 421150: `/auto/home/aram.dovlatyan/slurm_jobs/diagnostics/job_421150/` (FA3 benchmark)
-- Job 421188: `/auto/home/aram.dovlatyan/slurm_jobs/diagnostics/job_421188/` (SDPA backend availability)
-- Job 421191: `/auto/home/aram.dovlatyan/slurm_jobs/diagnostics/job_421191/` (forced backends - Flash failed, cuDNN hung)
-- Job 421194: `/auto/home/aram.dovlatyan/slurm_jobs/diagnostics/job_421194/` (Phase 1 final - 64 samples, dynamic cache)
-- Job 421210: `/auto/home/aram.dovlatyan/slurm_jobs/diagnostics/job_421210/` **(Phase 2 - Static KV cache benchmark)**
-- Job 421213: `/auto/home/aram.dovlatyan/slurm_jobs/diagnostics/job_421213/` (flash_attention_2 + static cache - HUNG)
+All jobs ran on H100 node with NVIDIA H100 80GB HBM3, Compute capability 9.0.
+
+| Job ID | Log File | Description | Key Results |
+|--------|----------|-------------|-------------|
+| 421088 | `archive/421088_attn_diag.out` | SDPA kernel-level benchmarks | cuDNN: 0.119ms (59.7x vs Math baseline) |
+| 421106 | `job_421106/421106_0_log.out` | Early inference test | Initial setup verification |
+| 421125 | `job_421125/421125_0_log.out` | Forced backends test | Timed out (dynamic cache issues) |
+| 421135 | `job_421135/421135_0_log.out` | sdpa vs eager | Initial comparison |
+| 421150 | `job_421150/421150_0_log.out` | FA3 full benchmark | **flash_attention_2: 1152.8 tok/s (40% slower than SDPA)** |
+| 421188 | `job_421188/421188_0_log.out` | SDPA backend availability check | All backends available in isolation |
+| 421191 | `job_421191/421191_0_log.out` | Forced backends (dynamic cache) | **sdpa_flash: "No available kernel"; sdpa_cudnn: HUNG** |
+| 421194 | `job_421194/421194_0_log.out` | **Phase 1 Final** (64 samples, dynamic) | **sdpa: 1958.4 tok/s; eager: 1907.4 tok/s; FA2: 1136.1 tok/s** |
+| 421210 | `job_421210/421210_0_log.out` | **Phase 2** (Static KV cache) | **eager: 3513.4 tok/s; sdpa: 3443.6 tok/s (1.8x speedup)** |
+| 421213 | `job_421213/421213_0_log.out` | flash_attention_2 + static cache | **HUNG** (incompatible) |
+
+**Base path**: `/auto/home/aram.dovlatyan/slurm_jobs/diagnostics/`
 
 ### Final Results
 
@@ -683,10 +730,58 @@ python scripts/logit_processor/run_logit_processor_smoke.py \
 
 ---
 
+## Known Issues: PyTorch 2.9 Compatibility
+
+**Date**: 2025-12-16
+**Status**: Blocking flash-attn installation
+
+### Problem
+
+The flash-attn 2.8.3 prebuilt wheels are incompatible with PyTorch 2.9.x due to C++ ABI changes:
+
+```text
+ImportError: flash_attn_2_cuda.cpython-310-x86_64-linux-gnu.so:
+undefined symbol: _ZN3c105ErrorC2ENS_14SourceLocationESs
+```
+
+### Root Cause
+
+The prebuilt wheels were compiled against PyTorch 2.4/2.5, which uses a different C++ ABI than PyTorch 2.9.
+
+### Related GitHub Issues
+
+- [#2051](https://github.com/Dao-AILab/flash-attention/issues/2051) - Compilation freezes with PyTorch 2.9
+- [#2045](https://github.com/Dao-AILab/flash-attention/issues/2045) - Prebuilt wheels for PyTorch 2.9 requested
+- [#2002](https://github.com/Dao-AILab/flash-attention/issues/2002) - PyTorch 2.9 not officially supported
+
+### Workaround
+
+Build from source on a GPU node with controlled parallelism:
+
+```bash
+MAX_JOBS=2 NVCC_THREADS=1 pip install flash-attn --no-binary flash-attn
+```
+
+### Current Environment
+
+```text
+PyTorch: 2.9.1+cu128
+CUDA: 12.8
+cuDNN: 91002
+flash-attn: NOT WORKING (ABI incompatible)
+```
+
+### Impact
+
+Without flash-attn, we can only compare `sdpa` vs `eager` attention. Based on previous findings, this is actually fine since SDPA already outperforms flash_attention_2 by 40%.
+
+---
+
 ### References
 
 1. FlashAttention-2 Paper: "FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning" (ICLR 2024)
-2. FlashAttention-3 Blog: https://tridao.me/blog/2024/flash3/
-3. PyTorch SDPA Docs: https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
-4. PyTorch 2.5 Release Notes: https://pytorch.org/blog/pytorch2-5/
+2. FlashAttention-3 Blog: <https://tridao.me/blog/2024/flash3/>
+3. PyTorch SDPA Docs: <https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html>
+4. PyTorch 2.5 Release Notes: <https://pytorch.org/blog/pytorch2-5/>
 5. flash-attention skill benchmarks: `~/.claude/skills/flash-attention/references/benchmarks.md`
+6. flash-attention GitHub Issues (PyTorch 2.9): <https://github.com/Dao-AILab/flash-attention/issues?q=is%3Aissue+state%3Aopen+2.9>
