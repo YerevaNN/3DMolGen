@@ -87,6 +87,24 @@ class DataLoaderConfig:
     drop_last: bool = False
 
 @dataclass
+class ValidationConfig:
+    # Numerical validation settings
+    enable_numerical_validation: bool = True
+    num_val_molecules: int = 10
+    max_conformer_tokens: int = 3500
+    validation_batch_size: int = 8
+    save_failed_generations: bool = True
+
+    # Evaluation dataset settings (for TRL GRPO trainer)
+    eval_dataset_path: Optional[str] = None
+    eval_steps: Optional[int] = None
+    eval_accumulation_steps: Optional[int] = None
+    eval_delay: Optional[float] = None
+    num_generations_eval: Optional[int] = None
+    per_device_eval_batch_size: Optional[int] = None
+
+
+@dataclass
 class TrainerConfig:
     # Checkpointing and saving
     save_strategy: str = "steps"
@@ -94,7 +112,7 @@ class TrainerConfig:
     save_total_limit: int = 8
     save_on_each_node: bool = False
     save_safetensors: bool = True
-    
+
     # Logging
     log_on_each_node: bool = False
     logging_steps: int = 1
@@ -143,6 +161,7 @@ class Config:
     device: DeviceConfig
     trainer: TrainerConfig
     dataloader: DataLoaderConfig
+    validation: ValidationConfig = field(default_factory=ValidationConfig)
 
     @classmethod
     def from_yaml(cls, yaml_path: str) -> 'Config':
@@ -187,5 +206,6 @@ class Config:
             run=RunConfig(**config_dict['run']),
             device=DeviceConfig(**config_dict['device']),
             trainer=TrainerConfig(**config_dict.get('trainer', {})),
-            dataloader=DataLoaderConfig(**config_dict.get('dataloader', {}))
+            dataloader=DataLoaderConfig(**config_dict.get('dataloader', {})),
+            validation=ValidationConfig(**config_dict.get('validation', {}))
         )

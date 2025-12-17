@@ -9,7 +9,7 @@ dataset:
   smiles_mapping_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/smiles_mapping.json
 device:
   device_type: a100
-  num_gpus: 4
+  num_gpus: 1
 generation:
   do_sample: true
   max_completion_length: 1000
@@ -58,7 +58,7 @@ run:
   log_level: INFO
   name: qwen3_test
 trainer:
-  attn_implementation: flash_attention_2
+  attn_implementation: sdpa
   log_on_each_node: false
   logging_steps: 1
   loss_type: grpo
@@ -69,3 +69,9 @@ trainer:
   save_total_limit: 8
   torch_dtype: bfloat16
   use_liger_loss: true
+validation:
+  enable_numerical_validation: true
+  max_conformer_tokens: 5000
+  num_val_molecules: 200
+  save_failed_generations: true
+  validation_batch_size: 24

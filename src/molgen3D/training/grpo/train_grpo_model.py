@@ -34,6 +34,8 @@ from molgen3D.training.grpo.utils import (
 )
 from molgen3D.training.grpo.rewards import reward_function
 from molgen3D.training.grpo.multi_component_reward import MultiComponentRewardCalculator
+from molgen3D.training.grpo.numerical_validator import GRPONumericalValidator
+from molgen3D.training.grpo.numerical_validation_callback import NumericalValidationCallback
 
 
 def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
@@ -126,16 +128,46 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     training_args.dataloader_persistent_workers = config.dataloader.persistent_workers
     training_args.dataloader_prefetch_factor = config.dataloader.prefetch_factor
     training_args.dataloader_drop_last = config.dataloader.drop_last
-    
+
+    # Initialize numerical validator and callback if enabled
+    numerical_validator = None
+    numerical_callback = None
+    if config.validation.enable_numerical_validation:
+        try:
+            numerical_validator = GRPONumericalValidator(
+                config=config,
+                tokenizer=tokenizer,
+                stats=stats,
+                output_dir=actual_output_dir
+            )
+            logger.info("Numerical validation enabled")
+
+            # Create callback for periodic validation
+            # Run validation every eval_steps if eval_steps is set, otherwise every 1000 steps
+            validation_interval = getattr(training_args, 'eval_steps', None) or 1000
+            numerical_callback = NumericalValidationCallback(
+                validator=numerical_validator,
+                stats=stats,
+                validation_steps=validation_interval,
+                max_seq_len=config.generation.max_completion_length + 3500
+            )
+            logger.info(f"Numerical validation callback created (interval: {validation_interval} steps)")
+
+        except Exception as e:
+            logger.warning(f"Failed to initialize numerical validator: {e}")
+
     trainer = GRPOTrainer(
         model=model,
         processing_class=tokenizer,
         reward_funcs=reward_func,
         args=training_args,
         train_dataset=dataset,
+        callbacks=[numerical_callback] if numerical_callback else None,
     )
-    
+
+    # Training with numerical validation (handled by callback)
     trainer.train()
+
     stats.update_stats()
 
     model_dir = Path(config.grpo.checkpoint_dir) / "model"
