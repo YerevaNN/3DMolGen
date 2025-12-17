@@ -9,7 +9,7 @@ venv
 .idea/
 .aim/
 
-# Compiled files
+# Compiled files (python caches, etc)
 *.pyc
 *.pyo
 *.pyd
@@ -30,6 +30,10 @@ dist/
 
 # linter
 .flake8
+
+# output files
+outputs/
+wandb_runs/
 
 # AI agents/tools
 .claude/*
