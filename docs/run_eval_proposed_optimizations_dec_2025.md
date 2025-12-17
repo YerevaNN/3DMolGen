@@ -6,7 +6,7 @@ This document describes the performance optimizations made to `src/molgen3D/eval
 
 | Change | Before | After | Impact |
 |--------|--------|-------|--------|
-| Executor type | `ThreadPoolExecutor` | `ProcessPoolExecutor` | ~48x speedup for CPU-bound RMSD |
+| Executor type | `ThreadPoolExecutor` | `ProcessPoolExecutor` | ~20% speedup for CPU-bound RMSD |
 | Parallelization granularity | Per-molecule (1000 tasks) | Per-row (106K tasks) | Eliminates straggler problem |
 | Memory allocation | Hardcoded 80GB | CLI configurable `--memory-gb` | Better resource utilization |
 | PoseBusters chunk size | Hardcoded 600 | CLI configurable `--pb-chunk-size` (default 300) | Better load balancing |

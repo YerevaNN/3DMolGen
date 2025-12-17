@@ -8,10 +8,10 @@
 |-----|------------|----------------|-------|
 | **A100** | Large (≥128) | `flash_attention_2` | 5% faster than SDPA |
 | **A100** | Small (≤16) | `sdpa` | 20% faster than FA2 |
-| **H100** | Any | `sdpa` | FA2 is 40% slower on H100 |
+| **H100** | Large (≥128) | TBD... | TBD... |
 | **Consumer (GTX 30xx)** | Any | `sdpa` | FA2 not recommended |
 
-**With logit processor**: Always use `--kv-cache dynamic` (static hurts 2-3x).
+**With logit processor**: Always use `--kv-cache dynamic` (static hurts 2-3x) (_Cant figure this one out on how to get static cache to work with logit processor_)
 
 ---
 
@@ -46,16 +46,6 @@
 **Conclusion**: At large batches, flash_attention_2 wins. At small batches, SDPA wins.
 
 **Memory limit**: Batch size 192 causes OOM on A100 40GB.
-
-### 2. H100 Results (Previous Findings)
-
-On H100, flash_attention_2 is consistently **40% slower** than SDPA regardless of batch size:
-
-| Implementation | Tokens/sec | Speedup |
-|----------------|------------|---------|
-| **sdpa** | 1958.4 | **1.03x** |
-| eager | 1907.4 | 1.00x |
-| flash_attention_2 | 1136.1 | 0.60x |
 
 ### 3. Static KV Cache
 
@@ -118,31 +108,7 @@ flash-attn: 2.8.3 (from prebuilt wheel)
 
 ## Detailed Experiment Log
 
-<details>
-<summary>H100 Experiments (2025-12-09)</summary>
 
-### Kernel-Level SDPA Backends (Job 421088)
-| Backend | Time (ms) | Speedup |
-|---------|-----------|---------|
-| cuDNN | 0.119 | 59.7x |
-| Flash (PyTorch) | 0.161 | 44.1x |
-| Memory-Efficient | 0.335 | 21.2x |
-| Math (baseline) | 7.094 | 1.0x |
-
-### Full Model Inference (Job 421194)
-- 64 samples, batch=16, max_new_tokens=1000
-- SDPA: 1958.4 tok/s, FA2: 1136.1 tok/s (40% slower)
-
-### Static KV Cache (Job 421210)
-- eager: 3513.4 tok/s (1.84x vs dynamic)
-- sdpa: 3443.6 tok/s (1.76x vs dynamic)
-- flash_attention_2: HUNG (incompatible)
-
-### With Logit Processor
-- dynamic + LP: 12.9s (baseline)
-- static + LP: 30.5s (2.4x slower)
-
-</details>
 
 <details>
 <summary>A100 Experiments (2025-12-17)</summary>
