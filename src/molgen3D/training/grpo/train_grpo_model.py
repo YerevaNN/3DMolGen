@@ -132,7 +132,15 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     if reward_strategy == "v3":
         logger.info("Using GRPO reward function v3 (GEOM-Drugs aligned: quality + smooth coverage + hard matching)")
         def reward_func(prompts, completions, **kwargs):
-            return reward_function_v3(prompts, completions, stats, tokenizer, config)
+            completion_entropies = kwargs.get("mean_token_entropy")
+            return reward_function_v3(
+                prompts,
+                completions,
+                stats,
+                tokenizer,
+                config,
+                completion_entropies=completion_entropies,
+            )
 
     elif reward_strategy == "multi_component":
         logger.info("Using multi-component reward calculator")

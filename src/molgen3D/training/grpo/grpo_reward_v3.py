@@ -422,6 +422,7 @@ def compute_group_reward(
     completions: List[str],
     config,
     stats,
+    rollout_entropies: Optional[List[Optional[float]]] = None,
 ) -> Tuple[np.ndarray, Dict]:
     """Compute rewards for a single prompt group (K rollouts).
 
@@ -482,6 +483,8 @@ def compute_group_reward(
             'valid_r_smcov_values': np.array([], dtype=np.float32),
             'valid_r_match_values': np.array([], dtype=np.float32),
             'valid_advantage_values': np.array([], dtype=np.float32),
+            'mean_entropy': float('nan'),
+            'entropy_list': [],
         }
 
     M = len(reference_mols)
@@ -580,9 +583,9 @@ def compute_group_reward(
             )
             stats.failed_rmsd += num_dropped
 
-        if np.sum(validity) == 0:
-            finite_rmsd_rate = float(np.mean(finite_mask)) if K > 0 else 0.0
-            return np.full(K, r_floor, dtype=np.float32), {
+    if np.sum(validity) == 0:
+        finite_rmsd_rate = float(np.mean(finite_mask)) if K > 0 else 0.0
+        return np.full(K, r_floor, dtype=np.float32), {
                 'M': M,
                 'K': K,
                 'graph_match_rate': graph_match_rate,
@@ -604,6 +607,8 @@ def compute_group_reward(
                 'valid_r_smcov_values': np.array([], dtype=np.float32),
                 'valid_r_match_values': np.array([], dtype=np.float32),
                 'valid_advantage_values': np.array([], dtype=np.float32),
+            'mean_entropy': float('nan'),
+            'entropy_list': [],
             }
     else:
         num_problematic = int(np.sum((validity_before_rmsd_gate == 1) & (~finite_mask)))
@@ -645,6 +650,25 @@ def compute_group_reward(
     else:
         group_advantages = np.zeros_like(rewards)
 
+    entropy_inputs = rollout_entropies if rollout_entropies is not None else [None] * K
+    entropy_values: List[float] = []
+    for val in entropy_inputs:
+        if val is None:
+            entropy_values.append(float('nan'))
+            continue
+        try:
+            num = float(val)
+        except (TypeError, ValueError):
+            num = float('nan')
+        entropy_values.append(num)
+    entropy_array = np.array(entropy_values, dtype=np.float32)
+    has_finite_entropy = np.isfinite(entropy_array).any()
+    mean_entropy_group = float(np.nanmean(entropy_array)) if has_finite_entropy else float('nan')
+    entropy_list = [
+        float(val) if np.isfinite(val) else float('nan')
+        for val in entropy_array
+    ]
+
     # Diagnostics
     finite_rmsd_rate = float(np.mean(finite_mask)) if K > 0 else 0.0
     validity_rate = float(np.mean(validity)) if K > 0 else 0.0
@@ -653,8 +677,14 @@ def compute_group_reward(
     d_valid = d_i_all[valid_idx] if valid_idx.size > 0 else np.array([], dtype=np.float32)
     finite_d_valid = d_valid[np.isfinite(d_valid)]
     under_threshold = float(np.mean(finite_d_valid < delta)) if finite_d_valid.size > 0 else 0.0
+    under_threshold_count = (
+        int(np.count_nonzero(finite_d_valid < delta)) if finite_d_valid.size > 0 else 0
+    )
+    under_threshold_total = int(finite_d_valid.size)
 
     mean_r_match_group = float(np.mean(r_match[valid_idx])) if valid_idx.size > 0 else 0.0
+    mean_r_qual_group = float(np.mean(r_qual[valid_idx])) if valid_idx.size > 0 else 0.0
+    mean_r_smcov_group = float(np.mean(r_smcov[valid_idx])) if valid_idx.size > 0 else 0.0
 
     pre_rmsd_valid_count = int(np.sum(validity_before_rmsd_gate))
     final_valid_count = int(np.sum(validity))
@@ -662,7 +692,12 @@ def compute_group_reward(
         100.0 * num_graph_matches / num_graph_checked if num_graph_checked > 0 else 0.0
     )
     mean_reward = float(np.mean(rewards)) if rewards.size > 0 else 0.0
+    baseline_std = float(np.std(rewards)) if rewards.size > 0 else float('nan')
     rewards_list = [float(val) for val in rewards] if rewards.size > 0 else []
+    min_rmsds_list = [float(val) for val in d_i_all.tolist()] if d_i_all.size > 0 else []
+    advantages_list = (
+        [float(val) for val in group_advantages.tolist()] if group_advantages.size > 0 else []
+    )
 
     if valid_idx.size > 0:
         valid_adv_values = group_advantages[valid_idx].astype(np.float32)
@@ -685,6 +720,7 @@ def compute_group_reward(
         'max_d_i': float(np.max(finite_d_valid)) if finite_d_valid.size > 0 else float('nan'),
         'num_matched': int(num_matched),
         'num_eligible_edges': int(num_eligible_edges),
+        'refs_hit': refs_hit,
         'max_possible_matches': int(max_possible_matches),
         'match_efficiency': match_efficiency,
         'fraction_under_delta': under_threshold,
@@ -695,6 +731,8 @@ def compute_group_reward(
         'valid_advantage_values': valid_adv_values,
         'advantage_mean': adv_mean_group,
         'advantage_std': adv_std_group,
+        'mean_entropy': mean_entropy_group,
+        'entropy_list': entropy_list,
         'prompt_log_data': {
             'smiles': canonical_smiles if canonical_smiles else "<missing>",
             'rollouts': K,
@@ -707,12 +745,24 @@ def compute_group_reward(
             'missing_conformer': num_missing_conformer,
             'empty_strip': num_empty_stripped,
             'mean_r_match_group': mean_r_match_group if np.isfinite(mean_r_match_group) else 0.0,
+            'mean_r_qual_group': mean_r_qual_group if np.isfinite(mean_r_qual_group) else 0.0,
+            'mean_r_smcov_group': mean_r_smcov_group if np.isfinite(mean_r_smcov_group) else 0.0,
             'mean_reward': mean_reward,
             'min_d_i': float(np.min(finite_d_valid)) if finite_d_valid.size > 0 else float('nan'),
             'fraction_under_delta': under_threshold,
+            'fraction_under_delta_numer': under_threshold_count,
+            'fraction_under_delta_denom': under_threshold_total,
             'advantage_mean': adv_mean_group,
             'advantage_std': adv_std_group,
             'rewards_list': rewards_list,
+            'advantage_baseline': mean_reward,
+            'advantage_baseline_std': baseline_std,
+            'min_rmsds_list': min_rmsds_list,
+            'advantages_list': advantages_list,
+            'refs_hit': refs_hit,
+            'refs_total': M,
+            'mean_token_entropy_group': mean_entropy_group,
+            'entropy_list': entropy_list,
         },
     }
 
@@ -731,7 +781,8 @@ def compute_group_reward(
 def group_by_prompt(
     prompts: List[str],
     completions: List[str],
-    expected_k: int
+    expected_k: int,
+    rollout_entropies: Optional[List[Optional[float]]] = None,
 ) -> List[Dict]:
     """Group flat batch into prompt groups."""
     groups = []
@@ -758,6 +809,10 @@ def group_by_prompt(
         group = active_groups[key]
         group['completions'].append(completion)
         group['indices'].append(idx)
+        entropy_val = None
+        if rollout_entropies is not None and idx < len(rollout_entropies):
+            entropy_val = rollout_entropies[idx]
+        group.setdefault('entropy_values', []).append(entropy_val)
 
     return groups
 
@@ -767,7 +822,8 @@ def reward_function(
     completions: List[str],
     stats,
     tokenizer,
-    config
+    config,
+    completion_entropies: Optional[List[Optional[float]]] = None,
 ) -> List[float]:
     """Main GRPO reward function (TRL-compatible).
 
@@ -789,7 +845,7 @@ def reward_function(
     """
     expected_k = config.grpo.num_generations
 
-    groups = group_by_prompt(prompts, completions, expected_k)
+    groups = group_by_prompt(prompts, completions, expected_k, completion_entropies)
 
     final_rewards = [0.0] * len(completions)
 
@@ -808,6 +864,8 @@ def reward_function(
     valid_r_smcov_arrays = []
     valid_r_match_arrays = []
     valid_advantage_arrays = []
+    all_mean_entropies = []
+    all_refs_hit = []
     prompt_log_data = []
     group_sizes = []
     total_M = 0
@@ -816,12 +874,14 @@ def reward_function(
 
     for group in groups:
         stats.processed_prompts += len(group['completions'])
+        stats.distinct_prompts += 1
 
         rewards, debug_info = compute_group_reward(
             canonical_smiles=group['canonical_smiles'],
             completions=group['completions'],
             config=config,
             stats=stats,
+            rollout_entropies=group.get('entropy_values'),
         )
 
         # Assign back to flat batch
@@ -848,6 +908,8 @@ def reward_function(
         total_K += debug_info['K']
         total_max_possible += debug_info['max_possible_matches']
         prompt_log_data.append(debug_info.get('prompt_log_data'))
+        all_mean_entropies.append(debug_info.get('mean_entropy', float('nan')))
+        all_refs_hit.append(debug_info.get('refs_hit', float('nan')))
 
     # Step G: Logging
     mean_validity = float(np.nanmean(all_validity_rates)) if all_validity_rates else 0.0
@@ -864,6 +926,7 @@ def reward_function(
     match_efficiency_total = (
         float(total_matched) / total_max_possible if total_max_possible > 0 else 0.0
     )
+    mean_unique_refs_hit = float(np.nanmean(all_refs_hit)) if all_refs_hit else 0.0
 
     def _concat(values_list: List[np.ndarray]) -> np.ndarray:
         filtered = [arr for arr in values_list if arr.size > 0]
@@ -892,41 +955,79 @@ def reward_function(
     r_match_mean, r_match_std = _summary_stats(batch_r_match)
     adv_mean, adv_std = _summary_stats(batch_advantages)
 
-    if wandb.run is not None:
-        main_metrics = {
-            "reward_v3_main/validity_rate": mean_validity,
-            "reward_v3_main/finite_rmsd_rate": mean_finite_rmsd,
-            "reward_v3_main/match_efficiency": match_efficiency_total,
-            "reward_v3_main/mean_reward": mean_reward_overall,
-            "reward_v3_main/total_matched": total_matched,
-            "reward_v3_main/max_possible_matches": total_max_possible,
-            "reward_v3_main/fraction_under_delta": mean_fraction_under_delta,
-        }
+    adv_baseline_mean = mean_reward_overall
+    adv_baseline_std = r_total_std
+    fraction_positive_adv = (
+        float(np.mean(batch_advantages > 0)) if batch_advantages.size > 0 else 0.0
+    )
+    absolute_mean_adv = (
+        float(np.mean(np.abs(batch_advantages))) if batch_advantages.size > 0 else 0.0
+    )
 
-        complementary_metrics = {
-            "reward_v3_extra/graph_match_rate": mean_graph_match,
-            "reward_v3_extra/mean_d_i": mean_d_i,
-            "reward_v3_extra/eligible_edges": total_eligible_edges,
-            "reward_v3_extra/matched_per_valid": float(total_matched) / valid_denominator,
-            "reward_v3_extra/avg_M": total_M / max(len(groups), 1),
-            "reward_v3_extra/avg_K": total_K / max(len(groups), 1),
-            "reward_v3_extra/r_total_mean": r_total_mean,
-            "reward_v3_extra/r_total_std": r_total_std,
-            "reward_v3_extra/r_qual_mean": r_qual_mean,
-            "reward_v3_extra/r_qual_std": r_qual_std,
-            "reward_v3_extra/r_smcov_mean": r_smcov_mean,
-            "reward_v3_extra/r_smcov_std": r_smcov_std,
-            "reward_v3_extra/r_match_mean": r_match_mean,
-            "reward_v3_extra/r_match_std": r_match_std,
-            "reward_v3_extra/advantage_mean": adv_mean,
-            "reward_v3_extra/advantage_std": adv_std,
-        }
-
-        wandb.log({**main_metrics, **complementary_metrics})
-
-    total_valid_final_int = int(round(total_valid_final)) if np.isfinite(total_valid_final) and total_valid_final > 0 else 1
     batch_unique_prompts = len(groups)
     batch_total_prompts = total_K
+
+    finite_entropy_vals = [
+        val for val in all_mean_entropies if val is not None and np.isfinite(val)
+    ]
+    mean_entropy_overall = (
+        float(np.mean(finite_entropy_vals)) if finite_entropy_vals else float('nan')
+    )
+
+    if wandb.run is not None:
+        reward_metrics = {
+            "reward/mean_quality": r_qual_mean,
+            "reward/mean_smcov": r_smcov_mean,
+            "reward/mean_match": r_match_mean,
+            "reward/matched_total": total_matched,
+            "reward/max_possible_matches": total_max_possible,
+            "reward/avg_unique_refs_hit": mean_unique_refs_hit,
+        }
+
+        valid_metrics = {
+            "valid/final_rate": mean_validity,
+            "valid/graph_match_rate": mean_graph_match,
+            "valid/match_efficiency": match_efficiency_total,
+        }
+
+        rmsd_metrics = {
+            "rmsd/finite_rate": mean_finite_rmsd,
+            "rmsd/fraction_under_delta": mean_fraction_under_delta,
+            "rmsd/mean_d_i": mean_d_i,
+        }
+
+        entropy_metrics = {
+            "entropy/mean": mean_entropy_overall,
+        }
+
+        adv_metrics = {
+            "adv/baseline_mean": adv_baseline_mean,
+            "adv/baseline_std": adv_baseline_std,
+            "adv/advantage_mean": adv_mean,
+            "adv/advantage_std": adv_std,
+            "adv/fraction_positive": fraction_positive_adv,
+            "adv/absolute_mean": absolute_mean_adv,
+        }
+
+        gen_metrics = {
+            "gen/unique_prompts": stats.distinct_prompts,
+            "gen/total_rollouts": stats.processed_prompts,
+            "gen/avg_M": total_M / max(len(groups), 1),
+            "gen/avg_K": total_K / max(len(groups), 1),
+        }
+
+        wandb.log(
+            {
+                **reward_metrics,
+                **valid_metrics,
+                **rmsd_metrics,
+                **entropy_metrics,
+                **adv_metrics,
+                **gen_metrics,
+            }
+        )
+
+    total_valid_final_int = int(round(total_valid_final)) if np.isfinite(total_valid_final) and total_valid_final > 0 else 1
 
     batch_log = (
         f"[PID {os.getpid()}] [reward_v3] Batch summary\n"
@@ -934,6 +1035,7 @@ def reward_function(
         f"final={mean_validity:.3f}\n"
         f"  prompts: unique={batch_unique_prompts}, total={batch_total_prompts}\n"
         f"  coverage: mean_d_i={mean_d_i:.3f}, fraction_under_delta={mean_fraction_under_delta:.3f}\n"
+        f"  entropy: mean_token={mean_entropy_overall:.3f}\n"
         f"  rewards: r_total_mean={r_total_mean:.3f}, r_qual={r_qual_mean:.3f}, "
         f"r_smcov={r_smcov_mean:.3f}, r_match={r_match_mean:.3f}\n"
         f"  advantages: mean={adv_mean:.3f}, std={adv_std:.3f}\n"
@@ -952,25 +1054,67 @@ def reward_function(
             rewards_vals = log_data.get('rewards_list', [])
 
             def _fmt(val):
-                return "nan" if val is None or not np.isfinite(val) else f"{val:.3f}"
+                if isinstance(val, str):
+                    return val
+                if val is None:
+                    return "nan"
+                try:
+                    finite = np.isfinite(val)
+                except TypeError:
+                    return str(val)
+                if not finite:
+                    return "inf" if np.isinf(val) else "nan"
+                return f"{float(val):.3f}"
 
-            rewards_str = ", ".join(f"{val:.3f}" for val in rewards_vals) if rewards_vals else ""
+            def _fmt_list(values):
+                return ", ".join(_fmt(val) for val in values) if values else ""
+
+            rewards_str = _fmt_list(rewards_vals)
+            min_rmsds_vals = log_data.get('min_rmsds_list', [])
+            min_rmsds_str = _fmt_list(min_rmsds_vals)
+            advantages_vals = log_data.get('advantages_list', [])
+            advantages_str = _fmt_list(advantages_vals)
+            entropy_mean_val = log_data.get('mean_token_entropy_group')
+            entropy_vals = log_data.get('entropy_list', [])
+            entropy_str = _fmt_list(entropy_vals)
+            fraction_numer = log_data.get('fraction_under_delta_numer')
+            fraction_denom = log_data.get('fraction_under_delta_denom')
+            fraction_display = (
+                f"{fraction_numer}/{fraction_denom}"
+                if fraction_numer is not None and fraction_denom is not None
+                else _fmt(fraction_val)
+            )
+            adv_baseline_val = log_data.get('advantage_baseline')
+            adv_baseline_std_val = log_data.get('advantage_baseline_std')
 
             prompts_lines.append(
                 "    SMILES: {smiles}\n"
                 "      min_d_i={min_d}, fraction_under_delta={fraction}, "
+                "entropy_mean={entropy_mean}, adv_baseline={adv_baseline}, baseline_std={baseline_std}, "
                 "advantage_mean={adv_mean}, advantage_std={adv_std}\n"
                 "      rewards=[{rewards_str}]\n"
+                "      min_rmsds=[{min_rmsds_str}]\n"
+                "      advantages=[{advantages_str}]\n"
+                "      token_entropy=[{entropy_str}]\n"
+                "      reward_components: r_qual={mean_r_qual_group:.3f}, "
+                "r_smcov={mean_r_smcov_group:.3f}, r_match={mean_r_match_group:.3f}, "
+                "total={mean_reward:.3f}\n"
                 "      rollouts={rollouts}, parsed={parsed}, "
                 "pre_rmsd_valid={pre_rmsd_valid}, final_valid={final_valid}, "
                 "graph_match={graph_match}/{graph_checked} ({graph_pct:.2f}%), "
-                "missing_conformer={missing_conformer}, empty_strip={empty_strip}, "
-                "mean_r_match={mean_r_match_group:.3f}, mean_reward={mean_reward:.3f}".format(
+                "unique_refs_hit={refs_hit}/{refs_total}, "
+                "missing_conformer={missing_conformer}, empty_strip={empty_strip}".format(
                     min_d=_fmt(min_d_val),
-                    fraction=_fmt(fraction_val),
+                    fraction=fraction_display,
+                    entropy_mean=_fmt(entropy_mean_val),
+                    adv_baseline=_fmt(adv_baseline_val),
+                    baseline_std=_fmt(adv_baseline_std_val),
                     adv_mean=_fmt(adv_mean_val),
                     adv_std=_fmt(adv_std_val),
                     rewards_str=rewards_str,
+                    min_rmsds_str=min_rmsds_str,
+                    advantages_str=advantages_str,
+                    entropy_str=entropy_str,
                     **log_data
                 )
             )
