@@ -121,6 +121,10 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         use_liger_kernel=config.trainer.use_liger_loss,
         loss_type=config.trainer.loss_type,
         num_iterations=config.grpo.num_iterations,
+        importance_sampling_level=config.grpo.importance_sampling_level,
+        epsilon=config.grpo.epsilon,
+        epsilon_high=config.grpo.epsilon_high,
+        steps_per_generation=config.grpo.steps_per_generation,
     )
 
     # Convert string dtype to torch dtype

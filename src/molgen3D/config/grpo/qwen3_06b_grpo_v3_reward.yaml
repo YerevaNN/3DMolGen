@@ -23,7 +23,10 @@ grpo:
   checkpoint_base_dir: /nfs/h100/raid/chem/checkpoints/conf_grpo
   delta: 1.0
   enable_posebusters: false
-  grad_acc_steps: 4
+  epsilon: 3e-4
+  epsilon_high: 4e-4
+  grad_acc_steps: 1
+  importance_sampling_level: sequence
   lambda_match: 2.0
   lambda_qual: 2.0
   lambda_smcov: 0.0
@@ -32,7 +35,7 @@ grpo:
   max_ground_truths: 30
   max_steps: 2000
   num_epochs: 1
-  num_generations: 16
+  num_generations: 8
   num_iterations: 2
   output_base_dir: ./grpo_outputs
   per_device_batch_size: 8
@@ -43,6 +46,7 @@ grpo:
   scheduler: cosine
   seed: 1
   sigma: 0.35
+  steps_per_generation: 4
   temperature: 1.0
   warmup_ratio: 0.05
   weight_decay: 0.0
@@ -61,7 +65,7 @@ processing:
   eos_token_id: 151672
 run:
   log_level: INFO
-  name: qwen3_v3_match_qual_smcov0_ni2_ga4
+  name: qwen3_v3_match_qual_smcov0_gspo
 trainer:
   attn_implementation: flash_attention_2
   log_on_each_node: false

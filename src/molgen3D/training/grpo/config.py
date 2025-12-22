@@ -60,6 +60,10 @@ class GRPOConfig:
     num_iterations: int = 1
     max_steps: Optional[int] = None
     num_epochs: Optional[int] = None
+    importance_sampling_level: str = "sequence"
+    epsilon: float = 3e-4
+    epsilon_high: float = 4e-4
+    steps_per_generation: int = 4
 
     # V2 reward parameters (optional, with defaults matching spec)
     coverage_delta: float = 0.75
