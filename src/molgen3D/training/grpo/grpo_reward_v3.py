@@ -12,7 +12,7 @@ Design targets all four GEOM-Drugs metrics under small-K constraints.
 from __future__ import annotations
 
 import os
-from typing import List, Optional, Tuple, Dict
+from typing import List, Optional, Tuple, Dict, Union
 from collections import OrderedDict
 
 import numpy as np
@@ -203,30 +203,17 @@ def compute_quality_reward(D: np.ndarray, validity: np.ndarray, sigma: float) ->
 def compute_smooth_coverage_reward(
     D: np.ndarray,
     validity: np.ndarray,
-    rho: float
-) -> np.ndarray:
-    """Compute smooth group marginal coverage reward.
-
-    This is the differentiable surrogate for "add new reference coverage".
-
-    Algorithm:
-    1. Compute kernel K[i,j] = exp(-(D[i,j]/rho)^2)
-    2. For invalid rollouts, set K[i,:] = 0
-    3. Compute marginal contribution Δ[i,j] = K[i,j] * prod_{ℓ≠i}(1 - K[ℓ,j])
-    4. Sum over references: r_i^smcov = (1/M) * sum_j Δ[i,j]
-
-    Args:
-        D: Distance matrix (K, M)
-        validity: Validity indicators (K,)
-        rho: Softness scale for kernel
-
-    Returns:
-        Array of shape (K,) with smooth coverage rewards
-    """
+    rho: float,
+    return_details: bool = False,
+) -> Union[np.ndarray, Tuple[np.ndarray, Tuple[float, List[float], np.ndarray]]]:
+    """Compute smooth group marginal coverage reward (optionally returning coverage stats)."""
     K, M = D.shape
 
     if M == 0:
-        return np.zeros(K, dtype=np.float32)
+        empty = np.zeros(K, dtype=np.float32)
+        if return_details:
+            return empty, (float('nan'), [float('nan')] * 3, np.array([], dtype=np.float32))
+        return empty
 
     rho = max(float(rho), 1e-8)
 
@@ -246,14 +233,9 @@ def compute_smooth_coverage_reward(
     log_prod_safe = np.sum(log_one_minus, axis=0, keepdims=True)  # (1, M)
     zero_counts = zero_mask.sum(axis=0, keepdims=True)
 
-    # Base case: no zeros -> simple exp difference
     prod_excl = np.exp(log_prod_safe - log_one_minus)
-
-    # If any zero in column, default contribution is zero
     has_zero = zero_counts > 0
     prod_excl = np.where(has_zero, 0.0, prod_excl)
-
-    # If this row is the unique zero contributor, use product of non-zero factors
     only_zero = (zero_counts == 1) & zero_mask
     if np.any(only_zero):
         prod_excl = np.where(only_zero, np.exp(log_prod_safe), prod_excl)
@@ -261,7 +243,45 @@ def compute_smooth_coverage_reward(
     Delta = K_matrix * prod_excl
     r_smcov = (Delta.sum(axis=1) / M).astype(np.float32)
     r_smcov[~valid_rows] = 0.0
-    return r_smcov
+
+    if not return_details:
+        return r_smcov
+
+    soft_cov = 1.0 - np.prod(one_minus, axis=0)
+    soft_cov = np.clip(soft_cov, 0.0, 1.0)
+    soft_mean = float(np.mean(soft_cov)) if soft_cov.size > 0 else float('nan')
+    soft_pcts = [
+        float(np.mean(soft_cov > thresh)) if soft_cov.size > 0 else float('nan')
+        for thresh in (0.1, 0.3, 0.5)
+    ]
+    return r_smcov, (soft_mean, soft_pcts, soft_cov.astype(np.float32))
+
+
+def compute_pairwise_rollout_distances(
+    rollout_mols: List[Optional[Chem.Mol]],
+    validity: np.ndarray,
+) -> np.ndarray:
+    """Compute pairwise RMSD distances between valid rollout conformers."""
+    valid_indices = [
+        idx for idx, flag in enumerate(validity) if flag == 1 and rollout_mols[idx] is not None
+    ]
+    if len(valid_indices) < 2:
+        return np.array([], dtype=np.float32)
+
+    distances: List[float] = []
+    for i_pos, i in enumerate(valid_indices):
+        mol_i = rollout_mols[i]
+        if mol_i is None:
+            continue
+        for j in valid_indices[i_pos + 1 :]:
+            mol_j = rollout_mols[j]
+            if mol_j is None:
+                continue
+            d_val = compute_rmsd_safe(mol_i, mol_j)
+            if np.isfinite(d_val):
+                distances.append(float(d_val))
+
+    return np.array(distances, dtype=np.float32)
 
 
 # ============================================================================
@@ -423,6 +443,7 @@ def compute_group_reward(
     config,
     stats,
     rollout_entropies: Optional[List[Optional[float]]] = None,
+    completion_lengths: Optional[List[Optional[float]]] = None,
 ) -> Tuple[np.ndarray, Dict]:
     """Compute rewards for a single prompt group (K rollouts).
 
@@ -438,6 +459,17 @@ def compute_group_reward(
         - debug_info: Dict with diagnostic information
     """
     K = len(completions)
+    length_array = (
+        np.array(
+            [
+                float(length) if length is not None else np.nan
+                for length in (completion_lengths or [])
+            ],
+            dtype=np.float32,
+        )
+        if completion_lengths is not None and len(completion_lengths) == K
+        else np.full(K, np.nan, dtype=np.float32)
+    )
 
     # Hyperparameters
     delta = getattr(config.grpo, 'delta', 0.75)
@@ -621,7 +653,14 @@ def compute_group_reward(
     r_qual = compute_quality_reward(D, validity, sigma)
 
     # Step D: Smooth coverage reward
-    r_smcov = compute_smooth_coverage_reward(D, validity, rho)
+    smcov_result = compute_smooth_coverage_reward(D, validity, rho, return_details=True)
+    if isinstance(smcov_result, tuple):
+        r_smcov, (soft_cov_mean, soft_cov_pcts, soft_cov_values) = smcov_result
+    else:
+        r_smcov = smcov_result
+        soft_cov_mean = float('nan')
+        soft_cov_pcts = [float('nan'), float('nan'), float('nan')]
+        soft_cov_values = np.array([], dtype=np.float32)
 
     valid_mask = validity.astype(bool)
     eligible_matrix = valid_mask[:, None] & (D < delta)
@@ -637,7 +676,24 @@ def compute_group_reward(
     match_efficiency = (
         float(num_matched) / max_possible_matches if max_possible_matches > 0 else 0.0
     )
-    # Matching efficiency warning disabled per request.
+    matched_dists = np.array([], dtype=np.float32)
+    if num_matched > 0 and D.size > 0:
+        matched_mask = eligible_matrix & (D < delta)
+        if np.any(matched_mask):
+            matched_dists = D[matched_mask]
+    matched_quantiles = (
+        np.percentile(matched_dists, [10, 50, 90]).tolist() if matched_dists.size > 0 else [np.nan] * 3
+    )
+    matched_shaped = (
+        np.clip(1.0 - matched_dists / max(delta, 1e-8), 0.0, 1.0) if matched_dists.size > 0 else np.array([], dtype=np.float32)
+    )
+
+    pairwise_dists = compute_pairwise_rollout_distances(rollout_mols, validity)
+    pairwise_mean = float(np.mean(pairwise_dists)) if pairwise_dists.size > 0 else float('nan')
+    pairwise_min = float(np.min(pairwise_dists)) if pairwise_dists.size > 0 else float('nan')
+    pairwise_quantiles = (
+        np.percentile(pairwise_dists, [10, 50, 90]).tolist() if pairwise_dists.size > 0 else [np.nan] * 3
+    )
 
     # Step F: Combine rewards
     rewards = combine_rewards(
@@ -649,6 +705,13 @@ def compute_group_reward(
         group_advantages = rewards - float(np.mean(rewards))
     else:
         group_advantages = np.zeros_like(rewards)
+
+    finite_length_mask = np.isfinite(length_array)
+    length_values = length_array[finite_length_mask]
+    length_mean = float(np.mean(length_values)) if length_values.size > 0 else float('nan')
+    length_quantiles = (
+        np.percentile(length_values, [10, 50, 90]).tolist() if length_values.size > 0 else [np.nan, np.nan, np.nan]
+    )
 
     entropy_inputs = rollout_entropies if rollout_entropies is not None else [None] * K
     entropy_values: List[float] = []
@@ -668,6 +731,12 @@ def compute_group_reward(
         float(val) if np.isfinite(val) else float('nan')
         for val in entropy_array
     ]
+    finite_entropy_sorted = np.sort(entropy_array[np.isfinite(entropy_array)])
+    entropy_quantiles = (
+        np.percentile(finite_entropy_sorted, [10, 50, 90]).tolist()
+        if finite_entropy_sorted.size > 0
+        else [np.nan, np.nan, np.nan]
+    )
 
     # Diagnostics
     finite_rmsd_rate = float(np.mean(finite_mask)) if K > 0 else 0.0
@@ -681,6 +750,9 @@ def compute_group_reward(
         int(np.count_nonzero(finite_d_valid < delta)) if finite_d_valid.size > 0 else 0
     )
     under_threshold_total = int(finite_d_valid.size)
+    d_quantiles = (
+        np.percentile(finite_d_valid, [10, 50, 90]).tolist() if finite_d_valid.size > 0 else [np.nan, np.nan, np.nan]
+    )
 
     mean_r_match_group = float(np.mean(r_match[valid_idx])) if valid_idx.size > 0 else 0.0
     mean_r_qual_group = float(np.mean(r_qual[valid_idx])) if valid_idx.size > 0 else 0.0
@@ -733,6 +805,21 @@ def compute_group_reward(
         'advantage_std': adv_std_group,
         'mean_entropy': mean_entropy_group,
         'entropy_list': entropy_list,
+        'entropy_quantiles': entropy_quantiles,
+        'd_quantiles': d_quantiles,
+        'd_values': finite_d_valid.tolist(),
+        'matched_distances': matched_dists.tolist() if matched_dists.size > 0 else [],
+        'matched_quantiles': matched_quantiles,
+        'matched_shaped_distances': matched_shaped.tolist() if matched_shaped.size > 0 else [],
+        'soft_coverage_mean': soft_cov_mean,
+        'soft_coverage_percentiles': soft_cov_pcts,
+        'pairwise_distances': pairwise_dists.tolist(),
+        'pairwise_mean': pairwise_mean,
+        'pairwise_min': pairwise_min,
+        'pairwise_quantiles': pairwise_quantiles,
+        'completion_lengths': length_array.tolist(),
+        'length_mean': length_mean,
+        'length_quantiles': length_quantiles,
         'prompt_log_data': {
             'smiles': canonical_smiles if canonical_smiles else "<missing>",
             'rollouts': K,
@@ -763,6 +850,16 @@ def compute_group_reward(
             'refs_total': M,
             'mean_token_entropy_group': mean_entropy_group,
             'entropy_list': entropy_list,
+            'entropy_quantiles': entropy_quantiles,
+            'd_quantiles': d_quantiles,
+            'matched_quantiles': matched_quantiles,
+            'soft_cov_mean': soft_cov_mean,
+            'soft_cov_pcts': soft_cov_pcts,
+            'pairwise_mean': pairwise_mean,
+            'pairwise_min': pairwise_min,
+            'pairwise_quantiles': pairwise_quantiles,
+            'length_mean': length_mean,
+            'length_quantiles': length_quantiles,
         },
     }
 
@@ -783,6 +880,7 @@ def group_by_prompt(
     completions: List[str],
     expected_k: int,
     rollout_entropies: Optional[List[Optional[float]]] = None,
+    completion_lengths: Optional[List[Optional[float]]] = None,
 ) -> List[Dict]:
     """Group flat batch into prompt groups."""
     groups = []
@@ -814,6 +912,11 @@ def group_by_prompt(
             entropy_val = rollout_entropies[idx]
         group.setdefault('entropy_values', []).append(entropy_val)
 
+        length_val = None
+        if completion_lengths is not None and idx < len(completion_lengths):
+            length_val = completion_lengths[idx]
+        group.setdefault('completion_lengths', []).append(length_val)
+
     return groups
 
 
@@ -824,6 +927,7 @@ def reward_function(
     tokenizer,
     config,
     completion_entropies: Optional[List[Optional[float]]] = None,
+    completion_lengths: Optional[List[Optional[float]]] = None,
 ) -> List[float]:
     """Main GRPO reward function (TRL-compatible).
 
@@ -844,8 +948,17 @@ def reward_function(
         List of reward scalars (B*K)
     """
     expected_k = config.grpo.num_generations
+    lambda_qual = float(getattr(config.grpo, 'lambda_qual', 1.0))
+    lambda_smcov = float(getattr(config.grpo, 'lambda_smcov', 1.0))
+    lambda_match = float(getattr(config.grpo, 'lambda_match', 1.0))
+    delta = float(getattr(config.grpo, 'delta', 0.75))
 
-    groups = group_by_prompt(prompts, completions, expected_k, completion_entropies)
+    if completion_lengths is not None:
+        completion_lengths = [
+            None if length is None else int(length)
+            for length in completion_lengths
+        ]
+    groups = group_by_prompt(prompts, completions, expected_k, completion_entropies, completion_lengths)
 
     final_rewards = [0.0] * len(completions)
 
@@ -871,6 +984,15 @@ def reward_function(
     total_M = 0
     total_K = 0
     total_max_possible = 0
+    all_d_quantiles = []
+    all_matched_dists = []
+    all_soft_cov = []
+    all_soft_cov_pcts = []
+    all_d_values = []
+    all_pairwise_dists = []
+    all_length_means = []
+    all_length_values = []
+    all_matched_shaped = []
 
     for group in groups:
         stats.processed_prompts += len(group['completions'])
@@ -882,6 +1004,7 @@ def reward_function(
             config=config,
             stats=stats,
             rollout_entropies=group.get('entropy_values'),
+            completion_lengths=group.get('completion_lengths'),
         )
 
         # Assign back to flat batch
@@ -909,7 +1032,18 @@ def reward_function(
         total_max_possible += debug_info['max_possible_matches']
         prompt_log_data.append(debug_info.get('prompt_log_data'))
         all_mean_entropies.append(debug_info.get('mean_entropy', float('nan')))
+        all_d_quantiles.append(debug_info.get('d_quantiles', [np.nan, np.nan, np.nan]))
+        all_matched_dists.extend(debug_info.get('matched_distances', []))
+        all_soft_cov.append(debug_info.get('soft_coverage_mean', float('nan')))
+        all_soft_cov_pcts.append(debug_info.get('soft_coverage_percentiles', [np.nan, np.nan, np.nan]))
         all_refs_hit.append(debug_info.get('refs_hit', float('nan')))
+        all_d_values.extend(debug_info.get('d_values', []))
+        all_pairwise_dists.extend(debug_info.get('pairwise_distances', []))
+        all_matched_shaped.extend(debug_info.get('matched_shaped_distances', []))
+        all_length_means.append(debug_info.get('length_mean', float('nan')))
+        for length_val in debug_info.get('completion_lengths', []):
+            if length_val is not None and np.isfinite(length_val):
+                all_length_values.append(length_val)
 
     # Step G: Logging
     mean_validity = float(np.nanmean(all_validity_rates)) if all_validity_rates else 0.0
@@ -974,6 +1108,108 @@ def reward_function(
         float(np.mean(finite_entropy_vals)) if finite_entropy_vals else float('nan')
     )
 
+    def _finite_array(values: List[float]) -> Optional[np.ndarray]:
+        if not values:
+            return None
+        arr = np.asarray(values, dtype=np.float32)
+        mask = np.isfinite(arr)
+        if not np.any(mask):
+            return None
+        return arr[mask]
+
+    geometry_metrics: Dict[str, float] = {}
+    d_arr = _finite_array(all_d_values)
+    if d_arr is not None and d_arr.size > 0:
+        geometry_metrics = {
+            "geom/d_min_p10": float(np.percentile(d_arr, 10)),
+            "geom/d_min_p50": float(np.percentile(d_arr, 50)),
+            "geom/d_min_p90": float(np.percentile(d_arr, 90)),
+            "geom/d_min_mean": float(np.mean(d_arr)),
+            "geom/d_min_median": float(np.median(d_arr)),
+        }
+
+    match_dist_metrics: Dict[str, float] = {}
+    matched_arr = _finite_array(all_matched_dists)
+    if matched_arr is not None and matched_arr.size > 0:
+        match_dist_metrics.update(
+            {
+                "match/dist_p10": float(np.percentile(matched_arr, 10)),
+                "match/dist_p50": float(np.percentile(matched_arr, 50)),
+                "match/dist_p90": float(np.percentile(matched_arr, 90)),
+            }
+        )
+    matched_shaped_arr = _finite_array(all_matched_shaped)
+    if matched_shaped_arr is not None and matched_shaped_arr.size > 0:
+        match_dist_metrics["match/shaped_p50"] = float(np.percentile(matched_shaped_arr, 50))
+
+    coverage_metrics: Dict[str, float] = {}
+    soft_arr = _finite_array(all_soft_cov)
+    if soft_arr is not None and soft_arr.size > 0:
+        coverage_metrics.update(
+            {
+                "coverage/soft_mean": float(np.mean(soft_arr)),
+                "coverage/soft_p10": float(np.percentile(soft_arr, 10)),
+                "coverage/soft_p50": float(np.percentile(soft_arr, 50)),
+                "coverage/soft_p90": float(np.percentile(soft_arr, 90)),
+            }
+        )
+    if all_soft_cov_pcts:
+        pct_array = np.asarray(all_soft_cov_pcts, dtype=np.float32)
+        coverage_metrics.update(
+            {
+                "coverage/pct_gt_0.1": float(np.nanmean(pct_array[:, 0])),
+                "coverage/pct_gt_0.3": float(np.nanmean(pct_array[:, 1])),
+                "coverage/pct_gt_0.5": float(np.nanmean(pct_array[:, 2])),
+            }
+        )
+
+    match_count_metrics: Dict[str, float] = {}
+    def _count_stats(prefix: str, data: List[float]) -> None:
+        arr = _finite_array(data)
+        if arr is None or arr.size == 0:
+            return
+        match_count_metrics.update(
+            {
+                f"{prefix}_p10": float(np.percentile(arr, 10)),
+                f"{prefix}_p50": float(np.percentile(arr, 50)),
+                f"{prefix}_p90": float(np.percentile(arr, 90)),
+            }
+        )
+
+    _count_stats("match/matched_count", all_num_matched)
+    _count_stats("match/eligible_count", all_num_eligible_edges)
+    _count_stats("match/max_possible_count", all_max_possible_matches)
+    _count_stats("match/refs_hit", all_refs_hit)
+
+    diversity_metrics: Dict[str, float] = {}
+    pair_arr = _finite_array(all_pairwise_dists)
+    if pair_arr is not None and pair_arr.size > 0:
+        diversity_metrics = {
+            "diversity/pairwise_mean": float(np.mean(pair_arr)),
+            "diversity/pairwise_min": float(np.min(pair_arr)),
+            "diversity/pairwise_p10": float(np.percentile(pair_arr, 10)),
+            "diversity/pairwise_p50": float(np.percentile(pair_arr, 50)),
+            "diversity/pairwise_p90": float(np.percentile(pair_arr, 90)),
+        }
+
+    length_metrics: Dict[str, float] = {}
+    len_arr = _finite_array(all_length_values)
+    if len_arr is not None and len_arr.size > 0:
+        length_metrics.update(
+            {
+                "len/completion_mean": float(np.mean(len_arr)),
+                "len/completion_p10": float(np.percentile(len_arr, 10)),
+                "len/completion_p50": float(np.percentile(len_arr, 50)),
+                "len/completion_p90": float(np.percentile(len_arr, 90)),
+            }
+        )
+
+    component_metrics = {
+        "reward/component_quality": lambda_qual * r_qual_mean,
+        "reward/component_smcov": lambda_smcov * r_smcov_mean,
+        "reward/component_match": lambda_match * r_match_mean,
+    }
+
     if wandb.run is not None:
         reward_metrics = {
             "reward/mean_quality": r_qual_mean,
@@ -1024,6 +1260,13 @@ def reward_function(
                 **entropy_metrics,
                 **adv_metrics,
                 **gen_metrics,
+                **component_metrics,
+                **geometry_metrics,
+                **match_dist_metrics,
+                **coverage_metrics,
+                **match_count_metrics,
+                **diversity_metrics,
+                **length_metrics,
             }
         )
 
