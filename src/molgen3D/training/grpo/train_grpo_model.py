@@ -122,8 +122,6 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         loss_type=config.trainer.loss_type,
         num_iterations=config.grpo.num_iterations,
         importance_sampling_level=config.grpo.importance_sampling_level,
-        epsilon=config.grpo.epsilon,
-        epsilon_high=config.grpo.epsilon_high,
         steps_per_generation=config.grpo.steps_per_generation,
     )
 
@@ -201,6 +199,13 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         args=training_args,
         train_dataset=dataset,
     )
+    
+    # Set epsilon parameters on trainer (not available in GRPOConfig)
+    epsilon_low = float(config.grpo.epsilon_low)
+    epsilon_high = float(config.grpo.epsilon_high)
+    trainer.epsilon_low = epsilon_low
+    trainer.epsilon_high = epsilon_high
+    logger.info(f"Set epsilon_low={epsilon_low}, epsilon_high={epsilon_high} on GRPO trainer")
     
     trainer.train()
     stats.update_stats()
