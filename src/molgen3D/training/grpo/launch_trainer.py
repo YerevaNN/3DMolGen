@@ -220,6 +220,8 @@ def save_updated_config(config, config_file_path):
 def main():
     setup_launcher_logging()
     project_root = get_project_root()
+    # Ensure snapshot jobs resolve data paths against the real repo root
+    os.environ.setdefault("MOLGEN3D_REPO_ROOT", str(project_root))
     
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Launch GRPO training job")

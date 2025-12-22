@@ -94,6 +94,7 @@ class ValidationConfig:
     max_conformer_tokens: int = 3500
     validation_batch_size: int = 8
     save_failed_generations: bool = True
+    sampling_config: str = "greedy"
 
     # Evaluation dataset settings (for TRL GRPO trainer)
     eval_dataset_path: Optional[str] = None

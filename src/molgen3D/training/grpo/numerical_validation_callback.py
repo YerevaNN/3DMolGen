@@ -53,7 +53,7 @@ class NumericalValidationCallback(TrainerCallback):
             f"Running numerical validation at train start (step {current_step})"
         )
         metrics = self.validator.run_validation(
-            model=kwargs.get("model"),
+            model=kwargs["model"],
             step=current_step,
             max_seq_len=self.max_seq_len,
         )
@@ -81,7 +81,7 @@ class NumericalValidationCallback(TrainerCallback):
         if current_step - self.last_validation_step >= self.validation_steps:
             logger.info(f"Running numerical validation at step {current_step}")
             metrics = self.validator.run_validation(
-                model=kwargs.get("model"),
+                model=kwargs["model"],
                 step=current_step,
                 max_seq_len=self.max_seq_len,
             )
@@ -105,7 +105,7 @@ class NumericalValidationCallback(TrainerCallback):
         current_step = state.global_step
         logger.info(f"Running final numerical validation at step {current_step}")
         metrics = self.validator.run_validation(
-            model=kwargs.get("model"),
+            model=kwargs["model"],
             step=current_step,
             max_seq_len=self.max_seq_len,
         )
