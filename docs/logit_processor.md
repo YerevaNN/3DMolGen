@@ -349,3 +349,184 @@ Real end-to-end testing via smoke runner:
 ```bash
 python scripts/logit_processor/run_logit_processor_smoke.py --help
 ```
+
+---
+
+## Experimental Findings: Quality Impact Analysis (December 2025)
+
+This section documents the experimental results comparing LP-constrained generation against unconstrained generation, and our decision to table further LP investigation.
+
+### RMSD Evaluation Results
+
+We ran full RMSD evaluation on the GEOM test set (~197,694 conformers) comparing LP vs baseline using the same `m600_qwen_pre` checkpoint at various training epochs:
+
+| Experiment | Epochs | COV-R ↑ | COV-P ↑ | MAT-R ↓ | MAT-P ↓ | mismatch | parse_fail | no_eos |
+|------------|--------|---------|---------|---------|---------|----------|------------|--------|
+| 2.1 qwen06-pre | 1e | 66.3% | 47.4% | 0.62 Å | 0.93 Å | 1354 | 173 | 23 |
+| 2.2 qwen06-pre | 2e | 68.1% | 49.7% | 0.60 Å | 0.91 Å | 687 | 137 | 44 |
+| 2.3 qwen06-pre | 3e | 68.7% | 51.8% | 0.60 Å | 0.82 Å | 709 | 142 | 11 |
+| 2.4 qwen06-pre | 4e | 68.3% | 52.4% | 0.59 Å | 0.82 Å | 710 | 119 | 9 |
+| **qwen06-pre + LP** | 2e | 44.0% | 28.0% | 0.80 Å | 1.16 Å | **0** | 569 | 0 |
+
+**Key observations:**
+- ✅ **LP achieves its primary goal**: SMILES mismatch dropped from 687 → 0 (100% reduction)
+- ✅ **LP eliminates EOS issues**: no_eos dropped from 44 → 0
+- ❌ **LP significantly degrades coordinate quality**: COV-R dropped 35%, COV-P dropped 44%
+- ❌ **LP increases parse failures**: 137 → 569 (4.15× increase)
+- ⚠️ **Total failure count actually decreased** with LP (569 vs 868), but quality on successful generations plummeted
+
+### The Distribution Shift Problem
+
+#### Why LP Degrades Quality
+
+The core issue: **chemical equivalence ≠ model familiarity**.
+
+Without LP, the model can generate SMILES freely:
+```
+Input SMILES:     "CC(=O)O"  (acetic acid)
+Model generates:  "C(C)(=O)O" (different but equivalent representation)
+same_molecular_graph: ✅ PASS
+Coordinates: Generated naturally for the representation the model chose → HIGH QUALITY
+```
+
+With LP, the model is forced to follow the exact input representation:
+```
+Input SMILES:     "CC(=O)O"
+Model forced to:  "CC(=O)O"  (exact match)
+same_molecular_graph: ✅ PASS (trivially)
+Coordinates: Generated for a representation model isn't "comfortable" with → LOWER QUALITY
+```
+
+#### The Atom Ordering Problem
+
+Even with canonical SMILES, the **atom traversal order** matters for coordinate generation. The model learned coordinate distributions conditioned on specific token patterns:
+
+```python
+# During training, model saw many examples like:
+"[C][H3]<0.0,0.0,0.0>[C]<1.54,0.0,0.0>..."  # Pattern A (common)
+"[C]<0.0,0.0,0.0>[C][H3]<1.54,0.0,0.0>..."  # Pattern B (rare)
+```
+
+Both represent the same molecule, but the model has strong priors for Pattern A. When LP forces Pattern B (or any non-preferred ordering), the hidden states evolve in ways the model wasn't trained for.
+
+#### Error Compounding Over Sequence Length
+
+```
+           Without LP                    With LP
+           ──────────                    ───────
+Step 1:    natural token → natural       forced token → slight confusion
+Step 2:    natural token → natural       forced token → more confusion
+Step 3:    natural token → natural       forced token → hidden state drift
+  ...         ...                           ...
+Step N:    natural token → good coords   forced token → degraded coords
+```
+
+Each forced token pushes the hidden state further from the training distribution. By the time generation reaches coordinates, the model is operating in "alien territory."
+
+### Hypotheses for Quality Degradation
+
+1. **Representation Mismatch**: The model's "preferred" SMILES representation differs from the input. Forcing an exact match creates distribution shift.
+
+2. **Hidden State Corruption**: Constrained tokens at early positions corrupt the hidden state, affecting downstream coordinate predictions even though coordinates are "free."
+
+3. **Training-Inference Gap**: The model was trained on unconstrained generation. Constrained generation is fundamentally a different task the model wasn't optimized for.
+
+4. **Coordinate Distribution Shift**: The model learned `P(coordinates | natural_SMILES_history)`. We're asking for `P(coordinates | forced_SMILES_history)` — a different distribution.
+
+### Parse Failure Analysis
+
+The 4× increase in parse failures (137 → 569) suggests LP exposes edge cases:
+- Model generates malformed `<x,y,z>` strings under constraint
+- Possible truncation or wrong number of coordinate blocks
+- **Not yet investigated in detail** — would require sampling failed parses and categorizing error types
+
+### Sampling Interaction
+
+The experiments used `top_p=1.0` (full nucleus sampling). Sampling interacts with LP in a subtle way:
+
+- **Constrained positions**: Sampling is irrelevant — LP forces exactly one token
+- **Unconstrained positions (coordinates)**: Sampling draws from a corrupted distribution
+
+Lower temperature or greedy decoding might reduce variance but won't fix the fundamental distribution shift.
+
+### Decision: Table Further LP Investigation
+
+**Given:**
+- 20 days to deadline (as of December 2025)
+- LP achieves structural correctness but degrades quality
+- Full inference runs take 5-6 hours each
+- RMSD evaluation takes 25-30 minutes
+
+**Decision:** Table further LP investigation and document findings for future work.
+
+**Rationale:**
+- The quality degradation is too severe (~35-44% drop in coverage metrics)
+- Fixing this would likely require training with LP constraints (significant effort)
+- Current baseline without LP achieves acceptable results
+- Time is better spent on other priorities
+
+### Future Investigation Starting Points
+
+If LP-based inference is revisited, consider these approaches:
+
+#### 1. Probability Logging Diagnostic (Low Cost, High Value)
+
+Add diagnostic hooks to measure distribution shift:
+
+```python
+# At each constrained position:
+logits = model(input_ids)
+probs = F.softmax(logits, dim=-1)
+
+forced_token_id = constraint_template[position]
+natural_token_id = probs.argmax()
+
+# Key metrics:
+forced_prob = probs[forced_token_id].item()
+natural_prob = probs[natural_token_id].item()
+prob_ratio = forced_prob / natural_prob  # How much model "disagrees"
+```
+
+**Analysis to run:**
+- Per-token heatmap: Which SMILES tokens cause biggest disagreement?
+- Positional analysis: Does disagreement grow over sequence length?
+- Correlation: Do molecules with high disagreement have worse RMSD?
+
+#### 2. Canonicalization Alignment
+
+Ensure input SMILES use the exact same canonicalization as training data:
+- Verify RDKit canonicalization settings match `encode_cartesian_v2()`
+- Test if different canonical forms produce different quality results
+
+#### 3. Training with LP Constraints
+
+Train the model with LP constraints during training (not just inference):
+- Model learns to generate coordinates under structural constraints
+- Significant effort: requires modifying training pipeline
+
+#### 4. Soft Constraints
+
+Instead of hard masking (force token to -inf), try soft constraints:
+- Add penalty to non-matching tokens rather than blocking completely
+- Allow model to "correct" if it strongly disagrees
+
+#### 5. Checkpoint Comparison
+
+Test LP with different training epochs (1e, 2e, 3e, 4e):
+- Hypothesis: Better-trained models might handle constraints better
+- 4e baseline had lowest MAT-R (0.59) — might be more robust
+
+#### 6. Parse Failure Investigation
+
+Sample 50-100 failed parses and categorize:
+- Truncated coordinates?
+- Wrong format (missing commas, invalid numbers)?
+- Extra/wrong tokens?
+- Fix any trivial bugs exposed by LP
+
+### References
+
+- RMSD evaluation results: `rmsd_results_temp.csv` (project root, gitignored)
+- Baseline experiments: 2.1-2.4 in RMSD table
+- LP experiment: "qwen06 - pre - logit processor" row
+- Checkpoint used: `m600_qwen_pre` with `step-40000-hf` (2e)
