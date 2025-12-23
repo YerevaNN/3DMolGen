@@ -17,15 +17,16 @@ if package_container and str(package_container) not in sys.path:
     sys.path.insert(0, str(package_container))
 
 # Third-party imports
+import torch
 from datasets import Dataset
 from loguru import logger
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import GRPOConfig as TRLGRPOConfig
 from trl import GRPOTrainer
+from trl.trainer import grpo_trainer as trl_grpo_module
 
 # Local imports
 from molgen3D.training.grpo.config import Config
-# from molgen3D.training.grpo.grpo_trainer import GRPOTrainer
 from molgen3D.training.grpo.stats import RunStatistics
 from molgen3D.training.grpo.utils import (
     load_smiles_mapping,
@@ -36,6 +37,30 @@ from molgen3D.training.grpo.utils import (
 from molgen3D.training.grpo.rewards import reward_function
 from molgen3D.training.grpo.multi_component_reward import MultiComponentRewardCalculator
 from molgen3D.training.grpo.grpo_reward_v3 import reward_function as reward_function_v3
+
+
+def ensure_completion_length_tracking():
+    """Register a runtime hook so TRL always exposes completion lengths."""
+    if getattr(trl_grpo_module, "_molgen3d_completion_length_hook", False):
+        return
+
+    original_generate = GRPOTrainer._generate
+
+    def _generate_with_lengths(self, prompts):
+        result = original_generate(self, prompts)
+        _, completion_ids, tool_mask, *_ = result
+        device = self.accelerator.device
+
+        if tool_mask is not None:
+            lengths = torch.tensor([sum(mask) for mask in tool_mask], device=device)
+        else:
+            lengths = torch.tensor([len(ids) for ids in completion_ids], device=device)
+
+        trl_grpo_module.completion_lengths = lengths
+        return result
+
+    GRPOTrainer._generate = _generate_with_lengths
+    trl_grpo_module._molgen3d_completion_length_hook = True
 
 
 def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
@@ -93,7 +118,7 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         logging_steps=config.trainer.logging_steps,
         max_steps=config.grpo.max_steps,
         # num_train_epochs=config.grpo.num_epochs,
-        use_liger_loss=config.trainer.use_liger_loss,
+        use_liger_kernel=config.trainer.use_liger_loss,
         loss_type=config.trainer.loss_type,
         num_iterations=config.grpo.num_iterations,
     )
@@ -132,7 +157,17 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     if reward_strategy == "v3":
         logger.info("Using GRPO reward function v3 (GEOM-Drugs aligned: quality + smooth coverage + hard matching)")
         def reward_func(prompts, completions, **kwargs):
-            return reward_function_v3(prompts, completions, stats, tokenizer, config)
+            completion_entropies = kwargs.get("mean_token_entropy")
+            completion_lengths = kwargs.get("completion_lengths")
+            return reward_function_v3(
+                prompts,
+                completions,
+                stats,
+                tokenizer,
+                config,
+                completion_entropies=completion_entropies,
+                completion_lengths=completion_lengths,
+            )
 
     elif reward_strategy == "multi_component":
         logger.info("Using multi-component reward calculator")
@@ -145,6 +180,8 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         logger.info("Using legacy reward function")
         def reward_func(prompts, completions, **kwargs):
             return reward_function(prompts, completions, stats, tokenizer, config)
+
+    ensure_completion_length_tracking()
 
     # Set DataLoader parameters from YAML config
     training_args.dataloader_num_workers = config.dataloader.num_workers

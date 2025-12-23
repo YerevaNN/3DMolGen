@@ -31,6 +31,8 @@ dependencies:
     - torchdata>=0.8.0
     - accelerate>=1.0.0
     - flash-attn>=2.0.0
+    - cloudpickle>=2.0.0
+    - submitit>=0.20.0
     # Optional: GRPO
     - trl>=0.7.0
     # Optional: Evaluation
@@ -45,3 +47,4 @@ dependencies:
     - black>=23.0.0
     - flake8>=6.0.0
     - mypy>=1.0.0
+
