@@ -8,11 +8,11 @@ dataset:
   dataset_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/geom_processed/grpo/train_smiles.jsonl
   smiles_mapping_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/geom_processed/grpo/train_smiles_to_pickle.json
 device:
-  device_type: a100
-  num_gpus: 4
+  device_type: h100
+  num_gpus: 8
 generation:
   do_sample: true
-  max_completion_length: 1800
+  max_completion_length: 1500
   num_return_sequences: 1
   repetition_penalty: 1.0
   temperature: 1.0
@@ -25,20 +25,20 @@ grpo:
   enable_posebusters: false
   epsilon_high: 4e-4
   epsilon_low: 3e-4
-  grad_acc_steps: 1
+  grad_acc_steps: 4
   importance_sampling_level: sequence
   lambda_match: 2.0
   lambda_qual: 2.0
   lambda_smcov: 0.0
-  learning_rate: 3.0e-05
+  learning_rate: 2.0e-05
   max_grad_norm: 1.0
   max_ground_truths: 30
-  max_steps: 2000
+  max_steps: 4000
   num_epochs: 1
-  num_generations: 8
-  num_iterations: 2
+  num_generations: 16
+  num_iterations: 1
   output_base_dir: ./grpo_outputs
-  per_device_batch_size: 8
+  per_device_batch_size: 16
   r_floor: -0.75
   reward_strategy: v3
   rho: 0.6
@@ -46,7 +46,7 @@ grpo:
   scheduler: cosine
   seed: 1
   sigma: 0.35
-  steps_per_generation: 4
+  steps_per_generation: 16
   temperature: 1.0
   warmup_ratio: 0.05
   weight_decay: 0.0
@@ -65,7 +65,7 @@ processing:
   eos_token_id: 151672
 run:
   log_level: INFO
-  name: qwen3_v3_match_qual_smcov0_gspo
+  name: qwen3_v3_match_qual_gspo_8*4*16comp_16steps
 trainer:
   attn_implementation: flash_attention_2
   log_on_each_node: false
