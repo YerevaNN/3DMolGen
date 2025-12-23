@@ -5,6 +5,7 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit.Chem.rdchem import ChiralType
 from rdkit.Geometry import Point3D
+import numpy as np
 
 
 def truncate(x, precision=4):
@@ -486,4 +487,188 @@ def coords_rmsd(mol_a, mol_b):
         dy = pa.y - pb.y
         dz = pa.z - pb.z
         sse += dx * dx + dy * dy + dz * dz
-    return math.sqrt(sse / n)
+
+    rmsd_rdkit = AllChem.GetBestRMS(mol_a, mol_b)
+    return min(math.sqrt(sse / n), rmsd_rdkit)
+
+def get_bins_for_coords(ranges, bin_size=0.05):
+    """Get bins for coordinates based on the ranges and bin size."""
+    bins = []
+    for start, end in ranges:
+        bins.append(np.arange(start, end, bin_size))
+    return bins
+
+def coords_to_bins(coords, bins):
+    """Convert coordinates to bins."""
+    return np.digitize(coords, bins)
+
+
+def bins_to_coords(bin_indices, bins, use_bin_center=False):
+    """
+    Convert bin indices to coordinates by choosing a value within the bin interval for each bin.
+    
+    Parameters:
+        bin_indices (array-like): Indices of the bins.
+        bins (array-like): The bin edges as used in np.digitize (e.g., output from np.arange).
+        use_bin_center (bool): If True, use the center of the bin; if False, uniformly sample within the bin.
+    
+    Returns:
+        np.ndarray: Coordinates either as bin centers or randomly sampled within each bin.
+    """
+    coords = []
+    for bin_idx in bin_indices:
+        # Find the left and right edges of the bin
+        if bin_idx <= 0:
+            left = bins[0]
+            right = bins[1] if len(bins) > 1 else bins[0]
+        elif bin_idx >= len(bins):
+            left = bins[-1]
+            right = bins[-1] + (bins[-1] - bins[-2]) if len(bins) > 1 else bins[-1] + 1.0
+        else:
+            left = bins[bin_idx - 1]
+            right = bins[bin_idx]
+        # Choose value: random within [left, right) or use center
+        if use_bin_center:
+            coord = (left + right) / 2.0
+        else:
+            coord = np.random.uniform(left, right)
+        coords.append(coord)
+    return np.array(coords)
+
+
+
+def encode_cartesian_binned(mol, bin_size=0.05, ranges=None):
+    """
+    Serialize a 3D RDKit Mol into an enriched text representation where
+    the Cartesian coordinates are replaced by bin indices.
+
+    Returns:
+        enriched_string (str): SMILES-like string with [atom]<ix,iy,iz> tokens.
+        smiles (str): Canonical SMILES of the heavy-atom molecule.
+        bins (list[np.ndarray]): [bins_x, bins_y, bins_z] used for binning.
+        ranges (list[tuple[float, float]]): Axis ranges used to construct bins.
+    """
+    mol_no_h = Chem.RemoveHs(mol)
+    if mol_no_h.GetNumConformers() == 0:
+        raise ValueError("Molecule has no conformer / 3D coordinates.")
+
+    smiles = Chem.MolToSmiles(
+        mol_no_h,
+        canonical=True,
+        isomericSmiles=True,
+        allHsExplicit=False,
+        allBondsExplicit=False,
+    )
+
+    if not mol_no_h.HasProp("_smilesAtomOutputOrder"):
+        raise ValueError("Mol is missing _smilesAtomOutputOrder after MolToSmiles.")
+
+    atom_order_raw = mol_no_h.GetProp("_smilesAtomOutputOrder")
+    atom_order = list(map(int, ast.literal_eval(atom_order_raw)))
+
+    expected_atom_tokens = [
+        _expected_plain_token(mol_no_h.GetAtomWithIdx(idx)) for idx in atom_order
+    ]
+
+    tokens = tokenize_smiles(smiles, expected_atom_tokens=expected_atom_tokens)
+
+    # Build bins per axis: use fixed global range [-9, 9] unless explicitly provided.
+    if ranges is None:
+        ranges = [(-21.0, 21.0), (-21.0, 21.0), (-21.0, 21.0)]
+    if len(ranges) != 3:
+        raise ValueError("ranges must be a sequence of three (start, end) tuples.")
+    bins = get_bins_for_coords(ranges, bin_size=bin_size)
+    if len(bins) != 3:
+        raise ValueError("get_bins_for_coords must return three bin arrays (x, y, z).")
+
+    out_parts = []
+    atom_idx_in_smiles = 0
+    conformer = mol_no_h.GetConformer()
+
+    for token in tokens:
+        if token["type"] == "atom":
+            if atom_idx_in_smiles >= len(atom_order):
+                raise ValueError("SMILES atom tokens exceed atom order mapping.")
+
+            rd_idx = atom_order[atom_idx_in_smiles]
+            atom_text = token["text"]
+            if atom_text.startswith("["):
+                atom_descriptor = atom_text
+            else:
+                atom_descriptor = f"[{atom_text}]"
+
+            pos = conformer.GetAtomPosition(rd_idx)
+
+            # Map each coordinate to a bin index (np.digitize-style).
+            ix = int(coords_to_bins(np.array([pos.x]), bins[0])[0])
+            iy = int(coords_to_bins(np.array([pos.y]), bins[1])[0])
+            iz = int(coords_to_bins(np.array([pos.z]), bins[2])[0])
+
+            out_parts.append(f"{atom_descriptor}<{ix},{iy},{iz}>")
+            atom_idx_in_smiles += 1
+        else:
+            out_parts.append(token["text"])
+
+    if atom_idx_in_smiles != len(atom_order):
+        raise ValueError(
+            f"Atom count mismatch: mapped {atom_idx_in_smiles} atoms but expected {len(atom_order)}."
+        )
+
+    enriched_string = "".join(out_parts)
+    return enriched_string, smiles, bins, ranges
+
+
+def decode_cartesian_binned(enriched_string, bins, use_bin_center=True):
+    """
+    Reconstruct an RDKit Mol (with conformer) from a binned enriched string.
+
+    The string must have been produced by ``encode_cartesian_binned`` using
+    the same set of ``bins`` (one array per axis). Bin indices are turned
+    back into coordinates by uniformly sampling within each bin interval.
+    """
+    if len(bins) != 3:
+        raise ValueError("bins must be a sequence of three bin arrays (x, y, z).")
+
+    tokens = tokenize_enriched(enriched_string)
+
+    smiles_parts = []
+    coords = []
+    for token in tokens:
+        if token["type"] == "atom_with_coords":
+            desc = token["atom_desc"]
+            desc_inner = desc[1:-1]
+            if desc_inner in _ORGANIC_SUBSET:
+                smiles_parts.append(desc_inner)
+            else:
+                smiles_parts.append(desc)
+
+            # token["coords"] are floats parsed from the text; interpret them
+            # as (possibly float) bin indices and round to nearest int.
+            ix_f, iy_f, iz_f = token["coords"]
+            ix = int(round(ix_f))
+            iy = int(round(iy_f))
+            iz = int(round(iz_f))
+
+            x = float(bins_to_coords([ix], bins[0], use_bin_center=use_bin_center)[0])
+            y = float(bins_to_coords([iy], bins[1], use_bin_center=use_bin_center)[0])
+            z = float(bins_to_coords([iz], bins[2], use_bin_center=use_bin_center)[0])
+            coords.append((x, y, z))
+        else:
+            smiles_parts.append(token["text"])
+
+    smiles = "".join(smiles_parts)
+    mol = Chem.MolFromSmiles(smiles, sanitize=False)
+    if mol is None:
+        raise ValueError(f"Failed to parse rebuilt SMILES from binned string: {smiles}")
+    if mol.GetNumAtoms() != len(coords):
+        raise ValueError(
+            f"Atom count mismatch: mol has {mol.GetNumAtoms()} atoms, coords list has {len(coords)} entries."
+        )
+
+    Chem.SanitizeMol(mol)
+
+    conformer = Chem.Conformer(mol.GetNumAtoms())
+    for idx, (x, y, z) in enumerate(coords):
+        conformer.SetAtomPosition(idx, Point3D(x, y, z))
+    mol.AddConformer(conformer, assignId=True)
+    return mol
