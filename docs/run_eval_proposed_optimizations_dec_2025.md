@@ -52,11 +52,11 @@ And critically:
 ### The Fix
 
 ```python
-# AFTER (run_eval.py)
+# AFTER (run_eval_optimized.py)
 from concurrent.futures import ProcessPoolExecutor
 ...
 with ProcessPoolExecutor(max_workers=args.num_workers) as ex:
-    futures = [ex.submit(compute_rmsd_row, ...) for ...]
+    futures = [ex.submit(compute_key_matrix, ...) for ...]
 ```
 
 `ProcessPoolExecutor` spawns separate Python interpreter processes, each with its own GIL. This enables true parallel execution on multi-core systems for CPU-bound work like RMSD calculations.
@@ -70,87 +70,65 @@ _pickle.PicklingError: Can't pickle <function _compute_key_matrix at 0x...>:
 attribute lookup _compute_key_matrix on __main__ failed
 ```
 
-**Solution**: Moved the function to `rdkit_utils.py` as `compute_rmsd_row`, making it a proper importable module-level function that survives the double-pickling chain (submitit → ProcessPoolExecutor).
+**Solution**: Moved the function to `rdkit_utils.py` as `compute_key_matrix`, making it a proper importable module-level function that survives the double-pickling chain (submitit → ProcessPoolExecutor).
 
 ---
 
-## 2. Molecule-Level → Row-Level Parallelization
+## 2. Row-Level vs Molecule-Level Parallelization (Tested & Rejected)
 
-### The Problem
+### The Investigation
 
-The original code created one task per molecule:
+We investigated whether finer-grained parallelization could improve performance. The idea was to parallelize at the **row level** (one task per true conformer) instead of **molecule level** (one task per molecule).
 
-```python
-# BEFORE
-work_items: List[Tuple[str, List, List]] = []
-for key in true_data.keys():
-    work_items.append((key, true_data[key]["confs"], gen_mols))  # One task per molecule
+### Why We Considered Row-Level
 
-with ProcessPoolExecutor(max_workers=48) as ex:
-    futures = [ex.submit(compute_key_matrix, key, confs, gen_mols, ...) for key, confs, gen_mols in work_items]
-```
-
-With 1000 molecules, this creates 1000 tasks. However, molecules have vastly different numbers of conformers:
+Molecules have vastly different numbers of conformers:
 
 ```
 Top 10 largest molecules by conformer count:
   2497 conformers: CCCCC(=O)NC(NC(=O)CCCC)c1ccc(OCC(C)C)c(OC)c1
   1837 conformers: CCCCOCP(=O)(CC)COCCCC
-  1500 conformers: CN(CC(O)COc1ccc(OCC(O)CN(C)C2CCCCC2)cc1)C1CCCCC1
   ...
 Total molecules: 1000
 Total conformers: 106778
-Top 1% molecules have 12602 conformers (11.8% of total)
 ```
 
-### The Straggler Problem
+This causes the **straggler problem**: one worker processes the 2497-conformer molecule while 47 workers sit idle.
 
-This is a well-known issue in parallel computing called the **straggler problem** or **load imbalance**. From [Dean & Barroso, "The Tail at Scale" (2013)](https://research.google/pubs/pub40801/):
+### What We Tested
 
-> "Variability in response times leads to situations where a small number of slow tasks ('stragglers') dominate overall job completion time."
-
-The work per molecule is O(n_true × n_gen) RMSD calculations:
-- Small molecule: 5 × 10 = 50 calculations → milliseconds
-- Large molecule: 2497 × 50 = 124,850 calculations → minutes
-
-One worker processes the 2497-conformer molecule while 47 workers sit idle.
-
-### The Fix
-
-Parallelize at the **row level** (one task per true conformer):
+Row-level parallelization would create **106,778 tasks** instead of 1000:
 
 ```python
-# AFTER
-row_tasks: List[Tuple[str, int, object, List, bool]] = []
+# Row-level approach (REJECTED)
 for key in true_data.keys():
-    true_confs = true_data[key]["confs"]
     for row_idx, ref_mol in enumerate(true_confs):
         row_tasks.append((key, row_idx, ref_mol, gen_mols, use_alignmol))
-
-with ProcessPoolExecutor(max_workers=48) as ex:
-    futures = [ex.submit(compute_rmsd_row, *task) for task in row_tasks]
+# Creates 106K tasks!
 ```
 
-This creates **106,778 tasks** instead of 1000, with each task being roughly the same size (one RMSD row computation).
+### Why Row-Level Was Slower
 
-### Evidence: Amdahl's Law and Load Balancing
+We tested using `scripts/test_parallelization_overhead.py` and found **IPC/pickling overhead dominates**:
 
-From [Amdahl's Law](https://en.wikipedia.org/wiki/Amdahl%27s_law), the speedup from parallelization is limited by the serial portion of the workload. With molecule-level parallelization, the serial portion is the largest molecule.
+| Simulated Work/Row | Molecule-Level | Row-Level | Overhead Ratio |
+|--------------------|----------------|-----------|----------------|
+| 0ms (pure overhead) | 0.61s | 34.62s | **57x slower** |
+| 1ms (light work) | 0.70s | 1.12s | **1.6x slower** |
 
-From the [Python multiprocessing documentation](https://docs.python.org/3/library/multiprocessing.html#programming-guidelines):
+At realistic scale (1000 molecules, 107K rows, 48 workers), row-level parallelization is always slower because:
+1. 100x more tasks = 100x more IPC overhead
+2. 100x more pickle/unpickle operations
+3. 100x more future object management
 
-> "When using a process pool, you should ensure that the work is divided into roughly equal-sized chunks to maximize efficiency."
+### Final Decision: Molecule-Level Wins
 
-### Observed Results
+We keep **molecule-level parallelization** (`compute_key_matrix`):
+- 1,000 tasks (not 106K)
+- Acceptable straggler effect (tail takes longer but not too bad)
+- Much lower overhead
 
-| Metric | Before (molecule-level) | After (row-level) |
-|--------|------------------------|-------------------|
-| Tasks | 1,000 | 106,778 |
-| Task size variance | Huge (5 → 2497 rows) | Uniform (~50 RMSD calcs each) |
-| Progress pattern | Steady throughput | 98% fast → last 2% slower |
-| RMSD phase time | Not measured | ~27 min |
-
-**Note**: Based on jobs 422719 (run_eval.py) and 422722 (run_eval_optimized) on H100 with `distinct` dataset (1000 molecules, 106K conformers). Overall, run_eval_optimized completed ~5 min faster than run_eval.py. The old run_eval.py has no progress logging, so RMSD timing was not measured.
+The `compute_rmsd_row` function was removed as dead code (2025-12-23).
 
 ---
 
@@ -237,14 +215,15 @@ The optimal chunk size balances:
 Created as experimental alternative to `run_eval.py` with:
 
 1. `ProcessPoolExecutor` instead of `ThreadPoolExecutor`
-2. Row-level parallelization in `compute_rmsd_matrix()`
+2. Molecule-level parallelization in `compute_rmsd_matrix()` (row-level tested but rejected due to overhead)
 3. New CLI arguments: `--memory-gb`, `--pb-chunk-size`, `--output-dir`
 4. Progress logging for RMSD and PoseBusters phases
 
 ### `src/molgen3D/evaluation/rdkit_utils.py`
 
-1. Added `compute_rmsd_row()` function (picklable, module-level)
+1. Added `compute_key_matrix()` function (picklable, module-level for ProcessPoolExecutor)
 2. Added numpy import for array operations
+3. `compute_rmsd_row()` was tested for row-level parallelization but removed (2025-12-23) after benchmarks showed 57x overhead
 
 ---
 

@@ -40,13 +40,13 @@ from molgen3D.evaluation.qwen_logit_processor import (
 
 def set_seed(seed: int = 42) -> None:
     """Set random seeds for reproducibility."""
-    random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
+    random.seed(seed)  # Python Random Moduel
+    torch.manual_seed(seed)  # PyTorch CPU
+
+    torch.cuda.manual_seed(seed)  # PyTorch GPU
+    torch.cuda.manual_seed_all(seed)  # All GPUs (if using multi-GPU)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False 
 
 
 def load_model_tokenizer(
