@@ -580,6 +580,8 @@ def encode_cartesian_binned(mol, bin_size=0.05, ranges=None):
     bins = get_bins_for_coords(ranges, bin_size=bin_size)
     if len(bins) != 3:
         raise ValueError("get_bins_for_coords must return three bin arrays (x, y, z).")
+    # Determine zero-padding width per axis; always at least 3 digits
+    digits = [max(3, len(str(len(b)))) for b in bins]
 
     out_parts = []
     atom_idx_in_smiles = 0
@@ -604,7 +606,12 @@ def encode_cartesian_binned(mol, bin_size=0.05, ranges=None):
             iy = int(coords_to_bins(np.array([pos.y]), bins[1])[0])
             iz = int(coords_to_bins(np.array([pos.z]), bins[2])[0])
 
-            out_parts.append(f"{atom_descriptor}<{ix},{iy},{iz}>")
+            # Zero-pad indices per axis to a fixed width (>=3)
+            ix_txt = f"{ix:0{digits[0]}d}"
+            iy_txt = f"{iy:0{digits[1]}d}"
+            iz_txt = f"{iz:0{digits[2]}d}"
+
+            out_parts.append(f"{atom_descriptor}<{ix_txt},{iy_txt},{iz_txt}>")
             atom_idx_in_smiles += 1
         else:
             out_parts.append(token["text"])
