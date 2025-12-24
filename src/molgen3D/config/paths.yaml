@@ -22,8 +22,8 @@ data:
   xl_smi: "xl_smi.pickle"
   qm9_smi: "qm9_smi.pickle"
 
-  pretokenized_prompts: "pretokenized_prompts.json"
-  validation_pickle: "valid_set.pickle"
+  pretokenized_prompts: "3DMolGen_data/pretokenized_prompts.json"
+  validation_pickle: "3DMolGen_data/valid_set.pickle"
 
   rdkit_folder: "rdkit_folder"
   test_mols: "geom_processed/test_smiles_corrected.csv"
