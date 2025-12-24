@@ -503,12 +503,28 @@ class MolGenNumericalValidator(BaseMolGenValidatorClass):
         model_parts: list[torch.nn.Module],
         step: int,
     ) -> None:
+        # Run regular validation (inherited from base class)
+        # Note: TorchTitan only calls validate() at validation.freq intervals,
+        # so regular validation will run whenever this method is called
         super().validate(model_parts, step)
-        try:
-            self._run_numerical_validation(model_parts, step)
-        except Exception as exc:  # pragma: no cover - safety
-            import traceback
-            logger.warning(f"Numerical validation failed: {exc}\n{traceback.format_exc()}")
+        
+        # Run numerical validation independently based on its own frequency
+        numerical_val_freq = getattr(self.job_config.validation, "numerical_validation_freq", 0)
+        numerical_val_enabled = getattr(self.job_config.validation, "numerical_validation", False)
+        
+        # Check if numerical validation should run at this step
+        should_run_numerical = (
+            numerical_val_enabled
+            and numerical_val_freq > 0
+            and step % numerical_val_freq == 0
+        )
+        
+        if should_run_numerical:
+            try:
+                self._run_numerical_validation(model_parts, step)
+            except Exception as exc:  # pragma: no cover - safety
+                import traceback
+                logger.warning(f"Numerical validation failed: {exc}\n{traceback.format_exc()}")
 
 MolGenNumericalValidatorClass = MolGenNumericalValidator
 

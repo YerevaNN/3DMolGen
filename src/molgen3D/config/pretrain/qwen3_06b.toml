@@ -22,7 +22,7 @@ custom_import = "molgen3D.training.pretraining.torchtitan_model.qwen3_custom"
 [training]
 seq_len = 2048
 local_batch_size = 12
-global_batch_size = 72
+global_batch_size = 144
 steps = 160000
 max_norm = 1.0
 dtype = "bfloat16"
@@ -40,6 +40,7 @@ freq = 500
 steps = 200
 numerical_validation = true
 num_val_molecules = 10
+numerical_validation_freq = 1000
 
 [molgen_data]
 train_path_key = "conformers_train"
