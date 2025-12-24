@@ -2,6 +2,7 @@
 # Standard library imports
 import argparse
 import os
+import random
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +18,7 @@ if package_container and str(package_container) not in sys.path:
     sys.path.insert(0, str(package_container))
 
 # Third-party imports
+import numpy as np
 import torch
 from datasets import Dataset
 from loguru import logger
@@ -37,6 +39,14 @@ from molgen3D.training.grpo.utils import (
 from molgen3D.training.grpo.rewards import reward_function
 from molgen3D.training.grpo.multi_component_reward import MultiComponentRewardCalculator
 from molgen3D.training.grpo.grpo_reward_v3 import reward_function as reward_function_v3
+
+
+def initialize_random_seed(seed: int) -> None:
+    """Seed all RNGs so the data order and sampling stays consistent."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 
 def ensure_completion_length_tracking():
@@ -64,6 +74,8 @@ def ensure_completion_length_tracking():
 
 
 def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
+    initialize_random_seed(config.grpo.seed)
+
     # Set up output and checkpoint directories if not already configured
     if output_dir is None and config.grpo.output_dir is None:
         timestamp = datetime.now().strftime("%y%m%d-%H%M")
@@ -121,6 +133,9 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         use_liger_kernel=config.trainer.use_liger_loss,
         loss_type=config.trainer.loss_type,
         num_iterations=config.grpo.num_iterations,
+        importance_sampling_level=config.grpo.importance_sampling_level,
+        steps_per_generation=config.grpo.steps_per_generation,
+        seed=config.grpo.seed,
     )
 
     # Convert string dtype to torch dtype
@@ -141,8 +156,13 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
 
     # Load dataset from text file and create prompt column
     with open(config.dataset.dataset_path, 'r') as f:
-        prompts = [line.strip() for line in f if line.strip()]
+        prompts = [
+            line.strip()
+            for line in f
+            if line.strip() and len(line.strip()) <= 170
+        ]
     dataset = Dataset.from_dict({"prompt": prompts})
+    dataset = dataset.shuffle(seed=config.grpo.seed)
     logger.info(f"Loaded {len(dataset)} prompts from {config.dataset.dataset_path}")
 
     tokenizer.pad_token_id = tokenizer.convert_tokens_to_ids(config.model.pad_token)
@@ -197,6 +217,13 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         args=training_args,
         train_dataset=dataset,
     )
+    
+    # Set epsilon parameters on trainer (not available in GRPOConfig)
+    epsilon_low = float(config.grpo.epsilon_low)
+    epsilon_high = float(config.grpo.epsilon_high)
+    trainer.epsilon_low = epsilon_low
+    trainer.epsilon_high = epsilon_high
+    logger.info(f"Set epsilon_low={epsilon_low}, epsilon_high={epsilon_high} on GRPO trainer")
     
     trainer.train()
     stats.update_stats()
