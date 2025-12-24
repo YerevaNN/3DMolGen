@@ -188,7 +188,7 @@ class Config:
         Returns:
             Config: A Config instance with all parameters loaded from the YAML file
         """
-        with open(yaml_path, 'r') as f:
+        with open(yaml_path, 'r', encoding='utf-8', errors='replace') as f:
             config_dict = yaml.safe_load(f)
 
         grpo_dict_raw = dict(config_dict['grpo'])

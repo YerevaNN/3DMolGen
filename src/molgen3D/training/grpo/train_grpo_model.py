@@ -155,7 +155,7 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     )
 
     # Load dataset from text file and create prompt column
-    with open(config.dataset.dataset_path, 'r') as f:
+    with open(config.dataset.dataset_path, 'r', encoding='utf-8', errors='replace') as f:
         prompts = [
             line.strip()
             for line in f
