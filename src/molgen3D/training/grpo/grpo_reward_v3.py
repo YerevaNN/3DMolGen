@@ -293,7 +293,7 @@ def compute_matching_reward(
     validity: np.ndarray,
     delta: float,
     eligible_matrix: Optional[np.ndarray] = None,
-) -> Tuple[np.ndarray, int, int]:
+) -> Tuple[np.ndarray, int, int, List[Tuple[int, int]]]:
     """Compute hard unique-coverage matching bonus via max-cardinality matching.
 
     This implements COV-R under δ proxy with one-to-one assignment.
@@ -317,9 +317,10 @@ def compute_matching_reward(
     K, M = D.shape
 
     r_match = np.zeros(K, dtype=np.float32)
+    matched_pairs: List[Tuple[int, int]] = []
 
     if M == 0 or K == 0:
-        return r_match, 0, 0
+        return r_match, 0, 0, matched_pairs
 
     valid_mask = validity.astype(bool)
     eligible = (
@@ -329,7 +330,7 @@ def compute_matching_reward(
     num_eligible_edges = int(np.count_nonzero(eligible))
 
     if num_eligible_edges == 0:
-        return r_match, 0, 0
+        return r_match, 0, 0, matched_pairs
 
     # Step E2: Max-cardinality min-cost matching
     try:
@@ -354,7 +355,6 @@ def compute_matching_reward(
         row_ind, col_ind = linear_sum_assignment(C)
 
         # Extract valid matches
-        matched_pairs = []
         for i, j in zip(row_ind, col_ind):
             if not padded:
                 # No padding, check eligibility
@@ -381,8 +381,9 @@ def compute_matching_reward(
         logger.warning(f"Matching solver failed: {exc}. Falling back to r_match=0")
         r_match = np.zeros(K, dtype=np.float32)
         num_matched = 0
+        matched_pairs = []
 
-    return r_match, num_matched, num_eligible_edges
+    return r_match, num_matched, num_eligible_edges, matched_pairs
 
 
 # ============================================================================
@@ -669,31 +670,23 @@ def compute_group_reward(
     max_possible_matches = min(num_valid, refs_hit)
 
     # Step E: Matching reward
-    r_match, num_matched, num_eligible_edges = compute_matching_reward(
+    r_match, num_matched, num_eligible_edges, matched_pairs = compute_matching_reward(
         D, validity, delta, eligible_matrix=eligible_matrix
     )
 
     match_efficiency = (
         float(num_matched) / max_possible_matches if max_possible_matches > 0 else 0.0
     )
-    matched_dists = np.array([], dtype=np.float32)
-    if num_matched > 0 and D.size > 0:
-        matched_mask = eligible_matrix & (D < delta)
-        if np.any(matched_mask):
-            matched_dists = D[matched_mask]
-    matched_quantiles = (
-        np.percentile(matched_dists, [10, 50, 90]).tolist() if matched_dists.size > 0 else [np.nan] * 3
+    matched_dists = (
+        np.array([D[i, j] for (i, j) in matched_pairs], dtype=np.float32)
+        if matched_pairs else np.array([], dtype=np.float32)
     )
-    matched_shaped = (
-        np.clip(1.0 - matched_dists / max(delta, 1e-8), 0.0, 1.0) if matched_dists.size > 0 else np.array([], dtype=np.float32)
+    eligible_dists = (
+        D[eligible_matrix].astype(np.float32)
+        if np.any(eligible_matrix) else np.array([], dtype=np.float32)
     )
 
     pairwise_dists = compute_pairwise_rollout_distances(rollout_mols, validity)
-    pairwise_mean = float(np.mean(pairwise_dists)) if pairwise_dists.size > 0 else float('nan')
-    pairwise_min = float(np.min(pairwise_dists)) if pairwise_dists.size > 0 else float('nan')
-    pairwise_quantiles = (
-        np.percentile(pairwise_dists, [10, 50, 90]).tolist() if pairwise_dists.size > 0 else [np.nan] * 3
-    )
 
     # Step F: Combine rewards
     rewards = combine_rewards(
@@ -706,37 +699,6 @@ def compute_group_reward(
     else:
         group_advantages = np.zeros_like(rewards)
 
-    finite_length_mask = np.isfinite(length_array)
-    length_values = length_array[finite_length_mask]
-    length_mean = float(np.mean(length_values)) if length_values.size > 0 else float('nan')
-    length_quantiles = (
-        np.percentile(length_values, [10, 50, 90]).tolist() if length_values.size > 0 else [np.nan, np.nan, np.nan]
-    )
-
-    entropy_inputs = rollout_entropies if rollout_entropies is not None else [None] * K
-    entropy_values: List[float] = []
-    for val in entropy_inputs:
-        if val is None:
-            entropy_values.append(float('nan'))
-            continue
-        try:
-            num = float(val)
-        except (TypeError, ValueError):
-            num = float('nan')
-        entropy_values.append(num)
-    entropy_array = np.array(entropy_values, dtype=np.float32)
-    has_finite_entropy = np.isfinite(entropy_array).any()
-    mean_entropy_group = float(np.nanmean(entropy_array)) if has_finite_entropy else float('nan')
-    entropy_list = [
-        float(val) if np.isfinite(val) else float('nan')
-        for val in entropy_array
-    ]
-    finite_entropy_sorted = np.sort(entropy_array[np.isfinite(entropy_array)])
-    entropy_quantiles = (
-        np.percentile(finite_entropy_sorted, [10, 50, 90]).tolist()
-        if finite_entropy_sorted.size > 0
-        else [np.nan, np.nan, np.nan]
-    )
 
     # Diagnostics
     finite_rmsd_rate = float(np.mean(finite_mask)) if K > 0 else 0.0
@@ -746,39 +708,6 @@ def compute_group_reward(
     d_valid = d_i_all[valid_idx] if valid_idx.size > 0 else np.array([], dtype=np.float32)
     finite_d_valid = d_valid[np.isfinite(d_valid)]
     under_threshold = float(np.mean(finite_d_valid < delta)) if finite_d_valid.size > 0 else 0.0
-    under_threshold_count = (
-        int(np.count_nonzero(finite_d_valid < delta)) if finite_d_valid.size > 0 else 0
-    )
-    under_threshold_total = int(finite_d_valid.size)
-    d_quantiles = (
-        np.percentile(finite_d_valid, [10, 50, 90]).tolist() if finite_d_valid.size > 0 else [np.nan, np.nan, np.nan]
-    )
-
-    mean_r_match_group = float(np.mean(r_match[valid_idx])) if valid_idx.size > 0 else 0.0
-    mean_r_qual_group = float(np.mean(r_qual[valid_idx])) if valid_idx.size > 0 else 0.0
-    mean_r_smcov_group = float(np.mean(r_smcov[valid_idx])) if valid_idx.size > 0 else 0.0
-
-    pre_rmsd_valid_count = int(np.sum(validity_before_rmsd_gate))
-    final_valid_count = int(np.sum(validity))
-    graph_match_pct = (
-        100.0 * num_graph_matches / num_graph_checked if num_graph_checked > 0 else 0.0
-    )
-    mean_reward = float(np.mean(rewards)) if rewards.size > 0 else 0.0
-    baseline_std = float(np.std(rewards)) if rewards.size > 0 else float('nan')
-    rewards_list = [float(val) for val in rewards] if rewards.size > 0 else []
-    min_rmsds_list = [float(val) for val in d_i_all.tolist()] if d_i_all.size > 0 else []
-    advantages_list = (
-        [float(val) for val in group_advantages.tolist()] if group_advantages.size > 0 else []
-    )
-
-    if valid_idx.size > 0:
-        valid_adv_values = group_advantages[valid_idx].astype(np.float32)
-        adv_mean_group = float(np.mean(valid_adv_values))
-        adv_std_group = float(np.std(valid_adv_values))
-    else:
-        valid_adv_values = np.array([], dtype=np.float32)
-        adv_mean_group = float('nan')
-        adv_std_group = float('nan')
 
     debug_info = {
         'smiles': canonical_smiles if canonical_smiles else "<missing>",
@@ -800,67 +729,12 @@ def compute_group_reward(
         'valid_r_qual_values': r_qual[valid_idx].astype(np.float32) if valid_idx.size > 0 else np.array([], dtype=np.float32),
         'valid_r_smcov_values': r_smcov[valid_idx].astype(np.float32) if valid_idx.size > 0 else np.array([], dtype=np.float32),
         'valid_r_match_values': r_match[valid_idx].astype(np.float32) if valid_idx.size > 0 else np.array([], dtype=np.float32),
-        'valid_advantage_values': valid_adv_values,
-        'advantage_mean': adv_mean_group,
-        'advantage_std': adv_std_group,
-        'mean_entropy': mean_entropy_group,
-        'entropy_list': entropy_list,
-        'entropy_quantiles': entropy_quantiles,
-        'd_quantiles': d_quantiles,
         'd_values': finite_d_valid.tolist(),
         'matched_distances': matched_dists.tolist() if matched_dists.size > 0 else [],
-        'matched_quantiles': matched_quantiles,
-        'matched_shaped_distances': matched_shaped.tolist() if matched_shaped.size > 0 else [],
+        'eligible_distances': eligible_dists.tolist() if eligible_dists.size > 0 else [],
         'soft_coverage_mean': soft_cov_mean,
         'soft_coverage_percentiles': soft_cov_pcts,
         'pairwise_distances': pairwise_dists.tolist(),
-        'pairwise_mean': pairwise_mean,
-        'pairwise_min': pairwise_min,
-        'pairwise_quantiles': pairwise_quantiles,
-        'completion_lengths': length_array.tolist(),
-        'length_mean': length_mean,
-        'length_quantiles': length_quantiles,
-        'prompt_log_data': {
-            'smiles': canonical_smiles if canonical_smiles else "<missing>",
-            'rollouts': K,
-            'parsed': num_parsed_success,
-            'pre_rmsd_valid': pre_rmsd_valid_count,
-            'final_valid': final_valid_count,
-            'graph_match': num_graph_matches,
-            'graph_checked': num_graph_checked,
-            'graph_pct': graph_match_pct,
-            'missing_conformer': num_missing_conformer,
-            'empty_strip': num_empty_stripped,
-            'mean_r_match_group': mean_r_match_group if np.isfinite(mean_r_match_group) else 0.0,
-            'mean_r_qual_group': mean_r_qual_group if np.isfinite(mean_r_qual_group) else 0.0,
-            'mean_r_smcov_group': mean_r_smcov_group if np.isfinite(mean_r_smcov_group) else 0.0,
-            'mean_reward': mean_reward,
-            'min_d_i': float(np.min(finite_d_valid)) if finite_d_valid.size > 0 else float('nan'),
-            'fraction_under_delta': under_threshold,
-            'fraction_under_delta_numer': under_threshold_count,
-            'fraction_under_delta_denom': under_threshold_total,
-            'advantage_mean': adv_mean_group,
-            'advantage_std': adv_std_group,
-            'rewards_list': rewards_list,
-            'advantage_baseline': mean_reward,
-            'advantage_baseline_std': baseline_std,
-            'min_rmsds_list': min_rmsds_list,
-            'advantages_list': advantages_list,
-            'refs_hit': refs_hit,
-            'refs_total': M,
-            'mean_token_entropy_group': mean_entropy_group,
-            'entropy_list': entropy_list,
-            'entropy_quantiles': entropy_quantiles,
-            'd_quantiles': d_quantiles,
-            'matched_quantiles': matched_quantiles,
-            'soft_cov_mean': soft_cov_mean,
-            'soft_cov_pcts': soft_cov_pcts,
-            'pairwise_mean': pairwise_mean,
-            'pairwise_min': pairwise_min,
-            'pairwise_quantiles': pairwise_quantiles,
-            'length_mean': length_mean,
-            'length_quantiles': length_quantiles,
-        },
     }
 
     # Update stats for finite RMSDs
@@ -962,37 +836,24 @@ def reward_function(
 
     final_rewards = [0.0] * len(completions)
 
-    # Aggregate diagnostics
+    # Aggregate diagnostics (only essential metrics)
     all_validity_rates = []
     all_graph_match_rates = []
     all_finite_rmsd_rates = []
-    all_mean_d_i = []
     all_num_matched = []
-    all_num_eligible_edges = []
-    all_max_possible_matches = []
     all_fraction_under_delta = []
-    all_mean_rewards = []
-    valid_reward_arrays = []
-    valid_r_qual_arrays = []
-    valid_r_smcov_arrays = []
-    valid_r_match_arrays = []
-    valid_advantage_arrays = []
-    all_mean_entropies = []
     all_refs_hit = []
-    prompt_log_data = []
     group_sizes = []
-    total_M = 0
-    total_K = 0
     total_max_possible = 0
-    all_d_quantiles = []
     all_matched_dists = []
+    all_eligible_dists = []
     all_soft_cov = []
     all_soft_cov_pcts = []
     all_d_values = []
     all_pairwise_dists = []
-    all_length_means = []
-    all_length_values = []
-    all_matched_shaped = []
+    valid_r_qual_arrays = []
+    valid_r_smcov_arrays = []
+    valid_r_match_arrays = []
 
     for group in groups:
         stats.processed_prompts += len(group['completions'])
@@ -1011,52 +872,32 @@ def reward_function(
         for local_idx, global_idx in enumerate(group['indices']):
             final_rewards[global_idx] = float(rewards[local_idx])
 
-        # Collect diagnostics
+        # Collect diagnostics (only essential metrics)
         all_validity_rates.append(debug_info['validity_rate'])
         all_graph_match_rates.append(debug_info['graph_match_rate'])
         all_finite_rmsd_rates.append(debug_info['finite_rmsd_rate'])
-        all_mean_d_i.append(debug_info['mean_d_i'])
         all_num_matched.append(debug_info['num_matched'])
-        all_num_eligible_edges.append(debug_info['num_eligible_edges'])
-        all_max_possible_matches.append(debug_info['max_possible_matches'])
         all_fraction_under_delta.append(debug_info['fraction_under_delta'])
-        all_mean_rewards.append(float(np.mean(rewards)) if rewards.size > 0 else 0.0)
-        valid_reward_arrays.append(debug_info['valid_reward_values'])
         valid_r_qual_arrays.append(debug_info['valid_r_qual_values'])
         valid_r_smcov_arrays.append(debug_info['valid_r_smcov_values'])
         valid_r_match_arrays.append(debug_info['valid_r_match_values'])
-        valid_advantage_arrays.append(debug_info['valid_advantage_values'])
         group_sizes.append(debug_info['K'])
-        total_M += debug_info['M']
-        total_K += debug_info['K']
         total_max_possible += debug_info['max_possible_matches']
-        prompt_log_data.append(debug_info.get('prompt_log_data'))
-        all_mean_entropies.append(debug_info.get('mean_entropy', float('nan')))
-        all_d_quantiles.append(debug_info.get('d_quantiles', [np.nan, np.nan, np.nan]))
         all_matched_dists.extend(debug_info.get('matched_distances', []))
+        all_eligible_dists.extend(debug_info.get('eligible_distances', []))
         all_soft_cov.append(debug_info.get('soft_coverage_mean', float('nan')))
         all_soft_cov_pcts.append(debug_info.get('soft_coverage_percentiles', [np.nan, np.nan, np.nan]))
         all_refs_hit.append(debug_info.get('refs_hit', float('nan')))
         all_d_values.extend(debug_info.get('d_values', []))
         all_pairwise_dists.extend(debug_info.get('pairwise_distances', []))
-        all_matched_shaped.extend(debug_info.get('matched_shaped_distances', []))
-        all_length_means.append(debug_info.get('length_mean', float('nan')))
-        for length_val in debug_info.get('completion_lengths', []):
-            if length_val is not None and np.isfinite(length_val):
-                all_length_values.append(length_val)
 
-    # Step G: Logging
+    # Step G: Logging (only essential metrics)
     mean_validity = float(np.nanmean(all_validity_rates)) if all_validity_rates else 0.0
     mean_graph_match = float(np.nanmean(all_graph_match_rates)) if all_graph_match_rates else 0.0
     mean_finite_rmsd = float(np.nanmean(all_finite_rmsd_rates)) if all_finite_rmsd_rates else 0.0
-    mean_d_i = float(np.nanmean(all_mean_d_i)) if all_mean_d_i else float('nan')
     mean_fraction_under_delta = float(np.nanmean(all_fraction_under_delta)) if all_fraction_under_delta else 0.0
     total_matched = int(np.sum(all_num_matched)) if all_num_matched else 0
-    total_eligible_edges = int(np.sum(all_num_eligible_edges)) if all_num_eligible_edges else 0
     total_max_possible = int(total_max_possible)
-    total_valid_final = float(np.nansum([vr * k for vr, k in zip(all_validity_rates, group_sizes)])) if group_sizes else 0.0
-    valid_denominator = total_valid_final if np.isfinite(total_valid_final) and total_valid_final > 0 else 1.0
-    mean_reward_overall = float(np.nanmean(all_mean_rewards)) if all_mean_rewards else 0.0
     match_efficiency_total = (
         float(total_matched) / total_max_possible if total_max_possible > 0 else 0.0
     )
@@ -1069,44 +910,16 @@ def reward_function(
             if filtered else np.array([], dtype=np.float32)
         )
 
-    batch_valid_rewards = _concat(valid_reward_arrays)
     batch_r_qual = _concat(valid_r_qual_arrays)
     batch_r_smcov = _concat(valid_r_smcov_arrays)
     batch_r_match = _concat(valid_r_match_arrays)
-    batch_advantages = _concat(valid_advantage_arrays)
 
-    def _summary_stats(values: np.ndarray) -> Tuple[float, float]:
-        if values.size == 0:
-            return 0.0, 0.0
-        return (
-            float(np.mean(values)),
-            float(np.std(values)),
-        )
+    def _mean(values: np.ndarray) -> float:
+        return float(np.mean(values)) if values.size > 0 else 0.0
 
-    r_total_mean, r_total_std = _summary_stats(batch_valid_rewards)
-    r_qual_mean, r_qual_std = _summary_stats(batch_r_qual)
-    r_smcov_mean, r_smcov_std = _summary_stats(batch_r_smcov)
-    r_match_mean, r_match_std = _summary_stats(batch_r_match)
-    adv_mean, adv_std = _summary_stats(batch_advantages)
-
-    adv_baseline_mean = mean_reward_overall
-    adv_baseline_std = r_total_std
-    fraction_positive_adv = (
-        float(np.mean(batch_advantages > 0)) if batch_advantages.size > 0 else 0.0
-    )
-    absolute_mean_adv = (
-        float(np.mean(np.abs(batch_advantages))) if batch_advantages.size > 0 else 0.0
-    )
-
-    batch_unique_prompts = len(groups)
-    batch_total_prompts = total_K
-
-    finite_entropy_vals = [
-        val for val in all_mean_entropies if val is not None and np.isfinite(val)
-    ]
-    mean_entropy_overall = (
-        float(np.mean(finite_entropy_vals)) if finite_entropy_vals else float('nan')
-    )
+    r_qual_mean = _mean(batch_r_qual)
+    r_smcov_mean = _mean(batch_r_smcov)
+    r_match_mean = _mean(batch_r_match)
 
     def _finite_array(values: List[float]) -> Optional[np.ndarray]:
         if not values:
@@ -1117,253 +930,66 @@ def reward_function(
             return None
         return arr[mask]
 
-    geometry_metrics: Dict[str, float] = {}
+    # Compute only essential metrics
+    essential_metrics: Dict[str, float] = {}
+    
+    # Validity metrics (3)
+    essential_metrics["validity_rate"] = mean_validity
+    essential_metrics["graph_match_rate"] = mean_graph_match
+    essential_metrics["finite_rmsd_rate"] = mean_finite_rmsd
+    
+    # Geometry metrics (3)
     d_arr = _finite_array(all_d_values)
     if d_arr is not None and d_arr.size > 0:
-        geometry_metrics = {
-            "geom/d_min_p10": float(np.percentile(d_arr, 10)),
-            "geom/d_min_p50": float(np.percentile(d_arr, 50)),
-            "geom/d_min_p90": float(np.percentile(d_arr, 90)),
-            "geom/d_min_mean": float(np.mean(d_arr)),
-            "geom/d_min_median": float(np.median(d_arr)),
-        }
-
-    match_dist_metrics: Dict[str, float] = {}
+        essential_metrics["geom/d_min_p50"] = float(np.percentile(d_arr, 50))
+        essential_metrics["geom/d_min_p90"] = float(np.percentile(d_arr, 90))
+        essential_metrics["geom/d_min_mean"] = float(np.mean(d_arr))
+    
+    # Matching/Coverage metrics (5)
+    essential_metrics["match/match_efficiency"] = float(match_efficiency_total)
+    essential_metrics["match/num_matched"] = float(np.mean(all_num_matched)) if all_num_matched else 0.0
     matched_arr = _finite_array(all_matched_dists)
     if matched_arr is not None and matched_arr.size > 0:
-        match_dist_metrics.update(
-            {
-                "match/dist_p10": float(np.percentile(matched_arr, 10)),
-                "match/dist_p50": float(np.percentile(matched_arr, 50)),
-                "match/dist_p90": float(np.percentile(matched_arr, 90)),
-            }
-        )
-    matched_shaped_arr = _finite_array(all_matched_shaped)
-    if matched_shaped_arr is not None and matched_shaped_arr.size > 0:
-        match_dist_metrics["match/shaped_p50"] = float(np.percentile(matched_shaped_arr, 50))
-
-    coverage_metrics: Dict[str, float] = {}
+        essential_metrics["match/dist_p50"] = float(np.percentile(matched_arr, 50))
+        essential_metrics["match/dist_p90"] = float(np.percentile(matched_arr, 90))
+    essential_metrics["match/refs_hit"] = float(mean_unique_refs_hit)
+    
+    # Reward components (3)
+    essential_metrics["reward/component_quality"] = float(lambda_qual * r_qual_mean)
+    essential_metrics["reward/component_smcov"] = float(lambda_smcov * r_smcov_mean)
+    essential_metrics["reward/component_match"] = float(lambda_match * r_match_mean)
+    
+    # Coverage metrics (2)
     soft_arr = _finite_array(all_soft_cov)
     if soft_arr is not None and soft_arr.size > 0:
-        coverage_metrics.update(
-            {
-                "coverage/soft_mean": float(np.mean(soft_arr)),
-                "coverage/soft_p10": float(np.percentile(soft_arr, 10)),
-                "coverage/soft_p50": float(np.percentile(soft_arr, 50)),
-                "coverage/soft_p90": float(np.percentile(soft_arr, 90)),
-            }
-        )
+        essential_metrics["coverage/soft_mean"] = float(np.mean(soft_arr))
     if all_soft_cov_pcts:
         pct_array = np.asarray(all_soft_cov_pcts, dtype=np.float32)
-        coverage_metrics.update(
-            {
-                "coverage/pct_gt_0.1": float(np.nanmean(pct_array[:, 0])),
-                "coverage/pct_gt_0.3": float(np.nanmean(pct_array[:, 1])),
-                "coverage/pct_gt_0.5": float(np.nanmean(pct_array[:, 2])),
-            }
-        )
-
-    match_count_metrics: Dict[str, float] = {}
-    def _count_stats(prefix: str, data: List[float]) -> None:
-        arr = _finite_array(data)
-        if arr is None or arr.size == 0:
-            return
-        match_count_metrics.update(
-            {
-                f"{prefix}_p10": float(np.percentile(arr, 10)),
-                f"{prefix}_p50": float(np.percentile(arr, 50)),
-                f"{prefix}_p90": float(np.percentile(arr, 90)),
-            }
-        )
-
-    _count_stats("match/matched_count", all_num_matched)
-    _count_stats("match/eligible_count", all_num_eligible_edges)
-    _count_stats("match/max_possible_count", all_max_possible_matches)
-    _count_stats("match/refs_hit", all_refs_hit)
-
-    diversity_metrics: Dict[str, float] = {}
-    pair_arr = _finite_array(all_pairwise_dists)
+        essential_metrics["coverage/pct_gt_0.5"] = float(np.nanmean(pct_array[:, 2]))
+    
+    # Diversity metric (1)
+    pair_arr = _finite_array(all_pairwise_dists) 
     if pair_arr is not None and pair_arr.size > 0:
-        diversity_metrics = {
-            "diversity/pairwise_mean": float(np.mean(pair_arr)),
-            "diversity/pairwise_min": float(np.min(pair_arr)),
-            "diversity/pairwise_p10": float(np.percentile(pair_arr, 10)),
-            "diversity/pairwise_p50": float(np.percentile(pair_arr, 50)),
-            "diversity/pairwise_p90": float(np.percentile(pair_arr, 90)),
-        }
-
-    length_metrics: Dict[str, float] = {}
-    len_arr = _finite_array(all_length_values)
-    if len_arr is not None and len_arr.size > 0:
-        length_metrics.update(
-            {
-                "len/completion_mean": float(np.mean(len_arr)),
-                "len/completion_p10": float(np.percentile(len_arr, 10)),
-                "len/completion_p50": float(np.percentile(len_arr, 50)),
-                "len/completion_p90": float(np.percentile(len_arr, 90)),
-            }
-        )
-
-    component_metrics = {
-        "reward/component_quality": lambda_qual * r_qual_mean,
-        "reward/component_smcov": lambda_smcov * r_smcov_mean,
-        "reward/component_match": lambda_match * r_match_mean,
-    }
+        essential_metrics["diversity/pairwise_mean"] = float(np.mean(pair_arr))
+    
+    # Additional useful metrics (3)
+    essential_metrics["fraction_under_delta"] = mean_fraction_under_delta
+    eligible_arr = _finite_array(all_eligible_dists)
+    if eligible_arr is not None and eligible_arr.size > 0:
+        essential_metrics["match/eligible_dist_p50"] = float(np.percentile(eligible_arr, 50))
+    essential_metrics["reward/matched_total"] = float(total_matched)
 
     if wandb.run is not None:
-        reward_metrics = {
-            "reward/mean_quality": r_qual_mean,
-            "reward/mean_smcov": r_smcov_mean,
-            "reward/mean_match": r_match_mean,
-            "reward/matched_total": total_matched,
-            "reward/max_possible_matches": total_max_possible,
-            "reward/avg_unique_refs_hit": mean_unique_refs_hit,
-        }
-
-        valid_metrics = {
-            "valid/final_rate": mean_validity,
-            "valid/graph_match_rate": mean_graph_match,
-            "valid/match_efficiency": match_efficiency_total,
-        }
-
-        rmsd_metrics = {
-            "rmsd/finite_rate": mean_finite_rmsd,
-            "rmsd/fraction_under_delta": mean_fraction_under_delta,
-            "rmsd/mean_d_i": mean_d_i,
-        }
-
-        entropy_metrics = {
-            "entropy/mean": mean_entropy_overall,
-        }
-
-        adv_metrics = {
-            "adv/baseline_mean": adv_baseline_mean,
-            "adv/baseline_std": adv_baseline_std,
-            "adv/advantage_mean": adv_mean,
-            "adv/advantage_std": adv_std,
-            "adv/fraction_positive": fraction_positive_adv,
-            "adv/absolute_mean": absolute_mean_adv,
-        }
-
-        gen_metrics = {
-            "gen/unique_prompts": stats.distinct_prompts,
-            "gen/total_rollouts": stats.processed_prompts,
-            "gen/avg_M": total_M / max(len(groups), 1),
-            "gen/avg_K": total_K / max(len(groups), 1),
-        }
-
-        wandb.log(
-            {
-                **reward_metrics,
-                **valid_metrics,
-                **rmsd_metrics,
-                **entropy_metrics,
-                **adv_metrics,
-                **gen_metrics,
-                **component_metrics,
-                **geometry_metrics,
-                **match_dist_metrics,
-                **coverage_metrics,
-                **match_count_metrics,
-                **diversity_metrics,
-                **length_metrics,
-            }
-        )
-
-    total_valid_final_int = int(round(total_valid_final)) if np.isfinite(total_valid_final) and total_valid_final > 0 else 1
+        wandb.log(essential_metrics)
 
     batch_log = (
         f"[PID {os.getpid()}] [reward_v3] Batch summary\n"
         f"  validity: graph_match={mean_graph_match:.3f}, finite_rmsd={mean_finite_rmsd:.3f}, "
         f"final={mean_validity:.3f}\n"
-        f"  prompts: unique={batch_unique_prompts}, total={batch_total_prompts}\n"
-        f"  coverage: mean_d_i={mean_d_i:.3f}, fraction_under_delta={mean_fraction_under_delta:.3f}\n"
-        f"  entropy: mean_token={mean_entropy_overall:.3f}\n"
-        f"  rewards: r_total_mean={r_total_mean:.3f}, r_qual={r_qual_mean:.3f}, "
-        f"r_smcov={r_smcov_mean:.3f}, r_match={r_match_mean:.3f}\n"
-        f"  advantages: mean={adv_mean:.3f}, std={adv_std:.3f}\n"
-        f"  matching: eligible_edges={total_eligible_edges}, max_possible={total_max_possible}, "
-        f"matched={total_matched}/{total_valid_final_int} (valid), match_eff={match_efficiency_total:.3f}"
+        f"  matching: max_possible={total_max_possible}, "
+        f"matched={total_matched}, match_eff={match_efficiency_total:.3f}\n"
+        f"  rewards: r_qual={r_qual_mean:.3f}, r_smcov={r_smcov_mean:.3f}, r_match={r_match_mean:.3f}"
     )
-    if prompt_log_data:
-        prompts_lines = []
-        for log_data in prompt_log_data:
-            if log_data is None:
-                continue
-            min_d_val = log_data.get('min_d_i')
-            fraction_val = log_data.get('fraction_under_delta')
-            adv_mean_val = log_data.get('advantage_mean')
-            adv_std_val = log_data.get('advantage_std')
-            rewards_vals = log_data.get('rewards_list', [])
-
-            def _fmt(val):
-                if isinstance(val, str):
-                    return val
-                if val is None:
-                    return "nan"
-                try:
-                    finite = np.isfinite(val)
-                except TypeError:
-                    return str(val)
-                if not finite:
-                    return "inf" if np.isinf(val) else "nan"
-                return f"{float(val):.3f}"
-
-            def _fmt_list(values):
-                return ", ".join(_fmt(val) for val in values) if values else ""
-
-            rewards_str = _fmt_list(rewards_vals)
-            min_rmsds_vals = log_data.get('min_rmsds_list', [])
-            min_rmsds_str = _fmt_list(min_rmsds_vals)
-            advantages_vals = log_data.get('advantages_list', [])
-            advantages_str = _fmt_list(advantages_vals)
-            entropy_mean_val = log_data.get('mean_token_entropy_group')
-            entropy_vals = log_data.get('entropy_list', [])
-            entropy_str = _fmt_list(entropy_vals)
-            fraction_numer = log_data.get('fraction_under_delta_numer')
-            fraction_denom = log_data.get('fraction_under_delta_denom')
-            fraction_display = (
-                f"{fraction_numer}/{fraction_denom}"
-                if fraction_numer is not None and fraction_denom is not None
-                else _fmt(fraction_val)
-            )
-            adv_baseline_val = log_data.get('advantage_baseline')
-            adv_baseline_std_val = log_data.get('advantage_baseline_std')
-
-            prompts_lines.append(
-                "    SMILES: {smiles}\n"
-                "      min_d_i={min_d}, fraction_under_delta={fraction}, "
-                "entropy_mean={entropy_mean}, adv_baseline={adv_baseline}, baseline_std={baseline_std}, "
-                "advantage_mean={adv_mean}, advantage_std={adv_std}\n"
-                "      rewards=[{rewards_str}]\n"
-                "      min_rmsds=[{min_rmsds_str}]\n"
-                "      advantages=[{advantages_str}]\n"
-                "      token_entropy=[{entropy_str}]\n"
-                "      reward_components: r_qual={mean_r_qual_group:.3f}, "
-                "r_smcov={mean_r_smcov_group:.3f}, r_match={mean_r_match_group:.3f}, "
-                "total={mean_reward:.3f}\n"
-                "      rollouts={rollouts}, parsed={parsed}, "
-                "pre_rmsd_valid={pre_rmsd_valid}, final_valid={final_valid}, "
-                "graph_match={graph_match}/{graph_checked} ({graph_pct:.2f}%), "
-                "unique_refs_hit={refs_hit}/{refs_total}, "
-                "missing_conformer={missing_conformer}, empty_strip={empty_strip}".format(
-                    min_d=_fmt(min_d_val),
-                    fraction=fraction_display,
-                    entropy_mean=_fmt(entropy_mean_val),
-                    adv_baseline=_fmt(adv_baseline_val),
-                    baseline_std=_fmt(adv_baseline_std_val),
-                    adv_mean=_fmt(adv_mean_val),
-                    adv_std=_fmt(adv_std_val),
-                    rewards_str=rewards_str,
-                    min_rmsds_str=min_rmsds_str,
-                    advantages_str=advantages_str,
-                    entropy_str=entropy_str,
-                    **log_data
-                )
-            )
-        prompts_block = "\n".join(prompts_lines)
-        logger.info(f"{batch_log}\n  prompts_detail:\n{prompts_block}")
-    else:
-        logger.info(batch_log)
+    logger.info(batch_log)
 
     return final_rewards
