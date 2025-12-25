@@ -88,6 +88,11 @@ class GRPOConfig:
     lambda_match: float = 1.0  # Weight for matching term
     r_floor: float = -1.0      # Reward for invalid samples
     hard_rmsd_gate: bool = True  # Drop PoseBusters-valid but RMSD-invalid rollouts
+    profile_rewards: bool = False
+    log_distance_samples_per_group: int = 32
+    enable_pairwise_rmsd_logging: bool = False
+    pairwise_rmsd_log_every: int = 50
+    log_every_steps: int = 1
 
     # Runtime parameters (set during execution)
     output_dir: Optional[str] = None
