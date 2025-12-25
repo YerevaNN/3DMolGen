@@ -21,15 +21,15 @@ grpo:
   adam_beta2: 0.95
   beta: 0
   checkpoint_base_dir: /nfs/h100/raid/chem/checkpoints/conf_grpo
-  delta: 1.0
+  delta: 0.85
   enable_posebusters: false
-  epsilon_high: 4e-4
-  epsilon_low: 3e-4
+  epsilon_high: 2e-4
+  epsilon_low: 6e-4
   grad_acc_steps: 4
   importance_sampling_level: sequence
-  lambda_match: 2.0
-  lambda_qual: 2.0
-  lambda_smcov: 0.0
+  lambda_match: 1.0
+  lambda_qual: 1.0
+  lambda_smcov: 8.0
   learning_rate: 2.0e-05
   max_grad_norm: 1.0
   max_ground_truths: 30
@@ -41,7 +41,7 @@ grpo:
   per_device_batch_size: 16
   r_floor: -0.75
   reward_strategy: v3
-  rho: 0.6
+  rho: 0.9
   rmsd_const: 0.75
   scheduler: cosine
   seed: 1
@@ -65,7 +65,7 @@ processing:
   eos_token_id: 151672
 run:
   log_level: INFO
-  name: qwen3_v3_match_qual_gspo_8*4*16comp_16steps
+  name: qwen3_v3_match_qual_gspo_8*2*16comp_16steps
 trainer:
   attn_implementation: flash_attention_2
   log_on_each_node: false

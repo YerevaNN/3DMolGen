@@ -1,5 +1,5 @@
 [job]
-description = "qwen3_06b_scr_4e_48effb_4kseq"
+description = "qwen3_06b_pre_4e_48effb_4kseq"
 dump_folder = "pretrain_runs"
 print_config = true
 custom_config_module = "molgen3D.training.pretraining.config.custom_job_config"
@@ -23,6 +23,10 @@ seq_len = 2048
 local_batch_size = 12
 global_batch_size = 144
 steps = 160000
+seq_len = 4096
+local_batch_size = 3
+global_batch_size = 48
+steps = 120000
 max_norm = 1.0
 dtype = "bfloat16"
 seed = 1234
@@ -57,7 +61,7 @@ lookahead_limit = 100
 
 [optimizer]
 name = "AdamW"
-lr = 3e-3
+lr = 8e-4
 beta1 = 0.9
 beta2 = 0.95
 eps = 1e-8
