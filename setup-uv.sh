@@ -69,6 +69,7 @@ FA_WHEEL="$FA_WHEEL_DEFAULT"
 INSTALL_EXTRAS=""
 VERIFY_ONLY=false
 SKIP_FLASH_ATTN=false
+INSTALL_PROJECT=false
 
 show_help() {
     cat << EOF
@@ -82,6 +83,7 @@ Options:
   --fa-wheel PATH   Flash Attention wheel path or URL (default: YNN cluster path)
   --skip-fa         Skip Flash Attention installation
   --dev             Include dev dependencies (pytest, black, etc.)
+  --install-project Editable install of molgen3D package (default: deps only)
   --verify          Only verify existing installation
   --help            Show this help message
 
@@ -90,8 +92,11 @@ Environment Variables:
   PYTORCH_INDEX     Override PyTorch index URL (default: cu128)
 
 Examples:
-  # YNN cluster (defaults)
+  # YNN cluster (deps only, no molgen3D package)
   ./setup-uv.sh --dev
+
+  # Include molgen3D package (editable install)
+  ./setup-uv.sh --dev --install-project
 
   # New cluster with custom wheel location
   ./setup-uv.sh --dir /data/envs/molgen --fa-wheel ~/wheels/flash_attn.whl --dev
@@ -101,9 +106,6 @@ Examples:
 
   # Install without Flash Attention (CPU-only or incompatible GPU)
   ./setup-uv.sh --skip-fa
-
-  # Different project
-  ./setup-uv.sh --project /path/to/other/project --dir /tmp/other-env
 EOF
 }
 
@@ -127,6 +129,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dev|--all)
             INSTALL_EXTRAS="dev"
+            shift
+            ;;
+        --install-project)
+            INSTALL_PROJECT=true
             shift
             ;;
         --verify)
@@ -253,15 +259,44 @@ install_dependencies() {
         exit 1
     fi
 
-    log_info "Installing project from ${PROJECT_DIR}..."
+    log_info "Installing dependencies from ${PROJECT_DIR}/pyproject.toml..."
 
-    if [[ -n "$INSTALL_EXTRAS" ]]; then
-        log_info "Including optional dependencies: [$INSTALL_EXTRAS]"
-        uv pip install -e "${PROJECT_DIR}[${INSTALL_EXTRAS}]"
-    else
-        uv pip install -e "${PROJECT_DIR}"
+    # Extract and install dependencies from pyproject.toml (without installing the package)
+    python3 << DEPS_EOF
+import tomllib
+import subprocess
+import sys
+
+with open("${PROJECT_DIR}/pyproject.toml", "rb") as f:
+    config = tomllib.load(f)
+
+deps = list(config["project"]["dependencies"])
+
+# Add optional dependencies if requested
+extras = "${INSTALL_EXTRAS}"
+if extras:
+    for extra in extras.split(","):
+        extra = extra.strip()
+        if extra in config["project"].get("optional-dependencies", {}):
+            deps.extend(config["project"]["optional-dependencies"][extra])
+
+print(f"Installing {len(deps)} dependencies...")
+result = subprocess.run(["uv", "pip", "install"] + deps)
+sys.exit(result.returncode)
+DEPS_EOF
+
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to install dependencies"
+        exit 1
     fi
     log_success "Dependencies installed"
+
+    # Optionally install molgen3D package (editable)
+    if [[ "$INSTALL_PROJECT" == true ]]; then
+        log_info "Installing molgen3D package (editable)..."
+        uv pip install --no-deps -e "${PROJECT_DIR}"
+        log_success "molgen3D package installed"
+    fi
 }
 
 # =============================================================================
@@ -367,9 +402,10 @@ main() {
     echo "  Python ${PYTHON_VERSION} | PyTorch ${PYTORCH_VERSION}+cu128"
     echo "=============================================="
     echo ""
-    echo "Environment:  ${ENV_DIR}"
-    echo "Project:      ${PROJECT_DIR}"
-    echo "FA wheel:     ${FA_WHEEL}"
+    echo "Environment:    ${ENV_DIR}"
+    echo "Project:        ${PROJECT_DIR}"
+    echo "FA wheel:       ${FA_WHEEL}"
+    echo "Install pkg:    ${INSTALL_PROJECT}"
     echo ""
 
     install_uv

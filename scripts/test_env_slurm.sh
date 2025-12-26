@@ -268,16 +268,22 @@ print(f"         liger-kernel installed")
 """)
 
 # =============================================================================
-# Local Package
+# Local Package (optional - requires --install-project)
 # =============================================================================
-print("\n--- Local Package ---")
+print("\n--- Local Package (optional) ---")
 
-test_import("molgen3D", """
-import molgen3D
-print(f"         molgen3D installed")
-""")
+# Check if molgen3D is installed
+try:
+    import molgen3D
+    MOLGEN_INSTALLED = True
+    print(f"  [PASS] molgen3D              installed")
+    results.append(("molgen3D", "PASS", "installed"))
+except ImportError:
+    MOLGEN_INSTALLED = False
+    print(f"  [SKIP] molgen3D              (not installed - use --install-project)")
 
-test_import("molgen3D.data_processing", """
+if MOLGEN_INSTALLED:
+    test_import("molgen3D.data_processing", """
 from molgen3D.data_processing import smiles_encoder_decoder
 print(f"         molgen3D.data_processing loaded")
 """)

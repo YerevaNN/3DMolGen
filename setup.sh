@@ -44,10 +44,14 @@ NC='\033[0m' # No Color
 INSTALL_EXTRAS=""
 VERIFY_ONLY=false
 CLEAN_INSTALL=false
+INSTALL_PROJECT=false
 for arg in "$@"; do
     case $arg in
         --dev|--all)
             INSTALL_EXTRAS="dev"
+            ;;
+        --install-project)
+            INSTALL_PROJECT=true
             ;;
         --verify)
             VERIFY_ONLY=true
@@ -59,14 +63,16 @@ for arg in "$@"; do
             echo "Usage: ./setup.sh [OPTIONS]"
             echo ""
             echo "Options:"
-            echo "  --dev       Install dev dependencies (pytest, black, ipython, einops)"
-            echo "  --verify    Only run environment verification, skip installation"
-            echo "  --clean     Remove existing environment and start fresh"
-            echo "  --help      Show this help message"
+            echo "  --dev             Install dev dependencies (pytest, black, ipython, einops)"
+            echo "  --install-project Editable install of molgen3D package (default: deps only)"
+            echo "  --verify          Only run environment verification, skip installation"
+            echo "  --clean           Remove existing environment and start fresh"
+            echo "  --help            Show this help message"
             echo ""
             echo "Examples:"
-            echo "  ./setup.sh              # Core (training + inference + eval)"
-            echo "  ./setup.sh --dev        # Core + local dev tools"
+            echo "  ./setup.sh              # Core deps only (no molgen3D package)"
+            echo "  ./setup.sh --dev        # Core + dev deps"
+            echo "  ./setup.sh --dev --install-project  # Include molgen3D package"
             echo "  ./setup.sh --clean      # Fresh install"
             exit 0
             ;;
@@ -207,14 +213,42 @@ install_dependencies() {
 
     cd "$SCRIPT_DIR"
 
-    if [ -n "$INSTALL_EXTRAS" ]; then
-        log_info "Including optional dependencies: [$INSTALL_EXTRAS]"
-        uv pip install -e ".[$INSTALL_EXTRAS]"
-    else
-        uv pip install -e .
-    fi
+    # Extract and install dependencies from pyproject.toml (without installing the package)
+    python3 << DEPS_EOF
+import tomllib
+import subprocess
+import sys
 
+with open("pyproject.toml", "rb") as f:
+    config = tomllib.load(f)
+
+deps = list(config["project"]["dependencies"])
+
+# Add optional dependencies if requested
+extras = "${INSTALL_EXTRAS}"
+if extras:
+    for extra in extras.split(","):
+        extra = extra.strip()
+        if extra in config["project"].get("optional-dependencies", {}):
+            deps.extend(config["project"]["optional-dependencies"][extra])
+
+print(f"Installing {len(deps)} dependencies...")
+result = subprocess.run(["uv", "pip", "install"] + deps)
+sys.exit(result.returncode)
+DEPS_EOF
+
+    if [ $? -ne 0 ]; then
+        log_error "Failed to install dependencies"
+        exit 1
+    fi
     log_success "Dependencies installed"
+
+    # Optionally install molgen3D package (editable)
+    if [ "$INSTALL_PROJECT" = true ]; then
+        log_info "Installing molgen3D package (editable)..."
+        uv pip install --no-deps -e .
+        log_success "molgen3D package installed"
+    fi
 }
 
 # =============================================================================

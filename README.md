@@ -169,7 +169,7 @@ For ephemeral environments on the new DGX cluster:
 
 # Fast setup with uv (warm installs <30s)
 cd /path/to/3DMolGen
-./setup-uv.sh --dev
+./setup-uv.sh --dev --install-project  # include molgen3D package for training
 
 # Activate and run
 source /scratch/$USER/3dmolgen/.venv/bin/activate
@@ -181,7 +181,7 @@ torchrun --nproc_per_node=8 \
 For existing machines with conda:
 
 ```bash
-./setup.sh --dev
+./setup.sh --dev --install-project
 conda activate 3dmolgen
 # ... run training
 ```
