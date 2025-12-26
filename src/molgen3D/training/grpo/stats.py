@@ -82,7 +82,7 @@ class RunStatistics:
     @property
     def average_rmsd(self) -> float:
         """Calculate average RMSD across successful generations"""
-        return np.nanmean(self.rmsd_values) if self.rmsd_values else 0.0
+        return float(np.nanmean(self.rmsd_values)) if self.rmsd_values else 0.0
     
     @property
     def success_rate(self) -> float:

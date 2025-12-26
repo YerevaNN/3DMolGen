@@ -59,16 +59,33 @@ def load_ground_truths(key_mol_smiles, num_gt: int = 16):
     Returns:
         List of RDKit molecules representing ground truth conformers
     """
-    
+
     # Get the original GEOM SMILES from the mapping
     filepath = _smiles_mapping.get(key_mol_smiles)
+    if filepath is None:
+        logger.error("Missing SMILES mapping for pad key %s", key_mol_smiles)
+        return None
 
+    conformers = None
     try:
         conformers = load_pkl(Path(filepath))
         return conformers
+    except FileNotFoundError as e:
+        logger.error(
+            "Ground-truth pickle missing for %s at %s: %s",
+            key_mol_smiles,
+            filepath,
+            e,
+        )
     except Exception as e:
-        logger.error(f"Error loading ground truth for {key_mol_smiles} {filepath}: {e}\n{conformers}")
-        return None
+        logger.error(
+            "Error loading ground truth for %s at %s: %s\n%r",
+            key_mol_smiles,
+            filepath,
+            e,
+            conformers,
+        )
+    return None
 
 def get_rmsd(ground_truths, generated_conformer, align: bool = False) -> float:
     try:

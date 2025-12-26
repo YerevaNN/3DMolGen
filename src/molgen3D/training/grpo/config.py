@@ -60,6 +60,10 @@ class GRPOConfig:
     num_iterations: int = 1
     max_steps: Optional[int] = None
     num_epochs: Optional[int] = None
+    importance_sampling_level: str = "sequence"
+    epsilon_low: float = 3e-4
+    epsilon_high: float = 4e-4
+    steps_per_generation: int = 4
 
     # V2 reward parameters (optional, with defaults matching spec)
     coverage_delta: float = 0.75
@@ -210,6 +214,10 @@ class Config:
         grpo_dict_raw = dict(config_dict['grpo'])
         reward_strategy = grpo_dict_raw.get('reward_strategy', 'legacy')
         grpo_dict_raw['reward_strategy'] = reward_strategy
+
+        # Backward compatibility: map 'epsilon' to 'epsilon_low' if present
+        if 'epsilon' in grpo_dict_raw and 'epsilon_low' not in grpo_dict_raw:
+            grpo_dict_raw['epsilon_low'] = grpo_dict_raw.pop('epsilon')
 
         advanced_reward_dict = grpo_dict_raw.get('advanced_reward', {})
         if advanced_reward_dict is None:

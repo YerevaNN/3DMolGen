@@ -32,20 +32,18 @@ except ModuleNotFoundError as exc:  # pragma: no cover - explicit error
 # ---- Sweep configuration (edit these) ---------------------------------------------------------
 
 # Learning rates to try.
-LRS: list[float] = [1e-4, 2e-4, 3e-4, 4e-4, 5e-4, 6e-4]
+LRS: list[float] = [5e-4, 8e-4, 1e-3, 3e-3, 5e-3]
 
 # Global batch sizes to try (TorchTitan interprets this as total across ranks).
-GLOBAL_BATCH_SIZES: list[int] = [48, 72, 96, 120, 144, 168, 192]
+GLOBAL_BATCH_SIZES: list[int] = [72, 96, 120, 144]
 
 # Training steps keyed by global batch size.
 TRAIN_STEPS_BY_GB: dict[int, int] = {
-    192: 1012,
-    168: 1157,
-    144: 1350,
-    120: 1620,
-    96: 2025,
-    72: 2700,
-    48: 4050
+    144: 2700,
+    120: 3400,
+    96: 4000,
+    72: 5400,
+    48: 8100,
 }
 
 # Warmup steps for the scheduler.
@@ -121,7 +119,7 @@ def main() -> None:
 
             # Update training settings (batch size + steps)
             training_cfg = cfg.setdefault("training", {})
-            training_cfg["local_batch_size"] = 4
+            training_cfg["local_batch_size"] = 12
             training_cfg["global_batch_size"] = int(gb)
             if gb in TRAIN_STEPS_BY_GB:
                 training_cfg["steps"] = int(TRAIN_STEPS_BY_GB[gb])

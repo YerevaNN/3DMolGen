@@ -10,8 +10,8 @@ design, how it maps to code, default hyperparameters, and operational guidance.
 - **Goal**: Provide a dense, group-aware reward that aligns with all four
   GEOM-Drugs metrics (AMR-P, AMR-R, COV-P, COV-R) under small rollout counts.
 - **Key ideas**
-  - Hard validity gate now requires (i) SMILES graph equality with the prompt
-    and (ii) optional PoseBusters success before any reward terms are computed.
+  - Hard validity gate requires SMILES graph equality with the prompt before
+    any reward terms are computed.
   - Dense quality term rewards every valid rollout for approaching any reference.
   - Smooth coverage term grants marginal value for covering new references even
     before reaching the benchmark threshold.
@@ -28,7 +28,7 @@ For each canonical SMILES (one GRPO group):
 - Rollouts: $Y=\{y_i\}_{i=1}^K$ generated conformers.
 - Distances: $D_{ij}=d(y_i,g_j)$ = heavy-atom RMSD (Å) after Kabsch alignment.
 - Hard threshold: $\delta = 0.75$ Å (GEOM-Drugs benchmark).
-- Validity gate: $v_i\in\{0,1\}$ via RDKit sanity + optional PoseBusters.
+- Validity gate: $v_i\in\{0,1\}$ via RDKit parsing + graph equality.
 - Nearest reference per rollout: $d_i = \min_j D_{ij}$.
 
 ## 3. Reward Terms
@@ -45,9 +45,7 @@ $$
 Rollouts are only considered valid if they **first** pass a graph-equality
 check: the generated SMILES (after stripping) must encode the same molecular
 graph as the prompt’s canonical SMILES (via `same_molecular_graph`). Any
-mismatch (or parsing failure) immediately receives $r_{\text{floor}}$. If
-`enable_posebusters` is true, the RDKit molecule must also pass PoseBusters;
-failures are likewise assigned the floor reward.
+mismatch (or parsing failure) immediately receives $r_{\text{floor}}$.
 
 ### Term 1 – Dense quality (AMR-P / COV-P aligned)
 $$
@@ -102,9 +100,8 @@ Located in `src/molgen3D/training/grpo/grpo_reward_v3.py`.
 
 1. **Group samples** by canonical SMILES (GRPO prompts carry SMILES tags).
 2. **Load reference conformers** for the group (cached pickles, max 30).
-3. **Parse rollouts** into RDKit molecules, ensure the parsed SMILES matches
-   the prompt’s graph, and optionally run PoseBusters. Invalid rollouts never
-   reach the RMSD or reward stages.
+3. **Parse rollouts** into RDKit molecules and ensure the parsed SMILES matches
+   the prompt’s graph. Invalid rollouts never reach the RMSD or reward stages.
 4. **Compute RMSD matrix** $D$ (K × M) with Kabsch alignment (heavy atoms).
 5. **Compute term rewards** (`compute_quality_reward`, `compute_smooth_coverage_reward`,
    `compute_matching_reward`).
@@ -112,11 +109,8 @@ Located in `src/molgen3D/training/grpo/grpo_reward_v3.py`.
 7. **Return per-sample rewards** in original order and log batch statistics.
 
 ### Validity gate (`compute_validity`)
-- Ensures SMILES/graph equality and pose sanity before any RMSD work.
-- PoseBusters is only run if `enable_posebusters` is true. Otherwise, the gate
-  is determined solely by SMILES parsing and graph equality.
-- Invalid rollouts are masked from all later computation and receive
-  `r_floor`.
+- Ensures SMILES/graph equality before any RMSD work.
+- Invalid rollouts are masked from all later computation and receive `r_floor`.
 
 ### RMSD matrix (`compute_distance_matrix`)
 - Skips invalid rollouts (sets $D_{ij}=\infty$).
@@ -197,7 +191,6 @@ grpo:
   lambda_smcov: 1.0
   lambda_match: 1.0
   r_floor: -1.0
-  enable_posebusters: false
   max_ground_truths: 30
 ```
 
