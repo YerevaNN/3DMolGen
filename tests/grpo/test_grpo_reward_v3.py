@@ -4,7 +4,8 @@ import pytest
 from types import SimpleNamespace
 
 from molgen3D.training.grpo import grpo_reward_v3 as reward_mod
-from molgen3D.training.grpo.grpo_reward_v3 import compute_matching_reward
+from molgen3D.training.grpo import reward_utils
+from molgen3D.training.grpo.reward_utils import compute_matching_reward
 from molgen3D.training.grpo.stats import RunStatistics
 
 
@@ -15,7 +16,7 @@ class DummyMol:
 
 @pytest.fixture(autouse=True)
 def clear_ground_truth_cache():
-    reward_mod._GROUND_TRUTH_CACHE.clear()
+    reward_utils._GROUND_TRUTH_CACHE.clear()
 
 
 @pytest.fixture
@@ -75,11 +76,11 @@ def reward_harness(monkeypatch):
     def fake_get_best_rmsd(probe: DummyMol, ref: DummyMol, use_alignmol=True):
         return harness.rmsd_map.get((probe.name, ref.name), float('inf'))
 
-    monkeypatch.setattr(reward_mod, "decode_cartesian_v2", fake_decode)
-    monkeypatch.setattr(reward_mod, "strip_smiles", fake_strip)
-    monkeypatch.setattr(reward_mod, "same_molecular_graph", fake_graph)
-    monkeypatch.setattr(reward_mod, "load_ground_truths", fake_load_gt)
-    monkeypatch.setattr(reward_mod, "get_best_rmsd", fake_get_best_rmsd)
+    monkeypatch.setattr(reward_utils, "decode_cartesian_v2", fake_decode)
+    monkeypatch.setattr(reward_utils, "strip_smiles", fake_strip)
+    monkeypatch.setattr(reward_utils, "same_molecular_graph", fake_graph)
+    monkeypatch.setattr(reward_utils, "load_ground_truths", fake_load_gt)
+    monkeypatch.setattr(reward_utils, "get_best_rmsd", fake_get_best_rmsd)
 
     return harness
 
@@ -185,7 +186,7 @@ def test_posebusters_mode_off_skips_runner(tmp_path, reward_harness, monkeypatch
     def boom(*_args, **_kwargs):
         raise AssertionError("PoseBusters runner should not be requested when mode=off")
 
-    monkeypatch.setattr(reward_mod, "_get_posebusters_runner", boom)
+    monkeypatch.setattr(reward_utils, "_get_posebusters_runner", boom)
     prompts = ["[SMILES]CC[/SMILES]"]
     completions = ["[CONFORMER]mol_good[/CONFORMER]"]
 
@@ -213,29 +214,29 @@ def test_posebusters_basic_masks_only_valid_entries(monkeypatch):
                 }
             )
 
-    monkeypatch.setattr(reward_mod, "_get_posebusters_runner", lambda *_: StubRunner())
+    monkeypatch.setattr(reward_utils, "_get_posebusters_runner", lambda *_: StubRunner())
     rollout_mols = [DummyMol("good"), None, DummyMol("bad")]
     base_mask = np.array([True, False, True], dtype=bool)
-    settings = reward_mod.PoseBustersRuntimeConfig(mode="basic")
+    settings = reward_utils.PoseBustersRuntimeConfig(mode="basic")
 
-    updated_mask, summary = reward_mod.apply_posebusters_gate(rollout_mols, base_mask, settings)
+    updated_mask, summary = reward_utils.apply_posebusters_gate(rollout_mols, base_mask, settings)
 
     assert len(captured["mol_pred"]) == 2  # only the True entries
     assert captured["mol_pred"][0].name == "good"
     assert captured["mol_pred"][1].name == "bad"
     assert updated_mask.tolist() == [True, False, False]
-    assert summary.checked == 2
-    assert summary.passed == 1
-    assert summary.failed == 1
+    assert summary["checked"] == 2
+    assert summary["passed"] == 1
+    assert summary["failed"] == 1
 
 
 def test_posebusters_full_clamps_energy_threads():
     """Full mode with multiprocessing should force energy module threads to 1."""
-    settings = reward_mod._normalize_posebusters_config(
+    settings = reward_utils.normalize_posebusters_config(
         {"mode": "full", "max_workers": 4, "energy_num_threads": 8}
     )
     assert settings.energy_num_threads == 1
-    config_dict = reward_mod._build_posebusters_config("full", settings.energy_num_threads)
+    config_dict = reward_utils._build_posebusters_config("full", settings.energy_num_threads)
     energy_module = config_dict["modules"][-1]
     assert energy_module["function"] == "energy_ratio"
     assert energy_module["parameters"]["num_threads"] == 1
@@ -247,14 +248,14 @@ def test_posebusters_exception_marks_invalid(monkeypatch):
         def bust(self, *_args, **_kwargs):
             raise RuntimeError("boom")
 
-    monkeypatch.setattr(reward_mod, "_get_posebusters_runner", lambda *_: ExplodingRunner())
+    monkeypatch.setattr(reward_utils, "_get_posebusters_runner", lambda *_: ExplodingRunner())
     rollout_mols = [DummyMol("a"), DummyMol("b")]
     base_mask = np.array([True, True], dtype=bool)
-    settings = reward_mod.PoseBustersRuntimeConfig(mode="full")
+    settings = reward_utils.PoseBustersRuntimeConfig(mode="full")
 
-    updated_mask, summary = reward_mod.apply_posebusters_gate(rollout_mols, base_mask, settings)
+    updated_mask, summary = reward_utils.apply_posebusters_gate(rollout_mols, base_mask, settings)
     assert updated_mask.tolist() == [False, False]
-    assert summary.checked == 2
-    assert summary.errors == 2
-    assert summary.failed == 0
+    assert summary["checked"] == 2
+    assert summary["errors"] == 2
+    assert summary["failed"] == 0
 
