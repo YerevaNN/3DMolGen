@@ -17,15 +17,15 @@ from molgen3D.data_processing.utils import (
     filter_mols,
     save_processed_pickle,
 )
-from molgen3D.data_processing.smiles_encoder_decoder import encode_cartesian_v2
+from molgen3D.data_processing.smiles_encoder_decoder import encode_cartesian_v2, encode_cartesian_binned
 from molgen3D.utils.utils import load_pkl
 
 random.seed(42)
 RDLogger.DisableLog("rdApp.*")
 def read_mol(
-    args: Tuple[str, int, int, Any, str, str]
+    args: Tuple[str, int, int, Any, str, float, str]
 ) -> Optional[Tuple[List[str], Dict[str, Any]]]:
-    mol_path, max_confs, precision, embedding_func, pickle_dir, _geom_root = args
+    mol_path, max_confs, precision, embedding_func, pickle_dir, bin_size, _geom_root = args
     mol_object = load_pkl(mol_path)
     geom_smiles = mol_object["smiles"]
 
@@ -46,7 +46,10 @@ def read_mol(
             pass
 
         try:
-            embedded_smile, iso_smile = embedding_func(mol, precision)
+            if embedding_func == encode_cartesian_binned:
+                embedded_smile, iso_smile, _, _ = embedding_func(mol, bin_size=bin_size)
+            else:
+                embedded_smile, iso_smile = embedding_func(mol, precision)
         except Exception as exc:
             log.error("Error encoding conformer | path={} | failure={}", mol_path, exc)
             local_failures["encoding_error"] += 1
@@ -110,6 +113,7 @@ def preprocess(
     embedding_type: str,
     num_workers: int = 20,
     precision: int = 4,
+    bin_size: float = 0.042,
     dataset_type: str = "drugs",
     splits: Optional[str] = None,
     dest_path: Optional[str] = None,
@@ -121,6 +125,7 @@ def preprocess(
     embedding_registry = {
         "cartesian_v2": encode_cartesian_v2,
         "cartesian": encode_cartesian_v2,
+        "cartesian_binned": encode_cartesian_binned,
     }
     if embedding_type not in embedding_registry:
         raise ValueError(f"Unsupported embedding_type '{embedding_type}'. Options: {sorted(embedding_registry)}")
@@ -143,7 +148,7 @@ def preprocess(
 
     split_name_to_index = {"train": 0, "valid": 1, "test": 2}
     requested_splits = [splits] if splits else list(split_name_to_index.keys())
-    log.info("Reading files from %s", geom_raw_path)
+    log.info(f"Reading files from {geom_raw_path}")
 
 
     split_indices_array = np.load(indices_path, allow_pickle=True)
@@ -158,7 +163,7 @@ def preprocess(
         split_indices = np.array(sorted(split_indices_array[split_idx]), dtype=int)
 
         if split_indices.size == 0:
-            log.warning("No indices found for split %s", split_name)
+            log.warning(f"No indices found for split {split_name}")
             continue
 
         if split_indices.max() >= len(pickle_paths):
@@ -168,7 +173,7 @@ def preprocess(
 
         mol_paths = pickle_paths[split_indices]
 
-        log.info("Processing split %s with %d samples", split_name, len(mol_paths))
+        log.info(f"Processing split {split_name} with {len(mol_paths)} samples")
 
         split_total_input = len(mol_paths)
         overall_total_input_mols += split_total_input
@@ -185,6 +190,7 @@ def preprocess(
                 precision,
                 embedding_func,
                 split_pickle_dirs[split_name],
+                bin_size,
                 geom_raw_path,
             )
             for path in mol_paths
@@ -311,7 +317,7 @@ if __name__ == "__main__":
         "--embedding_type",
         "-et",
         type=str,
-        choices=["cartesian", "cartesian_v2"],
+        choices=["cartesian", "cartesian_v2", "cartesian_binned"],
         default="cartesian_v2",
         help="Embedding type to use for enrichment.",
     )
@@ -327,6 +333,12 @@ if __name__ == "__main__":
         type=int,
         default=4,
         help="Numeric precision for encoded coordinates.",
+    )
+    parser.add_argument(
+        "--bin_size",
+        type=float,
+        default=0.042,
+        help="Bin size for binned encoding.",
     )
     parser.add_argument(
         "--dataset_type",
@@ -377,6 +389,7 @@ if __name__ == "__main__":
         geom_raw_path=args.geom_raw_path,
         indices_path=args.indices_path,
         embedding_type=args.embedding_type,
+        bin_size=args.bin_size,
         dest_path=dest_path,
         max_confs=args.max_confs,
         num_workers=args.num_workers,

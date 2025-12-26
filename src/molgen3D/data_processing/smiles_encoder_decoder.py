@@ -491,7 +491,7 @@ def coords_rmsd(mol_a, mol_b):
     rmsd_rdkit = AllChem.GetBestRMS(mol_a, mol_b)
     return min(math.sqrt(sse / n), rmsd_rdkit)
 
-def get_bins_for_coords(ranges, bin_size=0.05):
+def get_bins_for_coords(ranges, bin_size=0.043):
     """Get bins for coordinates based on the ranges and bin size."""
     bins = []
     for start, end in ranges:
@@ -537,7 +537,7 @@ def bins_to_coords(bin_indices, bins, use_bin_center=False):
 
 
 
-def encode_cartesian_binned(mol, bin_size=0.05, ranges=None):
+def encode_cartesian_binned(mol, bin_size=0.042, ranges=None):
     """
     Serialize a 3D RDKit Mol into an enriched text representation where
     the Cartesian coordinates are replaced by bin indices.
@@ -581,7 +581,8 @@ def encode_cartesian_binned(mol, bin_size=0.05, ranges=None):
     if len(bins) != 3:
         raise ValueError("get_bins_for_coords must return three bin arrays (x, y, z).")
     # Determine zero-padding width per axis; always at least 3 digits
-    digits = [max(3, len(str(len(b)))) for b in bins]
+    # np.digitize returns indices from 0 to len(bins) (inclusive), so max index is len(bins)
+    digits = [max(3, len(str(len(b)))-1) for b in bins]
 
     out_parts = []
     atom_idx_in_smiles = 0
