@@ -19,10 +19,6 @@ hf_assets_path = "base_paths:qwen3_0.6b_base_model"
 custom_import = "molgen3D.training.pretraining.torchtitan_model.qwen3_custom"
 
 [training]
-seq_len = 2048
-local_batch_size = 12
-global_batch_size = 144
-steps = 160000
 seq_len = 4096
 local_batch_size = 3
 global_batch_size = 48

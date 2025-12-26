@@ -23,14 +23,14 @@ grpo:
   checkpoint_base_dir: /nfs/h100/raid/chem/checkpoints/conf_grpo
   delta: 0.85
   enable_posebusters: false
-  epsilon_high: 4e-4
-  epsilon_low: 2e-4
+  epsilon_high: 5e-4
+  epsilon_low: 1e-4
   grad_acc_steps: 2
   importance_sampling_level: sequence
   lambda_match: 1.0
   lambda_qual: 1.0
   lambda_smcov: 8.0
-  learning_rate: 2.0e-05
+  learning_rate: 3.0e-05
   max_grad_norm: 1.0
   max_ground_truths: 30
   max_steps: 4000
@@ -43,7 +43,7 @@ grpo:
     chunk_size: 16
     energy_num_threads: 1
     max_workers: 8
-    mode: geometry
+    mode: false
   r_floor: -0.75
   reward_strategy: v3
   rho: 0.9
