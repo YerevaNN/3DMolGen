@@ -22,7 +22,7 @@ grpo:
   beta: 0
   checkpoint_base_dir: /nfs/h100/raid/chem/checkpoints/conf_grpo
   delta: 0.85
-  enable_posebusters: false
+  enable_posebusters: true
   epsilon_high: 5e-4
   epsilon_low: 1e-4
   grad_acc_steps: 2
@@ -43,7 +43,10 @@ grpo:
     chunk_size: 16
     energy_num_threads: 1
     max_workers: 8
-    mode: false
+    mode: geometry
+  enable_pairwise_rmsd_logging: true
+  pairwise_rmsd_log_every: 10
+  log_distance_samples_per_group: 128
   r_floor: -0.75
   reward_strategy: v3
   rho: 0.9
