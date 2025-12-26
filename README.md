@@ -41,14 +41,14 @@ This installs everything you need. See details below.
 
 ### Understanding the Stack
 
-We use a **conda + uv hybrid approach**:
+We provide **two setup options**:
 
-| Tool | Role | Why |
-|------|------|-----|
-| **Conda** | Environment & Python management | Manages Python 3.10, system deps like rdkit, CUDA libs |
-| **uv** | Fast package installer | 10-100x faster than pip, caches aggressively |
+| Script | Stack | Best for |
+|--------|-------|----------|
+| `setup-uv.sh` | Pure uv (no conda) | New clusters, ephemeral envs, portability |
+| `setup.sh` | Conda + uv hybrid | Existing machines with conda |
 
-**What is uv?** [uv](https://docs.astral.sh/uv/) is a Rust-based Python package manager from Astral (the Ruff team). It's a drop-in pip replacement that's dramatically faster - critical for ephemeral cluster environments where we reinstall packages every job.
+**What is uv?** [uv](https://docs.astral.sh/uv/) is a Rust-based Python package manager from Astral (the Ruff team). It's 10-100x faster than pip and can manage Python versions directly—no conda needed.
 
 ### Version Matrix
 
@@ -64,9 +64,31 @@ We use a **conda + uv hybrid approach**:
 
 ---
 
-### Option 1: Automated Setup (Recommended)
+### Option 1: Pure uv (Recommended for new clusters)
 
-The `setup.sh` script handles everything:
+The `setup-uv.sh` script creates an environment without conda:
+
+```bash
+./setup-uv.sh                              # Defaults (auto-detects /scratch or /tmp)
+./setup-uv.sh --dev                        # Include dev tools
+./setup-uv.sh --dir ~/envs/molgen          # Custom location
+./setup-uv.sh --fa-wheel /path/to/wheel    # Custom Flash Attention wheel
+./setup-uv.sh --skip-fa                    # Skip Flash Attention (CPU-only)
+./setup-uv.sh --verify                     # Verify existing installation
+```
+
+**What it does:**
+1. Installs uv (~30MB to ~/.local/bin)
+2. Creates venv with Python 3.10 (uv downloads if needed)
+3. Installs PyTorch 2.9.1+cu128
+4. Installs Flash Attention from local wheel or GitHub
+5. Installs rdkit from PyPI
+6. Installs molgen3D and dependencies
+7. Runs verification
+
+### Option 2: Conda + uv Hybrid (existing machines)
+
+The `setup.sh` script uses conda for Python/rdkit, uv for packages:
 
 ```bash
 ./setup.sh              # Full installation
@@ -74,16 +96,7 @@ The `setup.sh` script handles everything:
 ./setup.sh --verify     # Just verify existing installation
 ```
 
-**What it does:**
-1. Installs uv if not present (via curl)
-2. Creates/activates conda environment `3dmolgen` with Python 3.10
-3. Uses `uv pip install` for fast package installation
-4. Installs PyTorch 2.9.1+cu128 from official CUDA wheel index
-5. Installs Flash Attention 2.8.3 from prebuilt wheel
-6. Installs molgen3D in editable mode
-7. Runs verification checks
-
-### Option 2: Manual Installation
+### Option 3: Manual Installation
 
 Step-by-step if you want more control:
 
@@ -154,15 +167,23 @@ For ephemeral environments on the new DGX cluster:
 #SBATCH --gres=gpu:8
 #SBATCH --nodes=1
 
-# Fast setup (uv caching makes warm installs <30s)
+# Fast setup with uv (warm installs <30s)
 cd /path/to/3DMolGen
-./setup.sh
+./setup-uv.sh --dev
 
-# Run training
-conda activate 3dmolgen
+# Activate and run
+source /scratch/$USER/3dmolgen/.venv/bin/activate
 torchrun --nproc_per_node=8 \
   -m molgen3D.training.pretraining.torchtitan_runner \
   --train-toml src/molgen3D/config/pretrain/qwen3_06b.toml
+```
+
+For existing machines with conda:
+
+```bash
+./setup.sh --dev
+conda activate 3dmolgen
+# ... run training
 ```
 
 ## Project Structure

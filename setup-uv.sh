@@ -3,34 +3,35 @@
 # 3DMolGen Environment Setup - Pure uv (No Conda)
 # =============================================================================
 # Fast, reproducible environment using only uv.
-# Designed for ephemeral cluster environments (Slurm jobs).
+# Portable across clusters: YNN (with Slurm), new H100 cluster (SSH-only), etc.
 #
 # Usage:
-#   ./setup-uv.sh                    # Install to /scratch/$USER/3dmolgen
-#   ./setup-uv.sh --dir /path/to/env # Install to custom location
-#   ./setup-uv.sh --dev              # Include dev dependencies
-#   ./setup-uv.sh --verify           # Only verify existing install
+#   ./setup-uv.sh                              # Defaults for YNN cluster
+#   ./setup-uv.sh --dir /path/to/env           # Custom env location
+#   ./setup-uv.sh --project /path/to/project   # Custom project (pyproject.toml)
+#   ./setup-uv.sh --fa-wheel /path/to/wheel    # Custom Flash Attention wheel
+#   ./setup-uv.sh --dev                        # Include dev dependencies
 #
 # Requirements:
 #   - Linux x86_64
 #   - CUDA 12.8 drivers (system-level)
-#   - Internet access (first run) or uv cache populated
+#   - Internet access (or pre-downloaded wheels)
 # =============================================================================
 
 set -euo pipefail
 
 # =============================================================================
-# Configuration
+# Defaults (YNN cluster)
 # =============================================================================
 PYTHON_VERSION="3.10"
+PYTORCH_VERSION="2.9.1"
 PYTORCH_INDEX="https://download.pytorch.org/whl/cu128"
-FA_WHEEL="/nfs/ap/mnt/sxtn2/chem/wheels/flash_attn-2.8.3+cu128torch2.9-cp310-cp310-linux_x86_64.whl"
+
+# Flash Attention: try local wheel first, fall back to GitHub
+FA_WHEEL_DEFAULT="/nfs/ap/mnt/sxtn2/chem/wheels/flash_attn-2.8.3+cu128torch2.9-cp310-cp310-linux_x86_64.whl"
 FA_WHEEL_URL="https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.0/flash_attn-2.8.3+cu128torch2.9-cp310-cp310-linux_x86_64.whl"
 
-# Default install location (scratch is local, fast, ephemeral)
-DEFAULT_ENV_DIR="/scratch/${USER}/3dmolgen"
-
-# Script directory (where this script and pyproject.toml live)
+# Script directory (default project location)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Colors
@@ -41,17 +42,88 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # =============================================================================
+# Helper Functions
+# =============================================================================
+log_info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
+log_warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# Determine default env directory based on what exists
+get_default_env_dir() {
+    if [[ -d "/scratch" && -w "/scratch" ]]; then
+        echo "/scratch/${USER}/3dmolgen"
+    elif [[ -d "/tmp" ]]; then
+        echo "/tmp/${USER}/3dmolgen"
+    else
+        echo "${HOME}/envs/3dmolgen"
+    fi
+}
+
+# =============================================================================
 # Parse Arguments
 # =============================================================================
-ENV_DIR="$DEFAULT_ENV_DIR"
+ENV_DIR=""
+PROJECT_DIR="$SCRIPT_DIR"
+FA_WHEEL="$FA_WHEEL_DEFAULT"
 INSTALL_EXTRAS=""
 VERIFY_ONLY=false
+SKIP_FLASH_ATTN=false
+
+show_help() {
+    cat << EOF
+Usage: ./setup-uv.sh [OPTIONS]
+
+Creates a Python environment with PyTorch, Flash Attention, and project dependencies.
+
+Options:
+  --dir PATH        Environment directory (default: auto-detect /scratch or /tmp)
+  --project PATH    Project directory containing pyproject.toml (default: script dir)
+  --fa-wheel PATH   Flash Attention wheel path or URL (default: YNN cluster path)
+  --skip-fa         Skip Flash Attention installation
+  --dev             Include dev dependencies (pytest, black, etc.)
+  --verify          Only verify existing installation
+  --help            Show this help message
+
+Environment Variables:
+  UV_CACHE_DIR      Override uv cache location (default: auto-detect)
+  PYTORCH_INDEX     Override PyTorch index URL (default: cu128)
+
+Examples:
+  # YNN cluster (defaults)
+  ./setup-uv.sh --dev
+
+  # New cluster with custom wheel location
+  ./setup-uv.sh --dir /data/envs/molgen --fa-wheel ~/wheels/flash_attn.whl --dev
+
+  # Download Flash Attention from GitHub (no local wheel)
+  ./setup-uv.sh --fa-wheel https://github.com/.../flash_attn-2.8.3+cu128torch2.9-cp310-cp310-linux_x86_64.whl
+
+  # Install without Flash Attention (CPU-only or incompatible GPU)
+  ./setup-uv.sh --skip-fa
+
+  # Different project
+  ./setup-uv.sh --project /path/to/other/project --dir /tmp/other-env
+EOF
+}
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --dir)
             ENV_DIR="$2"
             shift 2
+            ;;
+        --project)
+            PROJECT_DIR="$2"
+            shift 2
+            ;;
+        --fa-wheel)
+            FA_WHEEL="$2"
+            shift 2
+            ;;
+        --skip-fa)
+            SKIP_FLASH_ATTN=true
+            shift
             ;;
         --dev|--all)
             INSTALL_EXTRAS="dev"
@@ -62,34 +134,21 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --help|-h)
-            echo "Usage: ./setup-uv.sh [OPTIONS]"
-            echo ""
-            echo "Options:"
-            echo "  --dir PATH  Install to custom directory (default: /scratch/\$USER/3dmolgen)"
-            echo "  --dev       Include dev dependencies (pytest, black, etc.)"
-            echo "  --verify    Only verify existing installation"
-            echo "  --help      Show this help message"
-            echo ""
-            echo "Examples:"
-            echo "  ./setup-uv.sh                        # Standard install"
-            echo "  ./setup-uv.sh --dev                  # With dev tools"
-            echo "  ./setup-uv.sh --dir ~/envs/molgen    # Custom location"
+            show_help
             exit 0
             ;;
         *)
-            echo "Unknown option: $1"
+            log_error "Unknown option: $1"
+            echo "Use --help for usage information"
             exit 1
             ;;
     esac
 done
 
-# =============================================================================
-# Helper Functions
-# =============================================================================
-log_info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
-log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
-log_warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
+# Set defaults after parsing (so --dir can override)
+if [[ -z "$ENV_DIR" ]]; then
+    ENV_DIR="$(get_default_env_dir)"
+fi
 
 # =============================================================================
 # Step 1: Install uv
@@ -106,11 +165,13 @@ install_uv() {
 }
 
 # =============================================================================
-# Step 2: Set up cache directory (avoid polluting NFS home)
+# Step 2: Set up cache directory
 # =============================================================================
 setup_cache() {
-    # Use scratch for cache if available, otherwise use env dir
-    if [[ -d "/scratch" ]]; then
+    # Allow override via environment variable
+    if [[ -n "${UV_CACHE_DIR:-}" ]]; then
+        log_info "Using UV_CACHE_DIR from environment: $UV_CACHE_DIR"
+    elif [[ -d "/scratch" && -w "/scratch" ]]; then
         export UV_CACHE_DIR="/scratch/${USER}/.cache/uv"
     else
         export UV_CACHE_DIR="${ENV_DIR}/.cache/uv"
@@ -141,8 +202,8 @@ create_venv() {
 # Step 4: Install PyTorch
 # =============================================================================
 install_pytorch() {
-    log_info "Installing PyTorch 2.9.1+cu128..."
-    uv pip install torch==2.9.1 --index-url "$PYTORCH_INDEX"
+    log_info "Installing PyTorch ${PYTORCH_VERSION}+cu128..."
+    uv pip install "torch==${PYTORCH_VERSION}" --index-url "$PYTORCH_INDEX"
     log_success "PyTorch installed"
 }
 
@@ -150,19 +211,32 @@ install_pytorch() {
 # Step 5: Install Flash Attention
 # =============================================================================
 install_flash_attention() {
+    if [[ "$SKIP_FLASH_ATTN" == true ]]; then
+        log_warn "Skipping Flash Attention (--skip-fa)"
+        return
+    fi
+
     log_info "Installing Flash Attention..."
-    if [[ -f "$FA_WHEEL" ]]; then
+
+    # Check if it's a URL or local path
+    if [[ "$FA_WHEEL" == http* ]]; then
+        log_info "Downloading from URL: $FA_WHEEL"
+        uv pip install "$FA_WHEEL"
+    elif [[ -f "$FA_WHEEL" ]]; then
         log_info "Using local wheel: $FA_WHEEL"
         uv pip install "$FA_WHEEL"
+    elif [[ -f "$FA_WHEEL_DEFAULT" ]]; then
+        log_info "Using default wheel: $FA_WHEEL_DEFAULT"
+        uv pip install "$FA_WHEEL_DEFAULT"
     else
-        log_info "Downloading from GitHub..."
+        log_info "Local wheel not found, downloading from GitHub..."
         uv pip install "$FA_WHEEL_URL"
     fi
     log_success "Flash Attention installed"
 }
 
 # =============================================================================
-# Step 6: Install rdkit (pip wheel)
+# Step 6: Install rdkit
 # =============================================================================
 install_rdkit() {
     log_info "Installing rdkit..."
@@ -174,13 +248,18 @@ install_rdkit() {
 # Step 7: Install project dependencies
 # =============================================================================
 install_dependencies() {
-    log_info "Installing molgen3D from ${SCRIPT_DIR}..."
+    if [[ ! -f "${PROJECT_DIR}/pyproject.toml" ]]; then
+        log_error "pyproject.toml not found at: ${PROJECT_DIR}/pyproject.toml"
+        exit 1
+    fi
+
+    log_info "Installing project from ${PROJECT_DIR}..."
 
     if [[ -n "$INSTALL_EXTRAS" ]]; then
         log_info "Including optional dependencies: [$INSTALL_EXTRAS]"
-        uv pip install -e "${SCRIPT_DIR}[${INSTALL_EXTRAS}]"
+        uv pip install -e "${PROJECT_DIR}[${INSTALL_EXTRAS}]"
     else
-        uv pip install -e "${SCRIPT_DIR}"
+        uv pip install -e "${PROJECT_DIR}"
     fi
     log_success "Dependencies installed"
 }
@@ -191,13 +270,15 @@ install_dependencies() {
 verify_environment() {
     log_info "Verifying environment..."
 
-    if [[ -f "${SCRIPT_DIR}/verify_env.py" ]]; then
-        python "${SCRIPT_DIR}/verify_env.py"
+    local verify_script="${PROJECT_DIR}/verify_env.py"
+    if [[ -f "$verify_script" ]]; then
+        python "$verify_script"
     else
+        # Inline verification
         python << 'EOF'
 import sys
 print("=" * 60)
-print("3DMolGen Environment Verification")
+print("Environment Verification")
 print("=" * 60)
 
 checks = []
@@ -215,14 +296,13 @@ except ImportError as e:
     checks.append(("PyTorch", False))
     print(f"PyTorch: FAILED - {e}")
 
-# Flash Attention
+# Flash Attention (optional)
 try:
     import flash_attn
     print(f"Flash Attention: {flash_attn.__version__}")
     checks.append(("Flash Attention", True))
-except ImportError as e:
-    checks.append(("Flash Attention", False))
-    print(f"Flash Attention: FAILED - {e}")
+except ImportError:
+    print("Flash Attention: not installed (optional)")
 
 # Core libs
 for lib in ["transformers", "trl", "torchtitan", "accelerate", "datasets"]:
@@ -268,11 +348,13 @@ print_instructions() {
     echo ""
     echo "  source ${ENV_DIR}/.venv/bin/activate"
     echo ""
-    echo "Or add to your Slurm job script:"
-    echo ""
-    echo "  export UV_CACHE_DIR=/scratch/\${USER}/.cache/uv"
-    echo "  source ${ENV_DIR}/.venv/bin/activate"
-    echo ""
+    if [[ -d "/scratch" ]]; then
+        echo "For Slurm jobs, add to your script:"
+        echo ""
+        echo "  export UV_CACHE_DIR=/scratch/\${USER}/.cache/uv"
+        echo "  source ${ENV_DIR}/.venv/bin/activate"
+        echo ""
+    fi
 }
 
 # =============================================================================
@@ -281,11 +363,13 @@ print_instructions() {
 main() {
     echo ""
     echo "=============================================="
-    echo "  3DMolGen - Pure uv Setup"
-    echo "  Python ${PYTHON_VERSION} | PyTorch 2.9.1+cu128 | FA2"
+    echo "  Environment Setup (uv)"
+    echo "  Python ${PYTHON_VERSION} | PyTorch ${PYTORCH_VERSION}+cu128"
     echo "=============================================="
     echo ""
-    echo "Environment directory: ${ENV_DIR}"
+    echo "Environment:  ${ENV_DIR}"
+    echo "Project:      ${PROJECT_DIR}"
+    echo "FA wheel:     ${FA_WHEEL}"
     echo ""
 
     install_uv
