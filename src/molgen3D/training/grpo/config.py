@@ -154,6 +154,8 @@ class TrainerConfig:
     # Model loading
     torch_dtype: str = "bfloat16"
     attn_implementation: str = "flash_attention_2"
+    # Tokenizer settings
+    tokenizers_parallelism: bool = False
 
 
 @dataclass

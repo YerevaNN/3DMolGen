@@ -17,6 +17,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, Union
 from collections import OrderedDict
+import multiprocessing as mp
 
 import numpy as np
 import pandas as pd
@@ -138,6 +139,7 @@ class GroupMetrics:
     posebusters_failed: int
     posebusters_errors: int
     posebusters_time_ms: float
+    sampled_percentiles: bool = False
 
 
 @dataclass
@@ -155,6 +157,63 @@ class PoseBustersRuntimeConfig:
     max_workers: int = 0
     chunk_size: int = 100
     energy_num_threads: int = 1
+
+
+@dataclass
+class ParsedRolloutBatch:
+    """Container with parsed rollout artifacts for a single prompt group."""
+
+    rollout_mols: List[Optional[Chem.Mol]]
+    graph_mask: np.ndarray
+    parsed_mask: np.ndarray
+    conformer_texts: List[Optional[str]]
+
+
+@dataclass
+class GroupValidity:
+    """Tracks gating masks applied to a rollout batch."""
+
+    graph_mask: np.ndarray
+    parsed_mask: np.ndarray
+    base_mask: np.ndarray
+    pose_mask: np.ndarray
+    reward_mask: np.ndarray
+
+
+@dataclass
+class DistanceArtifacts:
+    """Pre-computed RMSD artifacts needed for reward terms."""
+
+    distance_matrix: np.ndarray
+    min_distances: np.ndarray
+    finite_mask: np.ndarray
+
+
+@dataclass
+class RewardComponents:
+    """Holds decomposed reward terms for reporting."""
+
+    quality: np.ndarray
+    smooth_coverage: np.ndarray
+    matching: np.ndarray
+    combined: np.ndarray
+
+
+@dataclass
+class MatchingDiagnostics:
+    """Details about eligible edges and solved assignments."""
+
+    eligible_matrix: np.ndarray
+    matched_pairs: List[Tuple[int, int]]
+    refs_hit: int
+    num_matched: int
+
+
+@dataclass
+class SamplingSummary:
+    """Indicates whether logged percentiles/metrics are sample-based."""
+
+    percentiles_sampled: bool = False
 
 
 _POSEBUSTERS_BASE_CONFIG: Dict[str, Any] = {
@@ -314,6 +373,12 @@ _POSEBUSTERS_RUNNER_CACHE: Dict[Tuple[str, int, int, int], PoseBusters] = {}
 _POSEBUSTERS_ENERGY_WARNING_EMITTED = False
 
 
+_EMPTY_FLOAT32 = np.array([], dtype=np.float32)
+_RMSD_POOL: Optional[mp.pool.Pool] = None
+_RMSD_POOL_SIZE = 0
+_RMSD_WORKER_STATE: Dict[str, Any] = {"ref_key": None, "ref_mols": []}
+
+
 def _normalize_posebusters_config(raw_cfg: Any) -> PoseBustersRuntimeConfig:
     """Normalize user-provided config objects/dicts into a runtime config."""
     if isinstance(raw_cfg, PoseBustersRuntimeConfig):
@@ -429,13 +494,52 @@ def _extract_posebusters_pass_vector(table: pd.DataFrame, expected_len: int) -> 
     return passes
 
 
-def sample_array(values: np.ndarray, max_samples: int) -> np.ndarray:
-    """Return at most `max_samples` entries as float32 without copying unnecessarily."""
+def sample_array(
+    values: np.ndarray,
+    max_samples: int,
+    rng: Optional[np.random.Generator] = None,
+) -> Tuple[np.ndarray, bool]:
+    """Return at most `max_samples` entries as float32, with unbiased sampling.
+
+    Returns:
+        (sampled_values, used_sampling_flag)
+    """
     if values.size == 0 or max_samples <= 0:
-        return np.array([], dtype=np.float32)
+        return _EMPTY_FLOAT32, False
     if values.size <= max_samples:
-        return values.astype(np.float32, copy=False)
-    return values[:max_samples].astype(np.float32, copy=False)
+        return values.astype(np.float32, copy=False), False
+    if rng is None:
+        rng = np.random.default_rng()
+    idx = rng.choice(values.size, size=max_samples, replace=False)
+    return values[idx].astype(np.float32, copy=False), True
+
+
+def make_reward_rng(config, stats) -> np.random.Generator:
+    """Create a deterministic RNG seeded from config + training state."""
+
+    def _maybe_int(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    seed_candidates = [
+        _maybe_int(getattr(config, "seed", None)),
+        _maybe_int(getattr(getattr(config, "training", None), "seed", None)),
+        _maybe_int(getattr(config.grpo, "reward_seed", None)),
+        _maybe_int(getattr(stats, "global_step", None)),
+        os.getpid(),
+    ]
+    combined = 0
+    for value in seed_candidates:
+        if value is None:
+            continue
+        combined = (combined * 6364136223846793005 + value) & 0xFFFFFFFFFFFFFFFF
+    if combined == 0:
+        combined = int(time.time() * 1e6) & 0xFFFFFFFFFFFFFFFF
+    return np.random.default_rng(combined)
 
 
 # ============================================================================
@@ -503,6 +607,75 @@ def get_cached_ground_truths(
             _GROUND_TRUTH_CACHE.popitem(last=False)
     return references
 
+
+def _close_rmsd_pool() -> None:
+    global _RMSD_POOL, _RMSD_POOL_SIZE
+    if _RMSD_POOL is not None:
+        _RMSD_POOL.close()
+        _RMSD_POOL.join()
+    _RMSD_POOL = None
+    _RMSD_POOL_SIZE = 0
+
+
+def _get_rmsd_pool(worker_count: int) -> Optional[mp.pool.Pool]:
+    if worker_count <= 1:
+        return None
+    global _RMSD_POOL, _RMSD_POOL_SIZE
+    if _RMSD_POOL is not None and _RMSD_POOL_SIZE == worker_count:
+        return _RMSD_POOL
+    _close_rmsd_pool()
+    try:
+        ctx = mp.get_context("spawn")
+        _RMSD_POOL = ctx.Pool(processes=worker_count)
+        _RMSD_POOL_SIZE = worker_count
+        return _RMSD_POOL
+    except Exception as exc:
+        logger.warning("[reward_v3] Failed to create RMSD pool (%s); falling back to serial.", exc)
+        _RMSD_POOL = None
+        _RMSD_POOL_SIZE = 0
+        return None
+
+
+def _mol_to_block(mol: Optional[Chem.Mol]) -> Optional[str]:
+    if mol is None:
+        return None
+    try:
+        return Chem.MolToMolBlock(mol, includeStereo=False)
+    except Exception:
+        return None
+
+
+def _rmsd_parallel_worker(
+    payload: Tuple[int, Optional[str], Optional[str], Optional[List[str]]]
+) -> Tuple[int, Optional[List[float]]]:
+    idx, rollout_block, ref_key, ref_blocks = payload
+    if rollout_block is None or ref_blocks is None or ref_key is None:
+        return idx, None
+
+    state = _RMSD_WORKER_STATE
+    if state["ref_key"] != ref_key:
+        ref_mols: List[Chem.Mol] = []
+        for block in ref_blocks:
+            try:
+                mol = Chem.MolFromMolBlock(block, sanitize=False, removeHs=False)
+            except Exception:
+                mol = None
+            if mol is not None:
+                ref_mols.append(mol)
+        state["ref_key"] = ref_key
+        state["ref_mols"] = ref_mols
+
+    try:
+        rollout_mol = Chem.MolFromMolBlock(rollout_block, sanitize=False, removeHs=False)
+    except Exception:
+        rollout_mol = None
+
+    if rollout_mol is None or not state["ref_mols"]:
+        return idx, None
+
+    distances = [compute_rmsd_safe(rollout_mol, ref) for ref in state["ref_mols"]]
+    return idx, distances
+
 # ============================================================================
 # Step B: RMSD Matrix
 # ============================================================================
@@ -525,44 +698,93 @@ def compute_rmsd_safe(probe: Chem.Mol, ref: Chem.Mol) -> float:
         return float('inf')
 
 
+def _compute_distance_matrix_serial(
+    rollout_mols: List[Optional[Chem.Mol]],
+    reference_mols: List[Chem.Mol],
+    validity: np.ndarray,
+) -> np.ndarray:
+    K = len(rollout_mols)
+    M = len(reference_mols)
+    D = np.full((K, M), float("inf"), dtype=np.float32)
+
+    for i in range(K):
+        if not validity[i]:
+            continue
+        mol = rollout_mols[i]
+        if mol is None:
+            continue
+        for j, ref_mol in enumerate(reference_mols):
+            D[i, j] = compute_rmsd_safe(mol, ref_mol)
+    return D
+
+def _compute_distance_matrix_parallel(
+    rollout_mols: List[Optional[Chem.Mol]],
+    reference_mols: List[Chem.Mol],
+    validity: np.ndarray,
+    worker_count: int,
+    ref_cache_key: str,
+) -> Optional[np.ndarray]:
+    K = len(rollout_mols)
+    M = len(reference_mols)
+    pool = _get_rmsd_pool(worker_count)
+    if pool is None:
+        return None
+
+    valid_indices = [
+        idx for idx, flag in enumerate(validity) if flag and rollout_mols[idx] is not None
+    ]
+    if not valid_indices:
+        return np.full((K, M), float("inf"), dtype=np.float32)
+
+    ref_blocks = [_mol_to_block(mol) for mol in reference_mols]
+    if any(block is None for block in ref_blocks):
+        logger.debug("[reward_v3] Unable to serialize reference mols for parallel RMSD.")
+        return None
+
+    tasks: List[Tuple[int, Optional[str], Optional[str], Optional[List[str]]]] = []
+    for idx in valid_indices:
+        tasks.append((idx, _mol_to_block(rollout_mols[idx]), ref_cache_key, ref_blocks))
+
+    try:
+        results = pool.map(_rmsd_parallel_worker, tasks)
+    except Exception as exc:
+        logger.warning("[reward_v3] Parallel RMSD failed (%s); falling back to serial.", exc)
+        return None
+
+    D = np.full((K, M), float("inf"), dtype=np.float32)
+    for idx, distances in results:
+        if distances is None:
+            continue
+        D[idx, :] = np.asarray(distances, dtype=np.float32)
+    return D
+
+
 def compute_distance_matrix(
     rollout_mols: List[Optional[Chem.Mol]],
     reference_mols: List[Chem.Mol],
-    validity: np.ndarray
+    validity: np.ndarray,
+    rmsd_workers: int = 0,
+    ref_cache_key: Optional[str] = None,
 ) -> np.ndarray:
-    """Compute RMSD distance matrix D[i,j] = d(y_i, g_j).
-
-    For invalid rollouts (v_i=0), distances are set to inf.
-
-    Args:
-        rollout_mols: K generated conformers
-        reference_mols: M reference conformers
-        validity: K-length array of validity indicators
-
-    Returns:
-        Array of shape (K, M) with RMSD distances
-    """
+    """Compute RMSD distance matrix D[i,j] = d(y_i, g_j)."""
     K = len(rollout_mols)
     M = len(reference_mols)
 
     if K == 0 or M == 0:
-        return np.full((K, M), float('inf'), dtype=np.float32)
+        return np.full((K, M), float("inf"), dtype=np.float32)
 
-    D = np.full((K, M), float('inf'), dtype=np.float32)
-    
+    if rmsd_workers and rmsd_workers > 1 and ref_cache_key:
+        parallel = _compute_distance_matrix_parallel(
+            rollout_mols,
+            reference_mols,
+            validity,
+            rmsd_workers,
+            ref_cache_key,
+        )
+        if parallel is not None:
+            return parallel
 
-    for i in range(K):
-        if validity[i] == 0:
-            continue  # Leave as inf
-
-        mol = rollout_mols[i]
-        if mol is None:
-            continue
-
-        for j, ref_mol in enumerate(reference_mols):
-            D[i, j] = compute_rmsd_safe(mol, ref_mol)
-
-    return D
+    return _compute_distance_matrix_serial(rollout_mols, reference_mols, validity)
 
 
 # ============================================================================
@@ -621,19 +843,21 @@ def compute_smooth_coverage_reward(
     rho = max(float(rho), 1e-8)
 
     valid_rows = validity == 1
-    K_matrix = np.zeros((K, M), dtype=np.float64)
+    K_matrix = np.zeros((K, M), dtype=np.float32)
     if np.any(valid_rows):
-        D_valid = D[valid_rows].astype(np.float64)
-        D_valid[~np.isfinite(D_valid)] = np.inf
-        K_valid = np.exp(-((D_valid / rho) ** 2))
-        K_valid[~np.isfinite(K_valid)] = 0.0
+        D_valid = D[valid_rows].astype(np.float32, copy=False)
+        D_valid = np.where(np.isfinite(D_valid), D_valid, np.inf).astype(np.float32, copy=False)
+        exponent = -((D_valid / rho) ** 2)
+        K_valid = np.exp(exponent).astype(np.float32, copy=False)
+        K_valid = np.where(np.isfinite(K_valid), K_valid, 0.0).astype(np.float32, copy=False)
         K_matrix[valid_rows, :] = K_valid
 
-    one_minus = np.clip(1.0 - K_matrix, 0.0, 1.0)
+    one_minus = np.clip(1.0 - K_matrix, 0.0, 1.0).astype(np.float32, copy=False)
     zero_mask = one_minus <= 1e-12
-    one_minus_safe = np.where(zero_mask, 1.0, one_minus)
-    log_one_minus = np.log(one_minus_safe)
-    log_prod_safe = np.sum(log_one_minus, axis=0, keepdims=True)  # (1, M)
+    one_minus_safe = np.where(zero_mask, 1.0, one_minus).astype(np.float32, copy=False)
+    one_minus_f64 = one_minus_safe.astype(np.float64, copy=False)
+    log_one_minus = np.log(one_minus_f64)
+    log_prod_safe = np.sum(log_one_minus, axis=0, keepdims=True)
     zero_counts = zero_mask.sum(axis=0, keepdims=True)
 
     prod_excl = np.exp(log_prod_safe - log_one_minus)
@@ -749,6 +973,128 @@ def apply_posebusters_gate(
         updated_mask[idx] = bool(passed)
 
     return updated_mask, summary
+
+
+def parse_rollout_group(
+    canonical_smiles: str,
+    completions: List[str],
+    stats,
+    profiler: Optional[RewardProfiler],
+) -> ParsedRolloutBatch:
+    rollout_mols: List[Optional[Chem.Mol]] = []
+    graph_flags: List[bool] = []
+    parsed_flags: List[bool] = []
+    conformer_texts: List[Optional[str]] = []
+
+    with profile_section(profiler, "reward_parse"):
+        for completion in completions:
+            conformer_text = extract_conformer_text(completion)
+            conformer_texts.append(conformer_text)
+            graph_match_flag = False
+
+            if conformer_text:
+                generated_smiles = strip_smiles(conformer_text)
+                if generated_smiles:
+                    if canonical_smiles and same_molecular_graph(canonical_smiles, generated_smiles):
+                        graph_match_flag = True
+                    else:
+                        stats.failed_matching_smiles += 1
+
+            mol = parse_conformer_text(conformer_text)
+            if mol is None:
+                stats.failed_conformer_generation += 1
+
+            rollout_mols.append(mol)
+            parsed_flags.append(mol is not None)
+            graph_flags.append(graph_match_flag)
+
+    mask_graph = np.array(graph_flags, dtype=bool)
+    mask_parsed = np.array(parsed_flags, dtype=bool)
+
+    return ParsedRolloutBatch(
+        rollout_mols=rollout_mols,
+        graph_mask=mask_graph,
+        parsed_mask=mask_parsed,
+        conformer_texts=conformer_texts,
+    )
+
+
+def build_group_validity(
+    parsed: ParsedRolloutBatch,
+    pose_cfg: PoseBustersRuntimeConfig,
+    profiler: Optional[RewardProfiler],
+) -> Tuple[GroupValidity, PoseBustersGateSummary]:
+    graph_mask = parsed.graph_mask.astype(bool, copy=False)
+    parsed_mask = parsed.parsed_mask.astype(bool, copy=False)
+    base_mask = graph_mask & parsed_mask
+    pose_mask = base_mask.copy()
+    pose_summary = PoseBustersGateSummary()
+
+    if np.any(base_mask):
+        with profile_section(profiler, "reward_posebusters"):
+            pose_mask, pose_summary = apply_posebusters_gate(
+                parsed.rollout_mols,
+                base_mask.astype(bool, copy=False),
+                pose_cfg,
+            )
+
+    validity = GroupValidity(
+        graph_mask=graph_mask,
+        parsed_mask=parsed_mask,
+        base_mask=base_mask,
+        pose_mask=pose_mask.astype(bool, copy=False),
+        reward_mask=pose_mask.astype(bool, copy=False),
+    )
+    return validity, pose_summary
+
+
+def compute_distance_artifacts(
+    parsed: ParsedRolloutBatch,
+    reference_mols: List[Chem.Mol],
+    validity: GroupValidity,
+    hard_rmsd_gate: bool,
+    profiler: Optional[RewardProfiler],
+    stats,
+    rmsd_workers: int,
+    ref_cache_key: str,
+) -> DistanceArtifacts:
+    mask_for_distance = validity.reward_mask.astype(np.int32, copy=False)
+    with profile_section(profiler, "reward_rmsd"):
+        D = compute_distance_matrix(
+            parsed.rollout_mols,
+            reference_mols,
+            mask_for_distance,
+            rmsd_workers=rmsd_workers,
+            ref_cache_key=ref_cache_key,
+        )
+
+    if reference_mols:
+        d_i_all = np.min(D, axis=1)
+    else:
+        d_i_all = np.full(len(parsed.rollout_mols), np.inf, dtype=np.float32)
+
+    mask_finite = np.isfinite(d_i_all)
+    problematic_mask = validity.reward_mask & (~mask_finite)
+    num_problematic = int(np.count_nonzero(problematic_mask))
+    if num_problematic > 0:
+        stats.failed_rmsd += num_problematic
+        if hard_rmsd_gate:
+            logger.warning(
+                f"[reward_v3] {num_problematic} PoseBusters-valid rollouts "
+                "lacked finite RMSD; quality/coverage rewards will be zero for them."
+            )
+        else:
+            logger.warning(
+                f"[reward_v3] {num_problematic} PoseBusters-valid rollouts "
+                "lacked finite RMSD; applying reward floor for those entries."
+            )
+        validity.reward_mask &= mask_finite
+
+    return DistanceArtifacts(
+        distance_matrix=D,
+        min_distances=d_i_all,
+        finite_mask=mask_finite,
+    )
 
 
 # ============================================================================
@@ -904,33 +1250,30 @@ def compute_group_reward(
     distance_sample_limit: int = 0,
     enable_pairwise_logging: bool = False,
     pairwise_sample_limit: Optional[int] = None,
+    rng: Optional[np.random.Generator] = None,
 ) -> Tuple[np.ndarray, GroupMetrics]:
     """Compute rewards for a single prompt group (K rollouts)."""
     del rollout_entropies, completion_lengths  # Unused but kept for API parity
 
     K = len(completions)
-
-    # Hyperparameters
-    delta = getattr(config.grpo, 'delta', 0.75)
-    sigma = getattr(config.grpo, 'sigma', 0.25)
-    rho = getattr(config.grpo, 'rho', 0.75)
-    lambda_qual = getattr(config.grpo, 'lambda_qual', 1.0)
-    lambda_smcov = getattr(config.grpo, 'lambda_smcov', 1.0)
-    lambda_match = getattr(config.grpo, 'lambda_match', 1.0)
-    r_floor = getattr(config.grpo, 'r_floor', -1.0)
-    hard_rmsd_gate = getattr(
-        config.grpo,
-        'hard_rmsd_gate',
-        DEFAULT_ENABLE_HARD_RMSD_GATE,
+    delta = float(getattr(config.grpo, "delta", 0.75))
+    sigma = float(getattr(config.grpo, "sigma", 0.25))
+    rho = float(getattr(config.grpo, "rho", 0.75))
+    lambda_qual = float(getattr(config.grpo, "lambda_qual", 1.0))
+    lambda_smcov = float(getattr(config.grpo, "lambda_smcov", 1.0))
+    lambda_match = float(getattr(config.grpo, "lambda_match", 1.0))
+    r_floor = float(getattr(config.grpo, "r_floor", -1.0))
+    hard_rmsd_gate = bool(
+        getattr(config.grpo, "hard_rmsd_gate", DEFAULT_ENABLE_HARD_RMSD_GATE)
     )
+    rmsd_workers = int(getattr(config.grpo, "rmsd_workers", 0) or 0)
 
     reference_mols = get_cached_ground_truths(
         canonical_smiles,
-        num_gt=config.grpo.max_ground_truths
+        num_gt=config.grpo.max_ground_truths,
     )
 
     empty_rewards = np.full(K, r_floor, dtype=np.float32)
-    empty_sample = np.array([], dtype=np.float32)
 
     if not reference_mols:
         stats.failed_ground_truth += K
@@ -940,9 +1283,9 @@ def compute_group_reward(
             graph_match_rate=0.0,
             finite_rmsd_rate=0.0,
             validity_rate=0.0,
-            d_min_mean=float('nan'),
-            d_min_p50=float('nan'),
-            d_min_p90=float('nan'),
+            d_min_mean=float("nan"),
+            d_min_p50=float("nan"),
+            d_min_p90=float("nan"),
             num_matched=0,
             refs_hit=0,
             max_possible_matches=0,
@@ -950,67 +1293,37 @@ def compute_group_reward(
             r_qual_mean=0.0,
             r_smcov_mean=0.0,
             r_match_mean=0.0,
-            soft_cov_mean=float('nan'),
-            pct_gt_0_5=float('nan'),
+            soft_cov_mean=float("nan"),
+            pct_gt_0_5=float("nan"),
             fraction_under_delta=0.0,
-            matched_dists_sample=empty_sample,
-            eligible_dists_sample=empty_sample,
-            d_min_sample=empty_sample,
-            soft_cov_sample=empty_sample,
-            pairwise_sample=empty_sample,
+            matched_dists_sample=_EMPTY_FLOAT32,
+            eligible_dists_sample=_EMPTY_FLOAT32,
+            d_min_sample=_EMPTY_FLOAT32,
+            soft_cov_sample=_EMPTY_FLOAT32,
+            pairwise_sample=_EMPTY_FLOAT32,
             valid_count=0,
             posebusters_checked=0,
             posebusters_passed=0,
             posebusters_failed=0,
             posebusters_errors=0,
             posebusters_time_ms=0.0,
+            sampled_percentiles=False,
         )
         return empty_rewards, metrics
 
-    M = len(reference_mols)
+    parsed = parse_rollout_group(canonical_smiles, completions, stats, profiler)
+    graph_match_rate = float(np.mean(parsed.graph_mask)) if K > 0 else 0.0
 
-    rollout_mols: List[Optional[Chem.Mol]] = []
-    graph_match_flags: List[bool] = []
-    parsed_flags: List[bool] = []
-
-    with profile_section(profiler, "reward_parse"):
-        for completion in completions:
-            conformer_text = extract_conformer_text(completion)
-            generated_smiles = strip_smiles(conformer_text) if conformer_text else ""
-
-            graph_match_flag = False
-            if conformer_text is not None and generated_smiles:
-                graph_match = (
-                    bool(canonical_smiles)
-                    and same_molecular_graph(canonical_smiles, generated_smiles)
-                )
-                if graph_match:
-                    graph_match_flag = True
-                else:
-                    stats.failed_matching_smiles += 1
-
-            mol = parse_conformer_text(conformer_text)
-            if mol is None:
-                stats.failed_conformer_generation += 1
-            rollout_mols.append(mol)
-            parsed_flags.append(mol is not None)
-            graph_match_flags.append(graph_match_flag)
-
-    mask_graph = np.array(graph_match_flags, dtype=bool)
-    mask_parsed = np.array(parsed_flags, dtype=bool)
-    graph_match_rate = float(np.mean(mask_graph)) if K > 0 else 0.0
-    pose_summary = PoseBustersGateSummary()
-
-    if not np.any(mask_graph):
+    if not np.any(parsed.graph_mask):
         metrics = GroupMetrics(
             K=K,
-            M=M,
+            M=len(reference_mols),
             graph_match_rate=graph_match_rate,
             finite_rmsd_rate=0.0,
             validity_rate=0.0,
-            d_min_mean=float('nan'),
-            d_min_p50=float('nan'),
-            d_min_p90=float('nan'),
+            d_min_mean=float("nan"),
+            d_min_p50=float("nan"),
+            d_min_p90=float("nan"),
             num_matched=0,
             refs_hit=0,
             max_possible_matches=0,
@@ -1018,32 +1331,26 @@ def compute_group_reward(
             r_qual_mean=0.0,
             r_smcov_mean=0.0,
             r_match_mean=0.0,
-            soft_cov_mean=float('nan'),
-            pct_gt_0_5=float('nan'),
+            soft_cov_mean=float("nan"),
+            pct_gt_0_5=float("nan"),
             fraction_under_delta=0.0,
-            matched_dists_sample=empty_sample,
-            eligible_dists_sample=empty_sample,
-            d_min_sample=empty_sample,
-            soft_cov_sample=empty_sample,
-            pairwise_sample=empty_sample,
+            matched_dists_sample=_EMPTY_FLOAT32,
+            eligible_dists_sample=_EMPTY_FLOAT32,
+            d_min_sample=_EMPTY_FLOAT32,
+            soft_cov_sample=_EMPTY_FLOAT32,
+            pairwise_sample=_EMPTY_FLOAT32,
             valid_count=0,
             posebusters_checked=0,
             posebusters_passed=0,
             posebusters_failed=0,
             posebusters_errors=0,
             posebusters_time_ms=0.0,
+            sampled_percentiles=False,
         )
         return empty_rewards, metrics
-    mask_valid_base = mask_graph & mask_parsed
+
     pose_cfg = _normalize_posebusters_config(getattr(config.grpo, "posebusters", None))
-    if np.any(mask_valid_base):
-        mask_valid_bool, pose_summary = apply_posebusters_gate(
-            rollout_mols,
-            mask_valid_base.astype(bool, copy=False),
-            pose_cfg,
-        )
-    else:
-        mask_valid_bool = mask_valid_base.astype(bool, copy=False)
+    validity, pose_summary = build_group_validity(parsed, pose_cfg, profiler)
 
     stats.posebusters_checked += pose_summary.checked
     stats.posebusters_failed += pose_summary.failed
@@ -1052,129 +1359,158 @@ def compute_group_reward(
     stats.posebusters_successes += pose_summary.passed
     stats.posebusters_failures += pose_summary.failed + pose_summary.errors
 
-    validity_for_distance = mask_valid_bool.astype(np.int32, copy=False)
+    ref_cache_key = f"{canonical_smiles}:{len(reference_mols)}"
+    distance_artifacts = compute_distance_artifacts(
+        parsed=parsed,
+        reference_mols=reference_mols,
+        validity=validity,
+        hard_rmsd_gate=hard_rmsd_gate,
+        profiler=profiler,
+        stats=stats,
+        rmsd_workers=rmsd_workers,
+        ref_cache_key=ref_cache_key,
+    )
 
-    with profile_section(profiler, "reward_rmsd"):
-        D = compute_distance_matrix(rollout_mols, reference_mols, validity_for_distance)
-
-    d_i_all = np.min(D, axis=1) if M > 0 else np.full(K, np.inf, dtype=np.float32)
-    mask_finite = np.isfinite(d_i_all)
-
-    problematic_mask = mask_valid_bool & (~mask_finite)
-    num_problematic = int(np.count_nonzero(problematic_mask))
-    if num_problematic > 0:
-        stats.failed_rmsd += num_problematic
-        if hard_rmsd_gate:
-            logger.warning(
-                f"[reward_v3] {num_problematic} PoseBusters-valid rollouts "
-                "lacked finite RMSD; quality/coverage rewards will be zero for them."
-            )
-        else:
-            logger.warning(
-                f"[reward_v3] {num_problematic} PoseBusters-valid rollouts "
-                "lacked finite RMSD; continuing with zeroed RMSD-based rewards."
-            )
-
-    validity_final = mask_valid_bool.astype(np.int32, copy=False)
+    validity_final = validity.reward_mask.astype(np.int32, copy=False)
 
     with profile_section(profiler, "reward_smcov"):
-        smcov_result = compute_smooth_coverage_reward(D, validity_final, rho, return_details=True)
+        smcov_result = compute_smooth_coverage_reward(
+            distance_artifacts.distance_matrix,
+            validity_final,
+            rho,
+            return_details=True,
+        )
     if isinstance(smcov_result, tuple):
         r_smcov, (soft_cov_mean, soft_cov_pcts, soft_cov_values) = smcov_result
     else:
         r_smcov = smcov_result
-        soft_cov_mean = float('nan')
-        soft_cov_pcts = [float('nan'), float('nan'), float('nan')]
-        soft_cov_values = np.array([], dtype=np.float32)
+        soft_cov_mean = float("nan")
+        soft_cov_pcts = [float("nan"), float("nan"), float("nan")]
+        soft_cov_values = _EMPTY_FLOAT32
 
     with profile_section(profiler, "reward_qual"):
-        r_qual = compute_quality_reward(D, validity_final, sigma)
+        r_qual = compute_quality_reward(distance_artifacts.distance_matrix, validity_final, sigma)
 
-    valid_mask = mask_valid_bool
-    eligible_matrix = valid_mask[:, None] & (D < delta)
+    valid_mask = validity.reward_mask
+    eligible_matrix = valid_mask[:, None] & (distance_artifacts.distance_matrix < delta)
     refs_hit = int(np.count_nonzero(eligible_matrix.any(axis=0)))
     num_valid = int(np.count_nonzero(valid_mask))
     max_possible_matches = min(num_valid, refs_hit)
 
     with profile_section(profiler, "reward_match"):
         r_match, num_matched, _num_eligible_edges, matched_pairs = compute_matching_reward(
-            D, validity_final, delta, eligible_matrix=eligible_matrix
+            distance_artifacts.distance_matrix,
+            validity_final,
+            delta,
+            eligible_matrix=eligible_matrix,
         )
 
-    match_efficiency = (
-        float(num_matched) / max_possible_matches if max_possible_matches > 0 else 0.0
-    )
-    matched_dists = (
-        np.array([D[i, j] for (i, j) in matched_pairs], dtype=np.float32)
-        if matched_pairs else empty_sample
-    )
-    eligible_dists = (
-        D[eligible_matrix].astype(np.float32)
-        if np.any(eligible_matrix) else empty_sample
+    matching_diag = MatchingDiagnostics(
+        eligible_matrix=eligible_matrix,
+        matched_pairs=matched_pairs,
+        refs_hit=refs_hit,
+        num_matched=num_matched,
     )
 
     rewards = combine_rewards(
-        r_qual, r_smcov, r_match, validity_final,
-        lambda_qual, lambda_smcov, lambda_match, r_floor
+        r_qual,
+        r_smcov,
+        r_match,
+        validity_final,
+        lambda_qual,
+        lambda_smcov,
+        lambda_match,
+        r_floor,
     )
 
-    finite_rmsd_rate = float(np.mean(mask_finite)) if K > 0 else 0.0
+    finite_rmsd_rate = float(np.mean(distance_artifacts.finite_mask)) if K > 0 else 0.0
     validity_rate = float(np.mean(valid_mask)) if K > 0 else 0.0
-
-    valid_indices = np.where(valid_mask)[0]
-    finite_d_valid = d_i_all[valid_indices] if valid_indices.size > 0 else np.array([], dtype=np.float32)
+    finite_d_valid = distance_artifacts.min_distances[valid_mask]
     finite_d_valid = finite_d_valid[np.isfinite(finite_d_valid)]
     under_threshold = float(np.mean(finite_d_valid < delta)) if finite_d_valid.size > 0 else 0.0
 
-    def _sample(values: np.ndarray) -> np.ndarray:
-        max_samples = distance_sample_limit if distance_sample_limit > 0 else values.size
-        return sample_array(values, max_samples)
+    def _sample(values: np.ndarray) -> Tuple[np.ndarray, bool]:
+        limit = distance_sample_limit if distance_sample_limit > 0 else values.size
+        if limit <= 0:
+            return _EMPTY_FLOAT32, False
+        return sample_array(values, limit, rng=rng)
 
-    matched_sample = _sample(matched_dists)
-    eligible_sample = _sample(eligible_dists)
-    d_min_sample = _sample(finite_d_valid.astype(np.float32, copy=False))
-    soft_cov_sample = _sample(soft_cov_values.astype(np.float32, copy=False))
+    reward_components = RewardComponents(
+        quality=r_qual,
+        smooth_coverage=r_smcov,
+        matching=r_match,
+        combined=rewards,
+    )
 
-    pairwise_sample_cap = pairwise_sample_limit if pairwise_sample_limit is not None else distance_sample_limit
+    match_efficiency = (
+        float(matching_diag.num_matched) / max_possible_matches if max_possible_matches > 0 else 0.0
+    )
+
+    matched_dists = (
+        np.array(
+            [distance_artifacts.distance_matrix[i, j] for (i, j) in matching_diag.matched_pairs],
+            dtype=np.float32,
+        )
+        if matching_diag.matched_pairs
+        else _EMPTY_FLOAT32
+    )
+    eligible_dists = (
+        distance_artifacts.distance_matrix[eligible_matrix].astype(np.float32)
+        if np.any(eligible_matrix)
+        else _EMPTY_FLOAT32
+    )
+
+    matched_sample, matched_sampled = _sample(matched_dists)
+    eligible_sample, eligible_sampled = _sample(eligible_dists)
+    d_min_sample, d_min_sampled = _sample(finite_d_valid.astype(np.float32, copy=False))
+    soft_cov_sample, _ = _sample(soft_cov_values.astype(np.float32, copy=False))
+
+    pairwise_sample_cap = (
+        pairwise_sample_limit if pairwise_sample_limit is not None else distance_sample_limit
+    )
     if enable_pairwise_logging:
         pairwise_dists = compute_pairwise_rollout_distances(
-            rollout_mols,
+            parsed.rollout_mols,
             valid_mask,
             max_samples=max(pairwise_sample_cap, 0),
         )
     else:
-        pairwise_dists = empty_sample
+        pairwise_dists = _EMPTY_FLOAT32
 
-    valid_count = int(valid_indices.size)
+    valid_count = int(np.count_nonzero(valid_mask))
     if valid_count > 0:
-        r_qual_mean = float(np.mean(r_qual[valid_mask]))
-        r_smcov_mean = float(np.mean(r_smcov[valid_mask]))
-        r_match_mean = float(np.mean(r_match[valid_mask]))
+        r_qual_mean = float(np.mean(reward_components.quality[valid_mask]))
+        r_smcov_mean = float(np.mean(reward_components.smooth_coverage[valid_mask]))
+        r_match_mean = float(np.mean(reward_components.matching[valid_mask]))
     else:
         r_qual_mean = r_smcov_mean = r_match_mean = 0.0
 
     for i in range(K):
-        if valid_mask[i] and np.isfinite(d_i_all[i]):
-            stats.add_rmsd(float(d_i_all[i]))
+        if valid_mask[i] and np.isfinite(distance_artifacts.min_distances[i]):
+            stats.add_rmsd(float(distance_artifacts.min_distances[i]))
+
+    sampling_summary = SamplingSummary(
+        percentiles_sampled=matched_sampled or eligible_sampled or d_min_sampled,
+    )
 
     metrics = GroupMetrics(
         K=K,
-        M=M,
+        M=len(reference_mols),
         graph_match_rate=graph_match_rate,
         finite_rmsd_rate=finite_rmsd_rate,
         validity_rate=validity_rate,
-        d_min_mean=float(np.mean(finite_d_valid)) if finite_d_valid.size > 0 else float('nan'),
-        d_min_p50=float(np.percentile(finite_d_valid, 50)) if finite_d_valid.size > 0 else float('nan'),
-        d_min_p90=float(np.percentile(finite_d_valid, 90)) if finite_d_valid.size > 0 else float('nan'),
-        num_matched=int(num_matched),
-        refs_hit=refs_hit,
+        d_min_mean=float(np.mean(finite_d_valid)) if finite_d_valid.size > 0 else float("nan"),
+        d_min_p50=float(np.percentile(finite_d_valid, 50)) if finite_d_valid.size > 0 else float("nan"),
+        d_min_p90=float(np.percentile(finite_d_valid, 90)) if finite_d_valid.size > 0 else float("nan"),
+        num_matched=int(matching_diag.num_matched),
+        refs_hit=matching_diag.refs_hit,
         max_possible_matches=int(max_possible_matches),
         match_efficiency=match_efficiency,
         r_qual_mean=r_qual_mean,
         r_smcov_mean=r_smcov_mean,
         r_match_mean=r_match_mean,
         soft_cov_mean=soft_cov_mean,
-        pct_gt_0_5=float(soft_cov_pcts[2]) if len(soft_cov_pcts) >= 3 else float('nan'),
+        pct_gt_0_5=float(soft_cov_pcts[2]) if len(soft_cov_pcts) >= 3 else float("nan"),
         fraction_under_delta=under_threshold,
         matched_dists_sample=matched_sample,
         eligible_dists_sample=eligible_sample,
@@ -1187,6 +1523,7 @@ def compute_group_reward(
         posebusters_failed=pose_summary.failed,
         posebusters_errors=pose_summary.errors,
         posebusters_time_ms=pose_summary.elapsed_ms,
+        sampled_percentiles=sampling_summary.percentiles_sampled,
     )
 
     return rewards, metrics
@@ -1260,6 +1597,7 @@ def reward_function(
     profile_enabled = bool(getattr(config.grpo, 'profile_rewards', False))
     profiler = RewardProfiler(enabled=profile_enabled)
     total_start = time.perf_counter() if profile_enabled else None
+    reward_rng = make_reward_rng(config, stats)
     log_every_steps = max(int(getattr(config.grpo, 'log_every_steps', 1)), 1)
     pairwise_freq = max(int(getattr(config.grpo, 'pairwise_rmsd_log_every', 50)), 1)
     pairwise_flag = bool(getattr(config.grpo, 'enable_pairwise_rmsd_logging', False))
@@ -1295,6 +1633,7 @@ def reward_function(
             distance_sample_limit=distance_sample_limit,
             enable_pairwise_logging=should_log_pairwise,
             pairwise_sample_limit=distance_sample_limit if distance_sample_limit > 0 else None,
+            rng=reward_rng,
         )
 
         # Assign back to flat batch
@@ -1331,6 +1670,7 @@ def reward_function(
         posebusters_failures = [float(m.posebusters_failed) for m in metrics_list]
         posebusters_errors = [float(m.posebusters_errors) for m in metrics_list]
         posebusters_times = [m.posebusters_time_ms for m in metrics_list]
+        sampling_flags = [m.sampled_percentiles for m in metrics_list]
 
         d_samples = _concat([m.d_min_sample for m in metrics_list])
         matched_samples = _concat([m.matched_dists_sample for m in metrics_list])
@@ -1394,6 +1734,7 @@ def reward_function(
         if eligible_samples.size > 0:
             essential_metrics["match/eligible_dist_p50"] = float(np.percentile(eligible_samples, 50))
         essential_metrics["reward/matched_total"] = float(total_matched)
+        essential_metrics["sampling/approx_percentiles"] = 1.0 if any(sampling_flags) else 0.0
         essential_metrics["posebusters/pass_rate"] = posebusters_pass_rate
         essential_metrics["posebusters/fail_rate"] = (
             total_posebusters_failed / total_posebusters_checked if total_posebusters_checked > 0 else 0.0
@@ -1406,7 +1747,7 @@ def reward_function(
 
         should_log_metrics = wandb.run is not None and (step_index % log_every_steps == 0)
         if should_log_metrics:
-            wandb.log(essential_metrics)
+            wandb.log(essential_metrics, step=step_index)
 
         batch_log = (
             f"[PID {os.getpid()}] [reward_v3] Batch summary\n"
@@ -1423,15 +1764,21 @@ def reward_function(
         )
         logger.info(batch_log)
 
-        if profile_enabled and wandb.run is not None and total_start is not None:
+        if profile_enabled and total_start is not None:
             profiling_metrics = {
                 "profiling/reward_total_s": time.perf_counter() - total_start,
                 "profiling/reward_parse_s": profiler.sections.get("reward_parse", 0.0),
+                "profiling/reward_posebusters_s": profiler.sections.get("reward_posebusters", 0.0),
                 "profiling/reward_rmsd_s": profiler.sections.get("reward_rmsd", 0.0),
                 "profiling/reward_smcov_s": profiler.sections.get("reward_smcov", 0.0),
                 "profiling/reward_match_s": profiler.sections.get("reward_match", 0.0),
                 "profiling/reward_logging_s": profiler.sections.get("reward_logging", 0.0),
             }
-            wandb.log(profiling_metrics)
+            if wandb.run is not None:
+                wandb.log(profiling_metrics, step=step_index)
+            logger.info(
+                "[reward_v3] profiler totals (s): {}",
+                ", ".join(f"{k.split('/')[-1]}={v:.4f}" for k, v in profiling_metrics.items()),
+            )
 
     return final_rewards
