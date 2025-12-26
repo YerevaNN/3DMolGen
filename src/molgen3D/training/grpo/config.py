@@ -60,6 +60,10 @@ class GRPOConfig:
     num_iterations: int = 1
     max_steps: Optional[int] = None
     num_epochs: Optional[int] = None
+    importance_sampling_level: str = "sequence"
+    epsilon_low: float = 3e-4
+    epsilon_high: float = 4e-4
+    steps_per_generation: int = 4
 
     # V2 reward parameters (optional, with defaults matching spec)
     coverage_delta: float = 0.75
@@ -84,6 +88,11 @@ class GRPOConfig:
     lambda_match: float = 1.0  # Weight for matching term
     r_floor: float = -1.0      # Reward for invalid samples
     hard_rmsd_gate: bool = True  # Drop PoseBusters-valid but RMSD-invalid rollouts
+    profile_rewards: bool = False
+    log_distance_samples_per_group: int = 32
+    enable_pairwise_rmsd_logging: bool = False
+    pairwise_rmsd_log_every: int = 50
+    log_every_steps: int = 1
 
     # Runtime parameters (set during execution)
     output_dir: Optional[str] = None
@@ -204,12 +213,16 @@ class Config:
         Returns:
             Config: A Config instance with all parameters loaded from the YAML file
         """
-        with open(yaml_path, 'r') as f:
+        with open(yaml_path, 'r', encoding='utf-8', errors='replace') as f:
             config_dict = yaml.safe_load(f)
 
         grpo_dict_raw = dict(config_dict['grpo'])
         reward_strategy = grpo_dict_raw.get('reward_strategy', 'legacy')
         grpo_dict_raw['reward_strategy'] = reward_strategy
+
+        # Backward compatibility: map 'epsilon' to 'epsilon_low' if present
+        if 'epsilon' in grpo_dict_raw and 'epsilon_low' not in grpo_dict_raw:
+            grpo_dict_raw['epsilon_low'] = grpo_dict_raw.pop('epsilon')
 
         advanced_reward_dict = grpo_dict_raw.get('advanced_reward', {})
         if advanced_reward_dict is None:

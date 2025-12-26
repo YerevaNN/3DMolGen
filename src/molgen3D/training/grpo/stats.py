@@ -82,7 +82,7 @@ class RunStatistics:
     @property
     def average_rmsd(self) -> float:
         """Calculate average RMSD across successful generations"""
-        return np.nanmean(self.rmsd_values) if self.rmsd_values else 0.0
+        return float(np.nanmean(self.rmsd_values)) if self.rmsd_values else 0.0
     
     @property
     def success_rate(self) -> float:
@@ -182,11 +182,11 @@ class RunStatistics:
         stats_dir.mkdir(parents=True, exist_ok=True)
         own_stats = self.log_global_stats()
         own_stats_file = stats_dir / f"statistics_{pid}.json"
-        with open(own_stats_file, 'w') as f:
+        with open(own_stats_file, 'w', encoding='utf-8') as f:
             json.dump(own_stats, f, indent=4)
         lock_file = stats_dir / "statistics.lock"
         aggregate = {}
-        with open(lock_file, 'w') as lock:
+        with open(lock_file, 'w', encoding='utf-8') as lock:
             acquired = False
             while not acquired:
                 try:
@@ -231,7 +231,7 @@ class RunStatistics:
                 "numerical_val_failure_counts": {},
             }
             for file in stats_files:
-                with open(file, 'r') as f:
+                with open(file, 'r', encoding='utf-8', errors='replace') as f:
                     try:
                         stats = json.load(f)
                     except json.JSONDecodeError:
@@ -329,7 +329,7 @@ class RunStatistics:
             aggregate["numerical_val_rmsd_max_mean"] = safe_mean(aggregate["numerical_val_rmsd_max_values"])
             aggregate["numerical_val_rmsd_avg_mean"] = safe_mean(aggregate["numerical_val_rmsd_avg_values"])
             stats_file = stats_dir / "statistics.json"
-            with open(stats_file, 'w') as f:
+            with open(stats_file, 'w', encoding='utf-8') as f:
                 json.dump(aggregate, f, indent=4)
             fcntl.flock(lock, fcntl.LOCK_UN)
         return aggregate

@@ -12,7 +12,7 @@ device:
   num_gpus: 8
 generation:
   do_sample: true
-  max_completion_length: 2000
+  max_completion_length: 1500
   num_return_sequences: 1
   repetition_penalty: 1.0
   temperature: 1.0
@@ -21,33 +21,35 @@ grpo:
   adam_beta2: 0.95
   beta: 0
   checkpoint_base_dir: /nfs/h100/raid/chem/checkpoints/conf_grpo
-  delta: 0.75
+  delta: 1.0
   enable_posebusters: false
-  grad_acc_steps: 2
-  lambda_match: 2.5
-  lambda_qual: 1.2
-  lambda_smcov: 3.0
-  learning_rate: 1.0e-05
+  epsilon_high: 4e-4
+  epsilon_low: 3e-4
+  grad_acc_steps: 4
+  importance_sampling_level: sequence
+  lambda_match: 2.0
+  lambda_qual: 2.0
+  lambda_smcov: 0.0
+  learning_rate: 2.0e-05
   max_grad_norm: 1.0
   max_ground_truths: 30
-  max_steps: 2000
+  max_steps: 4000
   num_epochs: 1
   num_generations: 16
-  num_iterations: 2
+  num_iterations: 1
   output_base_dir: ./grpo_outputs
   per_device_batch_size: 16
-  r_floor: -1.0
+  r_floor: -0.75
   reward_strategy: v3
-  reward_weight_match: 0.15
-  reward_weight_rmsd: 0.85
-  rho: 0.75
+  rho: 0.6
   rmsd_const: 0.75
   scheduler: cosine
   seed: 1
-  sigma: 0.3
+  sigma: 0.35
+  steps_per_generation: 16
   temperature: 1.0
-  warmup_ratio: 0.15
-  weight_decay: 0.1
+  warmup_ratio: 0.05
+  weight_decay: 0.0
 model:
   checkpoint_path: /nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b/251210-1955-d79f-qwen3_06b_pre_4e_144effb/step-80000-hf/
   conf_tags:
@@ -63,7 +65,7 @@ processing:
   eos_token_id: 151672
 run:
   log_level: INFO
-  name: qwen3_v3_default_params_ni2
+  name: qwen3_v3_match_qual_gspo_8*4*16comp_16steps
 trainer:
   attn_implementation: flash_attention_2
   log_on_each_node: false
@@ -75,4 +77,4 @@ trainer:
   save_strategy: steps
   save_total_limit: 8
   torch_dtype: bfloat16
-  use_liger_loss: true
+  use_liger_loss: false
