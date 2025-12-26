@@ -13,11 +13,13 @@ from __future__ import annotations
 
 import os
 import time
+from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple, Dict, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from collections import OrderedDict
 
 import numpy as np
+import pandas as pd
 from loguru import logger
 from rdkit import Chem
 import wandb
@@ -31,6 +33,11 @@ try:
     from scipy.optimize import linear_sum_assignment
 except ImportError:  # pragma: no cover - exercised when SciPy is missing
     linear_sum_assignment = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - optional dependency used only when PoseBusters gating is enabled
+    from posebusters import PoseBusters  # type: ignore[import]
+except Exception:  # pragma: no cover - PoseBusters may be unavailable in some environments
+    PoseBusters = None  # type: ignore[assignment]
 
 
 # Toggle for the optional RMSD hard validity gate (overridable via config).
@@ -126,6 +133,300 @@ class GroupMetrics:
     soft_cov_sample: np.ndarray
     pairwise_sample: np.ndarray
     valid_count: int
+    posebusters_checked: int
+    posebusters_passed: int
+    posebusters_failed: int
+    posebusters_errors: int
+    posebusters_time_ms: float
+
+
+@dataclass
+class PoseBustersGateSummary:
+    checked: int = 0
+    passed: int = 0
+    failed: int = 0
+    errors: int = 0
+    elapsed_ms: float = 0.0
+
+
+@dataclass(frozen=True)
+class PoseBustersRuntimeConfig:
+    mode: str = "off"
+    max_workers: int = 0
+    chunk_size: int = 100
+    energy_num_threads: int = 1
+
+
+_POSEBUSTERS_BASE_CONFIG: Dict[str, Any] = {
+    "modules": [
+        {
+            "name": "Loading",
+            "function": "loading",
+            "chosen_binary_test_output": ["mol_pred_loaded"],
+            "rename_outputs": {"mol_pred_loaded": "MOL_PRED loaded"},
+        },
+        {
+            "name": "Chemistry",
+            "function": "rdkit_sanity",
+            "chosen_binary_test_output": ["passes_rdkit_sanity_checks"],
+            "rename_outputs": {"passes_rdkit_sanity_checks": "Sanitization"},
+        },
+        {
+            "name": "Chemistry",
+            "function": "inchi_convertible",
+            "chosen_binary_test_output": ["inchi_convertible"],
+            "rename_outputs": {"inchi_convertible": "InChI convertible"},
+        },
+        {
+            "name": "Chemistry",
+            "function": "atoms_connected",
+            "chosen_binary_test_output": ["all_atoms_connected"],
+            "rename_outputs": {"all_atoms_connected": "All atoms connected"},
+        },
+        {
+            "name": "Geometry",
+            "function": "distance_geometry",
+            "parameters": {
+                "bound_matrix_params": {
+                    "set15bounds": True,
+                    "scaleVDW": True,
+                    "doTriangleSmoothing": True,
+                    "useMacrocycle14config": False,
+                },
+                "threshold_bad_bond_length": 0.25,
+                "threshold_bad_angle": 0.25,
+                "threshold_clash": 0.3,
+                "ignore_hydrogens": True,
+                "sanitize": True,
+            },
+            "chosen_binary_test_output": [
+                "bond_lengths_within_bounds",
+                "bond_angles_within_bounds",
+                "no_internal_clash",
+            ],
+            "rename_outputs": {
+                "bond_lengths_within_bounds": "Bond lengths",
+                "bond_angles_within_bounds": "Bond angles",
+                "no_internal_clash": "Internal steric clash",
+            },
+        },
+        {
+            "name": "Ring flatness",
+            "function": "flatness",
+            "parameters": {
+                "flat_systems": {
+                    "aromatic_5_membered_rings_sp2": "[ar5^2]1[ar5^2][ar5^2][ar5^2][ar5^2]1",
+                    "aromatic_6_membered_rings_sp2": "[ar6^2]1[ar6^2][ar6^2][ar6^2][ar6^2][ar6^2]1",
+                },
+                "threshold_flatness": 0.25,
+            },
+            "chosen_binary_test_output": ["flatness_passes"],
+            "rename_outputs": {
+                "flatness_passes": "Aromatic ring flatness",
+                "num_systems_checked": "number_aromatic_rings_checked",
+                "num_systems_passed": "number_aromatic_rings_pass",
+                "max_distance": "aromatic_ring_maximum_distance_from_plane",
+            },
+        },
+        {
+            "name": "Ring non-flatness",
+            "function": "flatness",
+            "parameters": {
+                "check_nonflat": True,
+                "flat_systems": {
+                    "non-aromatic_6_membered_rings": "[C,O,S,N;R1]~1[C,O,S,N;R1][C,O,S,N;R1][C,O,S,N;R1][C,O,S,N;R1][C,O,S,N;R1]1",
+                    "non-aromatic_6_membered_rings_db03_0": "[C;R1]~1[C;R1][C,O,S,N;R1]~[C,O,S,N;R1][C;R1][C;R1]1",
+                    "non-aromatic_6_membered_rings_db03_1": "[C;R1]~1[C;R1][C;R1]~[C;R1][C,O,S,N;R1][C;R1]1",
+                    "non-aromatic_6_membered_rings_db02_0": "[C;R1]~1[C;R1][C;R1][C,O,S,N;R1]~[C,O,S,N;R1][C;R1]1",
+                    "non-aromatic_6_membered_rings_db02_1": "[C;R1]~1[C;R1][C,O,S,N;R1][C;R1]~[C;R1][C;R1]1",
+                },
+                "threshold_flatness": 0.05,
+            },
+            "chosen_binary_test_output": ["flatness_passes"],
+            "rename_outputs": {
+                "flatness_passes": "Non-aromatic ring non-flatness",
+                "num_systems_checked": "number_non-aromatic_rings_checked",
+                "num_systems_passed": "number_non-aromatic_rings_pass",
+                "max_distance": "non-aromatic_ring_maximum_distance_from_plane",
+            },
+        },
+        {
+            "name": "Double bond flatness",
+            "function": "flatness",
+            "parameters": {
+                "flat_systems": {
+                    "trigonal_planar_double_bonds": "[C;X3;^2](*)(*)=[C;X3;^2](*)(*)",
+                },
+                "threshold_flatness": 0.25,
+            },
+            "chosen_binary_test_output": ["flatness_passes"],
+            "rename_outputs": {
+                "flatness_passes": "Double bond flatness",
+                "num_systems_checked": "number_double_bonds_checked",
+                "num_systems_passed": "number_double_bonds_pass",
+                "max_distance": "double_bond_maximum_distance_from_plane",
+            },
+        },
+        {
+            "name": "Energy ratio",
+            "function": "energy_ratio",
+            "parameters": {
+                "threshold_energy_ratio": 100.0,
+                "ensemble_number_conformations": 50,
+                "inchi_strict": False,
+            },
+            "chosen_binary_test_output": ["energy_ratio_passes"],
+            "rename_outputs": {"energy_ratio_passes": "Internal energy"},
+        },
+    ],
+    "loading": {
+        "mol_pred": {
+            "cleanup": False,
+            "sanitize": False,
+            "add_hs": False,
+            "assign_stereo": False,
+            "load_all": True,
+        },
+        "mol_true": {
+            "cleanup": False,
+            "sanitize": False,
+            "add_hs": False,
+            "assign_stereo": False,
+            "load_all": True,
+        },
+        "mol_cond": {
+            "cleanup": False,
+            "sanitize": False,
+            "add_hs": False,
+            "assign_stereo": False,
+            "proximityBonding": False,
+        },
+    },
+}
+
+_POSEBUSTERS_STAGE_COUNTS: Dict[str, int] = {
+    "basic": 4,
+    "geometry": 5,
+    "full": len(_POSEBUSTERS_BASE_CONFIG["modules"]),
+}
+
+_POSEBUSTERS_RUNNER_CACHE: Dict[Tuple[str, int, int, int], PoseBusters] = {}
+_POSEBUSTERS_ENERGY_WARNING_EMITTED = False
+
+
+def _normalize_posebusters_config(raw_cfg: Any) -> PoseBustersRuntimeConfig:
+    """Normalize user-provided config objects/dicts into a runtime config."""
+    if isinstance(raw_cfg, PoseBustersRuntimeConfig):
+        return raw_cfg
+    if raw_cfg is None:
+        return PoseBustersRuntimeConfig()
+    if isinstance(raw_cfg, str):
+        data: Dict[str, Any] = {"mode": raw_cfg}
+    elif isinstance(raw_cfg, dict):
+        data = raw_cfg
+    else:
+        data = {
+            "mode": getattr(raw_cfg, "mode", None),
+            "max_workers": getattr(raw_cfg, "max_workers", None),
+            "chunk_size": getattr(raw_cfg, "chunk_size", None),
+            "energy_num_threads": getattr(raw_cfg, "energy_num_threads", None),
+        }
+
+    mode = str(data.get("mode", "off") or "off").lower()
+    if mode not in {"off", "basic", "geometry", "full"}:
+        logger.warning(f"Unknown PoseBusters mode '{mode}'. Falling back to 'off'.")
+        mode = "off"
+
+    def _to_int(value: Any, default: int) -> int:
+        if value is None:
+            return default
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    max_workers = _to_int(data.get("max_workers", 0), 0)
+    chunk_size = _to_int(data.get("chunk_size", 100), 100)
+    energy_threads = _to_int(data.get("energy_num_threads", 1), 1)
+
+    global _POSEBUSTERS_ENERGY_WARNING_EMITTED
+    effective_energy_threads = energy_threads
+    if mode == "full" and max_workers > 0 and energy_threads != 1:
+        if not _POSEBUSTERS_ENERGY_WARNING_EMITTED:
+            logger.info(
+                "[reward_v3] Clamping PoseBusters energy_num_threads to 1 when using multiprocessing "
+                "to avoid CPU oversubscription."
+            )
+            _POSEBUSTERS_ENERGY_WARNING_EMITTED = True
+        effective_energy_threads = 1
+
+    return PoseBustersRuntimeConfig(
+        mode=mode,
+        max_workers=max_workers,
+        chunk_size=chunk_size,
+        energy_num_threads=effective_energy_threads,
+    )
+
+
+def _build_posebusters_config(mode: str, energy_threads: int) -> Dict[str, Any]:
+    """Return a PoseBusters config dictionary tailored to the requested mode."""
+    if mode not in _POSEBUSTERS_STAGE_COUNTS:
+        raise ValueError(f"Unsupported PoseBusters mode '{mode}'.")
+
+    module_count = _POSEBUSTERS_STAGE_COUNTS[mode]
+    modules = deepcopy(_POSEBUSTERS_BASE_CONFIG["modules"][:module_count])
+    if mode == "full" and modules:
+        energy_module = modules[-1]
+        if energy_module.get("function") == "energy_ratio":
+            params = energy_module.setdefault("parameters", {})
+            params["num_threads"] = energy_threads
+    return {
+        "modules": modules,
+        "loading": deepcopy(_POSEBUSTERS_BASE_CONFIG["loading"]),
+    }
+
+
+def _get_posebusters_runner(settings: PoseBustersRuntimeConfig) -> PoseBusters:
+    """Return (and cache) a PoseBusters runner for the given settings."""
+    if PoseBusters is None:
+        raise RuntimeError("PoseBusters package is unavailable, but posebusters mode is enabled.")
+    cache_key = (
+        settings.mode,
+        settings.max_workers,
+        settings.chunk_size,
+        settings.energy_num_threads,
+    )
+    runner = _POSEBUSTERS_RUNNER_CACHE.get(cache_key)
+    if runner is None:
+        config_dict = _build_posebusters_config(settings.mode, settings.energy_num_threads)
+        runner = PoseBusters(
+            config=config_dict,
+            max_workers=settings.max_workers,
+            chunk_size=(settings.chunk_size if settings.chunk_size > 0 else None),
+        )
+        _POSEBUSTERS_RUNNER_CACHE[cache_key] = runner
+    return runner
+
+
+def _extract_posebusters_pass_vector(table: pd.DataFrame, expected_len: int) -> List[bool]:
+    """Extract per-row pass/fail booleans from a PoseBusters result table."""
+    if table is None or table.empty:
+        return [False] * expected_len
+    bool_df = table.select_dtypes(include=["bool"])
+    if bool_df.empty:
+        return [False] * expected_len
+    passes_raw = bool_df.all(axis=1)
+    passes: List[bool] = []
+    for value in passes_raw.tolist():
+        if value is pd.NA or value is None:
+            passes.append(False)
+        else:
+            passes.append(bool(value))
+    if len(passes) < expected_len:
+        passes.extend([False] * (expected_len - len(passes)))
+    elif len(passes) > expected_len:
+        passes = passes[:expected_len]
+    return passes
 
 
 def sample_array(values: np.ndarray, max_samples: int) -> np.ndarray:
@@ -392,6 +693,64 @@ def compute_pairwise_rollout_distances(
     return np.array(distances, dtype=np.float32)
 
 
+def apply_posebusters_gate(
+    rollout_mols: List[Optional[Chem.Mol]],
+    base_valid_mask: np.ndarray,
+    settings: PoseBustersRuntimeConfig,
+) -> Tuple[np.ndarray, PoseBustersGateSummary]:
+    """Apply PoseBusters gating atop the base validity mask."""
+    summary = PoseBustersGateSummary()
+    if settings.mode == "off":
+        return base_valid_mask, summary
+
+    valid_indices = [
+        idx
+        for idx, flag in enumerate(base_valid_mask)
+        if flag and rollout_mols[idx] is not None
+    ]
+    if not valid_indices:
+        return base_valid_mask, summary
+
+    summary.checked = len(valid_indices)
+    try:
+        runner = _get_posebusters_runner(settings)
+    except Exception as exc:  # pragma: no cover - depends on runtime environments
+        logger.warning(
+            "[reward_v3] PoseBusters unavailable (%s); marking %d samples invalid.",
+            exc,
+            summary.checked,
+        )
+        updated = base_valid_mask.copy()
+        updated[valid_indices] = False
+        summary.errors = summary.checked
+        return updated, summary
+
+    mol_batch = [rollout_mols[i] for i in valid_indices]
+    start = time.perf_counter()
+    try:
+        report = runner.bust(mol_pred=mol_batch, full_report=False)
+        if not isinstance(report, pd.DataFrame):
+            raise TypeError("PoseBusters returned an unexpected result.")
+    except Exception as exc:  # pragma: no cover - depends on PoseBusters runtime
+        logger.warning("[reward_v3] PoseBusters execution failed: %s", exc)
+        updated = base_valid_mask.copy()
+        updated[valid_indices] = False
+        summary.errors = summary.checked
+        summary.elapsed_ms = (time.perf_counter() - start) * 1000.0
+        return updated, summary
+
+    summary.elapsed_ms = (time.perf_counter() - start) * 1000.0
+    passes = _extract_posebusters_pass_vector(report, len(valid_indices))
+    summary.passed = int(sum(passes))
+    summary.failed = summary.checked - summary.passed
+
+    updated_mask = base_valid_mask.copy()
+    for idx, passed in zip(valid_indices, passes):
+        updated_mask[idx] = bool(passed)
+
+    return updated_mask, summary
+
+
 # ============================================================================
 # Step E: Term 3 - Hard Matching Bonus r^match
 # ============================================================================
@@ -600,6 +959,11 @@ def compute_group_reward(
             soft_cov_sample=empty_sample,
             pairwise_sample=empty_sample,
             valid_count=0,
+            posebusters_checked=0,
+            posebusters_passed=0,
+            posebusters_failed=0,
+            posebusters_errors=0,
+            posebusters_time_ms=0.0,
         )
         return empty_rewards, metrics
 
@@ -635,6 +999,7 @@ def compute_group_reward(
     mask_graph = np.array(graph_match_flags, dtype=bool)
     mask_parsed = np.array(parsed_flags, dtype=bool)
     graph_match_rate = float(np.mean(mask_graph)) if K > 0 else 0.0
+    pose_summary = PoseBustersGateSummary()
 
     if not np.any(mask_graph):
         metrics = GroupMetrics(
@@ -662,34 +1027,55 @@ def compute_group_reward(
             soft_cov_sample=empty_sample,
             pairwise_sample=empty_sample,
             valid_count=0,
+            posebusters_checked=0,
+            posebusters_passed=0,
+            posebusters_failed=0,
+            posebusters_errors=0,
+            posebusters_time_ms=0.0,
         )
         return empty_rewards, metrics
+    mask_valid_base = mask_graph & mask_parsed
+    pose_cfg = _normalize_posebusters_config(getattr(config.grpo, "posebusters", None))
+    if np.any(mask_valid_base):
+        mask_valid_bool, pose_summary = apply_posebusters_gate(
+            rollout_mols,
+            mask_valid_base.astype(bool, copy=False),
+            pose_cfg,
+        )
+    else:
+        mask_valid_bool = mask_valid_base.astype(bool, copy=False)
 
-    mask_graph_parsed = mask_graph & mask_parsed
-    validity_for_distance = mask_graph_parsed.astype(np.int32)
+    stats.posebusters_checked += pose_summary.checked
+    stats.posebusters_failed += pose_summary.failed
+    stats.posebusters_errors += pose_summary.errors
+    stats.posebusters_time_ms += pose_summary.elapsed_ms
+    stats.posebusters_successes += pose_summary.passed
+    stats.posebusters_failures += pose_summary.failed + pose_summary.errors
+
+    validity_for_distance = mask_valid_bool.astype(np.int32, copy=False)
 
     with profile_section(profiler, "reward_rmsd"):
         D = compute_distance_matrix(rollout_mols, reference_mols, validity_for_distance)
 
     d_i_all = np.min(D, axis=1) if M > 0 else np.full(K, np.inf, dtype=np.float32)
     mask_finite = np.isfinite(d_i_all)
-    mask_valid_final = mask_graph_parsed & mask_finite
 
-    problematic_mask = mask_graph_parsed & (~mask_finite)
+    problematic_mask = mask_valid_bool & (~mask_finite)
     num_problematic = int(np.count_nonzero(problematic_mask))
-    if hard_rmsd_gate and num_problematic > 0:
-        logger.warning(
-            f"[reward_v3] RMSD-gate dropped {num_problematic}/"
-            f"{int(np.count_nonzero(mask_graph_parsed))} graph-valid rollouts (no finite RMSD)."
-        )
+    if num_problematic > 0:
         stats.failed_rmsd += num_problematic
-    elif not hard_rmsd_gate and num_problematic > 0:
-        logger.warning(
-            f"[reward_v3] RMSD unavailable for {num_problematic} graph-valid rollouts; "
-            "treating rewards as invalid (r_floor)."
-        )
+        if hard_rmsd_gate:
+            logger.warning(
+                f"[reward_v3] {num_problematic} PoseBusters-valid rollouts "
+                "lacked finite RMSD; quality/coverage rewards will be zero for them."
+            )
+        else:
+            logger.warning(
+                f"[reward_v3] {num_problematic} PoseBusters-valid rollouts "
+                "lacked finite RMSD; continuing with zeroed RMSD-based rewards."
+            )
 
-    validity_final = mask_valid_final.astype(np.int32)
+    validity_final = mask_valid_bool.astype(np.int32, copy=False)
 
     with profile_section(profiler, "reward_smcov"):
         smcov_result = compute_smooth_coverage_reward(D, validity_final, rho, return_details=True)
@@ -704,7 +1090,7 @@ def compute_group_reward(
     with profile_section(profiler, "reward_qual"):
         r_qual = compute_quality_reward(D, validity_final, sigma)
 
-    valid_mask = mask_valid_final
+    valid_mask = mask_valid_bool
     eligible_matrix = valid_mask[:, None] & (D < delta)
     refs_hit = int(np.count_nonzero(eligible_matrix.any(axis=0)))
     num_valid = int(np.count_nonzero(valid_mask))
@@ -796,6 +1182,11 @@ def compute_group_reward(
         soft_cov_sample=soft_cov_sample,
         pairwise_sample=pairwise_dists,
         valid_count=valid_count,
+        posebusters_checked=pose_summary.checked,
+        posebusters_passed=pose_summary.passed,
+        posebusters_failed=pose_summary.failed,
+        posebusters_errors=pose_summary.errors,
+        posebusters_time_ms=pose_summary.elapsed_ms,
     )
 
     return rewards, metrics
@@ -935,6 +1326,11 @@ def reward_function(
         num_matched_list = [float(m.num_matched) for m in metrics_list]
         soft_cov_means = [m.soft_cov_mean for m in metrics_list]
         pct_over_half = [m.pct_gt_0_5 for m in metrics_list]
+        posebusters_checks = [float(m.posebusters_checked) for m in metrics_list]
+        posebusters_passes = [float(m.posebusters_passed) for m in metrics_list]
+        posebusters_failures = [float(m.posebusters_failed) for m in metrics_list]
+        posebusters_errors = [float(m.posebusters_errors) for m in metrics_list]
+        posebusters_times = [m.posebusters_time_ms for m in metrics_list]
 
         d_samples = _concat([m.d_min_sample for m in metrics_list])
         matched_samples = _concat([m.matched_dists_sample for m in metrics_list])
@@ -955,6 +1351,16 @@ def reward_function(
             r_match_mean = sum(m.r_match_mean * m.valid_count for m in metrics_list) / total_valid
         else:
             r_qual_mean = r_smcov_mean = r_match_mean = 0.0
+
+        total_posebusters_checked = sum(posebusters_checks)
+        total_posebusters_passed = sum(posebusters_passes)
+        total_posebusters_failed = sum(posebusters_failures)
+        total_posebusters_errors = sum(posebusters_errors)
+        posebusters_pass_rate = (
+            total_posebusters_passed / total_posebusters_checked
+            if total_posebusters_checked > 0
+            else 0.0
+        )
 
         essential_metrics["validity_rate"] = _nanmean(validity_rates)
         essential_metrics["graph_match_rate"] = _nanmean(graph_match_rates)
@@ -988,6 +1394,15 @@ def reward_function(
         if eligible_samples.size > 0:
             essential_metrics["match/eligible_dist_p50"] = float(np.percentile(eligible_samples, 50))
         essential_metrics["reward/matched_total"] = float(total_matched)
+        essential_metrics["posebusters/pass_rate"] = posebusters_pass_rate
+        essential_metrics["posebusters/fail_rate"] = (
+            total_posebusters_failed / total_posebusters_checked if total_posebusters_checked > 0 else 0.0
+        )
+        essential_metrics["posebusters/error_rate"] = (
+            total_posebusters_errors / total_posebusters_checked if total_posebusters_checked > 0 else 0.0
+        )
+        if posebusters_times:
+            essential_metrics["posebusters/time_ms_per_group"] = float(_nanmean(posebusters_times))
 
         should_log_metrics = wandb.run is not None and (step_index % log_every_steps == 0)
         if should_log_metrics:
@@ -1001,7 +1416,10 @@ def reward_function(
             f"  matching: max_possible={total_max_possible}, "
             f"matched={total_matched}, match_eff={match_efficiency_total:.3f}\n"
             f"  rewards: r_qual={r_qual_mean:.3f}, r_smcov={r_smcov_mean:.3f}, "
-            f"r_match={r_match_mean:.3f}"
+            f"r_match={r_match_mean:.3f}\n"
+            f"  posebusters: checked={int(total_posebusters_checked)}, "
+            f"passed={int(total_posebusters_passed)}, failed={int(total_posebusters_failed)}, "
+            f"errors={int(total_posebusters_errors)}, pass_rate={posebusters_pass_rate:.3f}"
         )
         logger.info(batch_log)
 

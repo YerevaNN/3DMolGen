@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import pytest
 from types import SimpleNamespace
 
@@ -41,6 +42,7 @@ def reward_harness(monkeypatch):
                 enable_pairwise_rmsd_logging=False,
                 pairwise_rmsd_log_every=50,
                 log_every_steps=1,
+                posebusters=SimpleNamespace(mode="off", max_workers=0, chunk_size=100, energy_num_threads=1),
             )
             base.update(overrides)
             return SimpleNamespace(grpo=SimpleNamespace(**base))
@@ -176,4 +178,83 @@ def test_reward_function_matches_golden_batch(tmp_path, reward_harness):
         0.04110811650753021,
     ]
     assert np.allclose(rewards, expected, atol=1e-6)
+
+
+def test_posebusters_mode_off_skips_runner(tmp_path, reward_harness, monkeypatch):
+    """Ensure PoseBusters is not touched when the mode is 'off'."""
+    def boom(*_args, **_kwargs):
+        raise AssertionError("PoseBusters runner should not be requested when mode=off")
+
+    monkeypatch.setattr(reward_mod, "_get_posebusters_runner", boom)
+    prompts = ["[SMILES]CC[/SMILES]"]
+    completions = ["[CONFORMER]mol_good[/CONFORMER]"]
+
+    rewards = reward_harness.run(
+        tmp_path,
+        prompts,
+        completions,
+        posebusters={"mode": "off"},
+        num_generations=1,
+    )
+    assert len(rewards) == 1
+
+
+def test_posebusters_basic_masks_only_valid_entries(monkeypatch):
+    """PoseBusters should evaluate only base-valid mols and update mask accordingly."""
+    captured = {}
+
+    class StubRunner:
+        def bust(self, mol_pred, full_report=False):
+            captured["mol_pred"] = list(mol_pred)
+            return pd.DataFrame(
+                {
+                    "mol_pred_loaded": [True, False],
+                    "sanitization": [True, True],
+                }
+            )
+
+    monkeypatch.setattr(reward_mod, "_get_posebusters_runner", lambda *_: StubRunner())
+    rollout_mols = [DummyMol("good"), None, DummyMol("bad")]
+    base_mask = np.array([True, False, True], dtype=bool)
+    settings = reward_mod.PoseBustersRuntimeConfig(mode="basic")
+
+    updated_mask, summary = reward_mod.apply_posebusters_gate(rollout_mols, base_mask, settings)
+
+    assert len(captured["mol_pred"]) == 2  # only the True entries
+    assert captured["mol_pred"][0].name == "good"
+    assert captured["mol_pred"][1].name == "bad"
+    assert updated_mask.tolist() == [True, False, False]
+    assert summary.checked == 2
+    assert summary.passed == 1
+    assert summary.failed == 1
+
+
+def test_posebusters_full_clamps_energy_threads():
+    """Full mode with multiprocessing should force energy module threads to 1."""
+    settings = reward_mod._normalize_posebusters_config(
+        {"mode": "full", "max_workers": 4, "energy_num_threads": 8}
+    )
+    assert settings.energy_num_threads == 1
+    config_dict = reward_mod._build_posebusters_config("full", settings.energy_num_threads)
+    energy_module = config_dict["modules"][-1]
+    assert energy_module["function"] == "energy_ratio"
+    assert energy_module["parameters"]["num_threads"] == 1
+
+
+def test_posebusters_exception_marks_invalid(monkeypatch):
+    """If PoseBusters raises, all checked samples should be flagged as errors."""
+    class ExplodingRunner:
+        def bust(self, *_args, **_kwargs):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(reward_mod, "_get_posebusters_runner", lambda *_: ExplodingRunner())
+    rollout_mols = [DummyMol("a"), DummyMol("b")]
+    base_mask = np.array([True, True], dtype=bool)
+    settings = reward_mod.PoseBustersRuntimeConfig(mode="full")
+
+    updated_mask, summary = reward_mod.apply_posebusters_gate(rollout_mols, base_mask, settings)
+    assert updated_mask.tolist() == [False, False]
+    assert summary.checked == 2
+    assert summary.errors == 2
+    assert summary.failed == 0
 
