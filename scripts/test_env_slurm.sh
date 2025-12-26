@@ -213,7 +213,8 @@ print(f"         loguru installed")
 
 test_import("rich", """
 import rich
-print(f"         rich {rich.__version__}")
+from rich.console import Console
+print(f"         rich installed")
 """)
 
 # =============================================================================
