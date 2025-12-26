@@ -110,7 +110,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 
 # 3. Install PyTorch with CUDA 12.8 (using uv for speed)
-uv pip install torch==2.9.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+uv pip install torch==2.9.1 --index-url https://download.pytorch.org/whl/cu128
 
 # 4. Install Flash Attention (prebuilt wheel)
 # Option A: From local copy (YerevaNN cluster)
