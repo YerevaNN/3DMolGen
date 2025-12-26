@@ -18,14 +18,12 @@ _geom_data_path = None
 
 @contextmanager
 def _suppress_rdkit_pickle_warnings():
-    """Temporarily raise RDKit logger level to suppress pickle version warnings."""
-    rd_logger = RDLogger.logger()
-    previous_level = rd_logger.level
-    rd_logger.setLevel(logging.ERROR)
+    """Temporarily mute rdApp warnings emitted during RDKit pickle loading."""
+    RDLogger.DisableLog("rdApp.warning")
     try:
         yield
     finally:
-        rd_logger.setLevel(previous_level)
+        RDLogger.EnableLog("rdApp.warning")
 
 def load_smiles_mapping(mapping_path: str) -> None:
     """Load the SMILES mapping from a JSON file.
@@ -76,7 +74,7 @@ def load_ground_truths(key_mol_smiles, num_gt: int = 16):
     # Get the original GEOM SMILES from the mapping
     filepath = _smiles_mapping.get(key_mol_smiles)
     if filepath is None:
-        logger.error("Missing SMILES mapping for pad key %s", key_mol_smiles)
+        logger.error("Missing SMILES mapping for pad key {}", key_mol_smiles)
         return None
 
     conformers = None
@@ -86,14 +84,14 @@ def load_ground_truths(key_mol_smiles, num_gt: int = 16):
         return conformers
     except FileNotFoundError as e:
         logger.error(
-            "Ground-truth pickle missing for %s at %s: %s",
+            "Ground-truth pickle missing for {} at {}: {}",
             key_mol_smiles,
             filepath,
             e,
         )
     except Exception as e:
-        logger.error(
-            "Error loading ground truth for %s at %s: %s\n%r",
+        logger.exception(
+            "Error loading ground truth for {} at {}: {}\nPayload snapshot: {}",
             key_mol_smiles,
             filepath,
             e,

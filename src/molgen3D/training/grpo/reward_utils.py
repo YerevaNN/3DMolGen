@@ -862,24 +862,24 @@ def summarize_batch_metrics(
     delta: float,
 ) -> Dict[str, float]:
     def _safe_ratio(num: float, denom: float) -> float:
-        return float(num / denom) if denom > 0 else float("nan")
+        return float(num / denom) if denom > 0 else 0.0
 
     def _safe_mean(values: Sequence[float]) -> float:
         if not values:
-            return float("nan")
+            return 0.0
         arr = np.asarray(values, dtype=np.float32)
         mask = np.isfinite(arr)
         if not np.any(mask):
-            return float("nan")
+            return 0.0
         return float(np.mean(arr[mask]))
 
     def _safe_percentile(values: Sequence[float], pct: float) -> float:
         if not values:
-            return float("nan")
+            return 0.0
         arr = np.asarray(values, dtype=np.float32)
         mask = np.isfinite(arr)
         if not np.any(mask):
-            return float("nan")
+            return 0.0
         return float(np.percentile(arr[mask], pct))
 
     def _concat(arrays: Sequence[np.ndarray]) -> np.ndarray:
@@ -937,14 +937,14 @@ def summarize_batch_metrics(
     result["pose/pass_rate"] = _safe_ratio(pose_passed_total, pose_checked_total)
     result["pose/error_rate"] = _safe_ratio(pose_errors_total, pose_checked_total)
 
-    result["rmsd/d_min_mean"] = float(np.mean(all_d_min)) if all_d_min.size > 0 else float("nan")
-    result["rmsd/d_min_p50"] = float(np.percentile(all_d_min, 50)) if all_d_min.size > 0 else float("nan")
-    result["rmsd/d_min_p90"] = float(np.percentile(all_d_min, 90)) if all_d_min.size > 0 else float("nan")
+    result["rmsd/d_min_mean"] = float(np.mean(all_d_min)) if all_d_min.size > 0 else 0.0
+    result["rmsd/d_min_p50"] = float(np.percentile(all_d_min, 50)) if all_d_min.size > 0 else 0.0
+    result["rmsd/d_min_p90"] = float(np.percentile(all_d_min, 90)) if all_d_min.size > 0 else 0.0
     result["rmsd/frac_under_delta"] = (
-        float(np.mean(all_d_min < delta)) if all_d_min.size > 0 else float("nan")
+        float(np.mean(all_d_min < delta)) if all_d_min.size > 0 else 0.0
     )
     result["rmsd/frac_under_2delta"] = (
-        float(np.mean(all_d_min < (2 * delta))) if all_d_min.size > 0 else float("nan")
+        float(np.mean(all_d_min < (2 * delta))) if all_d_min.size > 0 else 0.0
     )
 
     result["cov/refs_hit_mean"] = _safe_mean(refs_hit_values)
@@ -958,10 +958,10 @@ def summarize_batch_metrics(
     result["match/max_possible_mean"] = _safe_mean(max_possible_values)
     result["match/efficiency_mean"] = _safe_mean(efficiency_values)
     result["match/matched_dist_p50"] = (
-        float(np.percentile(all_matched, 50)) if all_matched.size > 0 else float("nan")
+        float(np.percentile(all_matched, 50)) if all_matched.size > 0 else 0.0
     )
     result["match/matched_dist_p90"] = (
-        float(np.percentile(all_matched, 90)) if all_matched.size > 0 else float("nan")
+        float(np.percentile(all_matched, 90)) if all_matched.size > 0 else 0.0
     )
     result["match/eligible_edge_density"] = _safe_ratio(eligible_edges_total, possible_edges_total)
 
@@ -977,10 +977,10 @@ def summarize_batch_metrics(
             np.corrcoef(refs_arr[valid_mask], soft_cov_arr[valid_mask])[0, 1]
         )
     else:
-        result["smcov/corr_with_refs_hit"] = float("nan")
+        result["smcov/corr_with_refs_hit"] = 0.0
 
-    reward_total_mean = float(np.mean(all_rewards)) if all_rewards.size > 0 else float("nan")
-    reward_total_std = float(np.std(all_rewards)) if all_rewards.size > 0 else float("nan")
+    reward_total_mean = float(np.mean(all_rewards)) if all_rewards.size > 0 else 0.0
+    reward_total_std = float(np.std(all_rewards)) if all_rewards.size > 0 else 0.0
     result["reward/total_mean"] = reward_total_mean
     result["reward/total_std"] = reward_total_std
 
@@ -990,13 +990,13 @@ def summarize_batch_metrics(
     result["reward/comp_qual_mean"] = comp_qual_mean
     result["reward/comp_smcov_mean"] = comp_smcov_mean
     result["reward/comp_match_mean"] = comp_match_mean
-    if np.isfinite(comp_smcov_mean) and np.isfinite(reward_total_mean):
+    if np.isfinite(comp_smcov_mean) and np.isfinite(reward_total_mean) and reward_total_mean != 0.0:
         result["reward/comp_smcov_frac"] = comp_smcov_mean / (reward_total_mean + 1e-8)
     else:
-        result["reward/comp_smcov_frac"] = float("nan")
+        result["reward/comp_smcov_frac"] = 0.0
 
     result["div/pairwise_rmsd_p50"] = (
-        float(np.percentile(all_pairwise, 50)) if all_pairwise.size > 0 else float("nan")
+        float(np.percentile(all_pairwise, 50)) if all_pairwise.size > 0 else 0.0
     )
 
     return result
