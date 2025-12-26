@@ -157,7 +157,7 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     )
 
     # Load dataset from text file and create prompt column
-    with open(config.dataset.dataset_path, 'r') as f:
+    with open(config.dataset.dataset_path, 'r', encoding='utf-8', errors='replace') as f:
         prompts = [
             line.strip()
             for line in f
@@ -243,6 +243,7 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         train_dataset=dataset,
         callbacks=[numerical_callback] if numerical_callback is not None else None,
     )
+
     
     # Set epsilon parameters on trainer (not available in GRPOConfig)
     epsilon_low = float(config.grpo.epsilon_low)

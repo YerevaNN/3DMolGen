@@ -67,7 +67,7 @@ def build_launch_command(args, work_dir: str | None = None, accelerate_config_pa
 def load_and_update_configs(args, project_root: Path):
     """Load and update configuration files with command line overrides."""
     # Load base config
-    with open(args.config, "r") as f:
+    with open(args.config, "r", encoding='utf-8', errors='replace') as f:
         config_data = yaml.safe_load(f)
     
     # Override device settings from command line - ALWAYS override
@@ -77,7 +77,7 @@ def load_and_update_configs(args, project_root: Path):
         logger.info(f"Overriding device config: {args.device} with {args.ngpus} GPUs")
     
     # Write updated config back to file immediately
-    with open(args.config, "w") as f:
+    with open(args.config, "w", encoding='utf-8') as f:
         yaml.safe_dump(config_data, f)
     logger.info(f"Updated config file with CLI overrides: {args.device} with {args.ngpus} GPUs")
 
@@ -86,10 +86,10 @@ def load_and_update_configs(args, project_root: Path):
         accelerate_config_path = project_root / "src" / "molgen3D" / "config" / "grpo" / f"{args.strategy}.conf"
         if not accelerate_config_path.exists():
             raise FileNotFoundError(f"Accelerate config not found for strategy '{args.strategy}': {accelerate_config_path}")
-        with open(accelerate_config_path, "r") as f:
+        with open(accelerate_config_path, "r", encoding='utf-8', errors='replace') as f:
             accelerate_config = yaml.safe_load(f)
         accelerate_config["num_processes"] = args.ngpus
-        with open(accelerate_config_path, "w") as f:
+        with open(accelerate_config_path, "w", encoding='utf-8') as f:
             yaml.safe_dump(accelerate_config, f)
     
     return config_data, accelerate_config_path
@@ -191,7 +191,7 @@ def setup_job_executor(device_type, num_gpus, run_name):
 def update_config_in_place(config, config_file_path):
     """Update the YAML config file in place with runtime paths."""
     # Load the existing YAML file
-    with open(config_file_path, "r") as f:
+    with open(config_file_path, "r", encoding='utf-8', errors='replace') as f:
         config_data = yaml.safe_load(f)
     
     # Update only the runtime paths, preserving the base paths
@@ -200,12 +200,12 @@ def update_config_in_place(config, config_file_path):
         config_data['grpo']['checkpoint_dir'] = config.grpo.checkpoint_dir
     
     # Write back to the same file
-    with open(config_file_path, "w") as f:
+    with open(config_file_path, "w", encoding='utf-8') as f:
         yaml.safe_dump(config_data, f, default_flow_style=False, sort_keys=False)
 
 def save_updated_config(config, config_file_path):
     """Save the updated configuration to file."""
-    with open(config_file_path, "w") as f:
+    with open(config_file_path, "w", encoding='utf-8') as f:
         yaml.safe_dump({
             'model': config.model.__dict__,
             'generation': config.generation.__dict__,
