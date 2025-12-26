@@ -859,178 +859,144 @@ def compute_pairwise_rollout_distances(
 
 def summarize_batch_metrics(
     metrics_list: Sequence["GroupMetrics"],
-    lambda_qual: float,
-    lambda_smcov: float,
-    lambda_match: float,
+    delta: float,
 ) -> Dict[str, float]:
-    def _nanmean(values: List[float]) -> float:
+    def _safe_ratio(num: float, denom: float) -> float:
+        return float(num / denom) if denom > 0 else float("nan")
+
+    def _safe_mean(values: Sequence[float]) -> float:
         if not values:
-            return 0.0
+            return float("nan")
         arr = np.asarray(values, dtype=np.float32)
-        if arr.size == 0:
-            return 0.0
-        if np.isnan(arr).all():
-            return 0.0
-        return float(np.nanmean(arr))
+        mask = np.isfinite(arr)
+        if not np.any(mask):
+            return float("nan")
+        return float(np.mean(arr[mask]))
 
-    def _concat(samples: List[np.ndarray]) -> np.ndarray:
-        arrays = [arr for arr in samples if arr.size > 0]
-        return np.concatenate(arrays) if arrays else EMPTY_FLOAT32
+    def _safe_percentile(values: Sequence[float], pct: float) -> float:
+        if not values:
+            return float("nan")
+        arr = np.asarray(values, dtype=np.float32)
+        mask = np.isfinite(arr)
+        if not np.any(mask):
+            return float("nan")
+        return float(np.percentile(arr[mask], pct))
 
-    essential_metrics: Dict[str, float] = {}
+    def _concat(arrays: Sequence[np.ndarray]) -> np.ndarray:
+        filtered = [arr for arr in arrays if arr.size > 0]
+        return np.concatenate(filtered) if filtered else EMPTY_FLOAT32
+
     if not metrics_list:
-        essential_metrics.update(
-            {
-                "validity_rate": 0.0,
-                "graph_match_rate": 0.0,
-                "finite_rmsd_rate": 0.0,
-                "match/match_efficiency": 0.0,
-                "posebusters/pass_rate": 0.0,
-                "posebusters/fail_rate": 0.0,
-                "posebusters/error_rate": 0.0,
-                "reward/component_quality": 0.0,
-                "reward/component_smcov": 0.0,
-                "reward/component_match": 0.0,
-                "sampling/approx_percentiles": 0.0,
-                "posebusters/checked_total": 0.0,
-                "posebusters/passed_total": 0.0,
-                "posebusters/failed_total": 0.0,
-                "posebusters/errors_total": 0.0,
-                "posebusters/time_ms_per_group": 0.0,
-                "match/matched_total": 0.0,
-                "match/max_possible_total": 0.0,
-            }
-        )
-        return essential_metrics
+        return {}
 
-    validity_rates = [m.validity_rate for m in metrics_list]
-    graph_match_rates = [m.graph_match_rate for m in metrics_list]
-    finite_rmsd_rates = [m.finite_rmsd_rate for m in metrics_list]
-    fraction_under_delta = [m.fraction_under_delta for m in metrics_list]
-    refs_hit = [float(m.refs_hit) for m in metrics_list]
-    num_matched_list = [float(m.num_matched) for m in metrics_list]
-    d_min_means = [m.d_min_mean for m in metrics_list]
-    d_min_p50s = [m.d_min_p50 for m in metrics_list]
-    d_min_p90s = [m.d_min_p90 for m in metrics_list]
+    result: Dict[str, float] = {}
+
+    total_rollouts = sum(m.K for m in metrics_list)
+    total_graph = sum(m.graph_match_count for m in metrics_list)
+    total_parsed = sum(m.rdkit_parse_count for m in metrics_list)
+    total_base_valid = sum(m.base_valid_count for m in metrics_list)
+    total_final_valid = sum(m.valid_rollouts for m in metrics_list)
+
+    pose_checked_total = sum(m.pose_checked for m in metrics_list)
+    pose_passed_total = sum(m.pose_passed for m in metrics_list)
+    pose_errors_total = sum(m.pose_errors for m in metrics_list)
+
+    refs_hit_values = [float(m.refs_hit) for m in metrics_list]
+    cov_ratio_values = [m.cov_ratio for m in metrics_list]
+    unique_refs_values = [float(m.unique_nearest_refs) for m in metrics_list]
+    collision_rates = [m.nearest_collision_rate for m in metrics_list]
+    valid_rollout_values = [float(m.valid_rollouts) for m in metrics_list]
+
+    num_matched_values = [float(m.num_matched) for m in metrics_list]
+    max_possible_values = [float(m.max_possible_matches) for m in metrics_list]
+    efficiency_values = [m.match_efficiency for m in metrics_list]
+
     soft_cov_means = [m.soft_cov_mean for m in metrics_list]
-    pct_over_half = [m.pct_gt_0_5 for m in metrics_list]
-    posebusters_checks = [float(m.posebusters_checked) for m in metrics_list]
-    posebusters_passes = [float(m.posebusters_passed) for m in metrics_list]
-    posebusters_failures = [float(m.posebusters_failed) for m in metrics_list]
-    posebusters_errors = [float(m.posebusters_errors) for m in metrics_list]
-    posebusters_times = [m.posebusters_time_ms for m in metrics_list]
-    sampling_flags = [m.sampled_percentiles for m in metrics_list]
+    pct_cov_gt_0p1_values = [m.pct_cov_gt_0p1 for m in metrics_list]
+    pct_cov_gt_0p5_values = [m.pct_cov_gt_0p5 for m in metrics_list]
 
-    d_samples = _concat([m.d_min_sample for m in metrics_list])
-    matched_samples = _concat([m.matched_dists_sample for m in metrics_list])
-    eligible_samples = _concat([m.eligible_dists_sample for m in metrics_list])
-    soft_cov_samples = _concat([m.soft_cov_sample for m in metrics_list])
-    pairwise_samples = _concat([m.pairwise_sample for m in metrics_list])
+    all_d_min = _concat([m.d_min_values for m in metrics_list])
+    all_matched = _concat([m.matched_dists for m in metrics_list])
+    all_pairwise = _concat([m.pairwise_dists for m in metrics_list])
+    all_rewards = _concat([m.reward_total_values for m in metrics_list])
 
-    total_matched = int(sum(m.num_matched for m in metrics_list))
-    total_max_possible = int(sum(m.max_possible_matches for m in metrics_list))
-    match_efficiency_total = float(total_matched) / total_max_possible if total_max_possible > 0 else 0.0
-    mean_unique_refs_hit = _nanmean(refs_hit)
+    total_valid_rollouts = sum(m.valid_rollouts for m in metrics_list)
+    total_comp_qual = sum(m.comp_qual_sum for m in metrics_list)
+    total_comp_smcov = sum(m.comp_smcov_sum for m in metrics_list)
+    total_comp_match = sum(m.comp_match_sum for m in metrics_list)
 
-    total_valid = sum(m.valid_count for m in metrics_list)
-    if total_valid > 0:
-        r_qual_mean = sum(m.r_qual_mean * m.valid_count for m in metrics_list) / total_valid
-        r_smcov_mean = sum(m.r_smcov_mean * m.valid_count for m in metrics_list) / total_valid
-        r_match_mean = sum(m.r_match_mean * m.valid_count for m in metrics_list) / total_valid
+    eligible_edges_total = sum(m.eligible_edges for m in metrics_list)
+    possible_edges_total = sum(m.K * m.M for m in metrics_list)
+
+    result["gate/graph_match_rate"] = _safe_ratio(total_graph, total_rollouts)
+    result["gate/rdkit_parse_rate"] = _safe_ratio(total_parsed, total_rollouts)
+    result["gate/base_valid_rate"] = _safe_ratio(total_base_valid, total_rollouts)
+    result["gate/final_valid_rate"] = _safe_ratio(total_final_valid, total_rollouts)
+
+    result["pose/checked_rate"] = _safe_ratio(pose_checked_total, total_base_valid)
+    result["pose/pass_rate"] = _safe_ratio(pose_passed_total, pose_checked_total)
+    result["pose/error_rate"] = _safe_ratio(pose_errors_total, pose_checked_total)
+
+    result["rmsd/d_min_mean"] = float(np.mean(all_d_min)) if all_d_min.size > 0 else float("nan")
+    result["rmsd/d_min_p50"] = float(np.percentile(all_d_min, 50)) if all_d_min.size > 0 else float("nan")
+    result["rmsd/d_min_p90"] = float(np.percentile(all_d_min, 90)) if all_d_min.size > 0 else float("nan")
+    result["rmsd/frac_under_delta"] = (
+        float(np.mean(all_d_min < delta)) if all_d_min.size > 0 else float("nan")
+    )
+    result["rmsd/frac_under_2delta"] = (
+        float(np.mean(all_d_min < (2 * delta))) if all_d_min.size > 0 else float("nan")
+    )
+
+    result["cov/refs_hit_mean"] = _safe_mean(refs_hit_values)
+    result["cov/refs_hit_p50"] = _safe_percentile(refs_hit_values, 50.0)
+    result["cov/cov_ratio_mean"] = _safe_mean(cov_ratio_values)
+    result["cov/unique_nearest_refs_mean"] = _safe_mean(unique_refs_values)
+    result["cov/nearest_collision_rate_mean"] = _safe_mean(collision_rates)
+    result["cov/valid_rollouts_mean"] = _safe_mean(valid_rollout_values)
+
+    result["match/num_matched_mean"] = _safe_mean(num_matched_values)
+    result["match/max_possible_mean"] = _safe_mean(max_possible_values)
+    result["match/efficiency_mean"] = _safe_mean(efficiency_values)
+    result["match/matched_dist_p50"] = (
+        float(np.percentile(all_matched, 50)) if all_matched.size > 0 else float("nan")
+    )
+    result["match/matched_dist_p90"] = (
+        float(np.percentile(all_matched, 90)) if all_matched.size > 0 else float("nan")
+    )
+    result["match/eligible_edge_density"] = _safe_ratio(eligible_edges_total, possible_edges_total)
+
+    result["smcov/soft_cov_mean"] = _safe_mean(soft_cov_means)
+    result["smcov/pct_gt_cov_gt_0p1"] = _safe_mean(pct_cov_gt_0p1_values)
+    result["smcov/pct_gt_cov_gt_0p5"] = _safe_mean(pct_cov_gt_0p5_values)
+
+    refs_arr = np.asarray(refs_hit_values, dtype=np.float64)
+    soft_cov_arr = np.asarray(soft_cov_means, dtype=np.float64)
+    valid_mask = np.isfinite(refs_arr) & np.isfinite(soft_cov_arr)
+    if np.count_nonzero(valid_mask) >= 2:
+        result["smcov/corr_with_refs_hit"] = float(
+            np.corrcoef(refs_arr[valid_mask], soft_cov_arr[valid_mask])[0, 1]
+        )
     else:
-        r_qual_mean = r_smcov_mean = r_match_mean = 0.0
+        result["smcov/corr_with_refs_hit"] = float("nan")
 
-    total_posebusters_checked = sum(posebusters_checks)
-    total_posebusters_passed = sum(posebusters_passes)
-    total_posebusters_failed = sum(posebusters_failures)
-    total_posebusters_errors = sum(posebusters_errors)
-    posebusters_pass_rate = (
-        total_posebusters_passed / total_posebusters_checked if total_posebusters_checked > 0 else 0.0
+    reward_total_mean = float(np.mean(all_rewards)) if all_rewards.size > 0 else float("nan")
+    reward_total_std = float(np.std(all_rewards)) if all_rewards.size > 0 else float("nan")
+    result["reward/total_mean"] = reward_total_mean
+    result["reward/total_std"] = reward_total_std
+
+    comp_qual_mean = _safe_ratio(total_comp_qual, total_valid_rollouts)
+    comp_smcov_mean = _safe_ratio(total_comp_smcov, total_valid_rollouts)
+    comp_match_mean = _safe_ratio(total_comp_match, total_valid_rollouts)
+    result["reward/comp_qual_mean"] = comp_qual_mean
+    result["reward/comp_smcov_mean"] = comp_smcov_mean
+    result["reward/comp_match_mean"] = comp_match_mean
+    if np.isfinite(comp_smcov_mean) and np.isfinite(reward_total_mean):
+        result["reward/comp_smcov_frac"] = comp_smcov_mean / (reward_total_mean + 1e-8)
+    else:
+        result["reward/comp_smcov_frac"] = float("nan")
+
+    result["div/pairwise_rmsd_p50"] = (
+        float(np.percentile(all_pairwise, 50)) if all_pairwise.size > 0 else float("nan")
     )
 
-    essential_metrics["validity_rate"] = _nanmean(validity_rates)
-    essential_metrics["graph_match_rate"] = _nanmean(graph_match_rates)
-    essential_metrics["finite_rmsd_rate"] = _nanmean(finite_rmsd_rates)
-
-    essential_metrics["geom/d_min_mean"] = _nanmean(d_min_means)
-    essential_metrics["geom/d_min_p50"] = _nanmean(d_min_p50s)
-    essential_metrics["geom/d_min_p90"] = _nanmean(d_min_p90s)
-    if d_samples.size > 0:
-        essential_metrics["geom/d_min_sampled_p50"] = float(np.percentile(d_samples, 50))
-        essential_metrics["geom/d_min_sampled_p90"] = float(np.percentile(d_samples, 90))
-        essential_metrics["geom/d_min_sampled_mean"] = float(np.mean(d_samples))
-        essential_metrics["geom/d_min_sampled_size"] = float(d_samples.size)
-
-    essential_metrics["match/match_efficiency"] = match_efficiency_total
-    essential_metrics["match/num_matched"] = _nanmean(num_matched_list)
-    if matched_samples.size > 0:
-        essential_metrics["match/dist_p50"] = float(np.percentile(matched_samples, 50))
-        essential_metrics["match/dist_p90"] = float(np.percentile(matched_samples, 90))
-        essential_metrics["match/dist_mean"] = float(np.mean(matched_samples))
-        essential_metrics["match/dist_count"] = float(matched_samples.size)
-    essential_metrics["match/refs_hit"] = mean_unique_refs_hit
-
-    essential_metrics["reward/component_quality"] = float(lambda_qual * r_qual_mean)
-    essential_metrics["reward/component_smcov"] = float(lambda_smcov * r_smcov_mean)
-    essential_metrics["reward/component_match"] = float(lambda_match * r_match_mean)
-
-    if soft_cov_means:
-        essential_metrics["coverage/soft_mean"] = _nanmean(soft_cov_means)
-    if pct_over_half:
-        essential_metrics["coverage/pct_gt_0.5"] = _nanmean(pct_over_half)
-    if pairwise_samples.size > 0:
-        essential_metrics["diversity/pairwise_mean"] = float(np.mean(pairwise_samples))
-        essential_metrics["diversity/pairwise_p50"] = float(np.percentile(pairwise_samples, 50))
-        essential_metrics["diversity/pairwise_p90"] = float(np.percentile(pairwise_samples, 90))
-        essential_metrics["diversity/pairwise_count"] = float(pairwise_samples.size)
-
-    essential_metrics["fraction_under_delta"] = _nanmean(fraction_under_delta)
-    if eligible_samples.size > 0:
-        essential_metrics["match/eligible_dist_p50"] = float(np.percentile(eligible_samples, 50))
-        essential_metrics["match/eligible_dist_p90"] = float(np.percentile(eligible_samples, 90))
-        essential_metrics["match/eligible_dist_mean"] = float(np.mean(eligible_samples))
-        essential_metrics["match/eligible_count"] = float(eligible_samples.size)
-    if soft_cov_samples.size > 0:
-        essential_metrics["coverage/soft_sample_mean"] = float(np.mean(soft_cov_samples))
-        essential_metrics["coverage/soft_sample_p50"] = float(np.percentile(soft_cov_samples, 50))
-        essential_metrics["coverage/soft_sample_p90"] = float(np.percentile(soft_cov_samples, 90))
-        essential_metrics["coverage/soft_sample_count"] = float(soft_cov_samples.size)
-
-    essential_metrics["reward/matched_total"] = float(total_matched)
-    essential_metrics["match/matched_total"] = float(total_matched)
-    essential_metrics["match/max_possible_total"] = float(total_max_possible)
-    essential_metrics["sampling/approx_percentiles"] = 1.0 if any(sampling_flags) else 0.0
-
-    essential_metrics["posebusters/pass_rate"] = posebusters_pass_rate
-    essential_metrics["posebusters/fail_rate"] = (
-        total_posebusters_failed / total_posebusters_checked if total_posebusters_checked > 0 else 0.0
-    )
-    essential_metrics["posebusters/error_rate"] = (
-        total_posebusters_errors / total_posebusters_checked if total_posebusters_checked > 0 else 0.0
-    )
-    essential_metrics["posebusters/checked_total"] = float(total_posebusters_checked)
-    essential_metrics["posebusters/passed_total"] = float(total_posebusters_passed)
-    essential_metrics["posebusters/failed_total"] = float(total_posebusters_failed)
-    essential_metrics["posebusters/errors_total"] = float(total_posebusters_errors)
-    if posebusters_times:
-        essential_metrics["posebusters/time_ms_per_group"] = float(_nanmean(posebusters_times))
-
-    wandb_mod = None
-    try:  # pragma: no cover - wandb may be unavailable
-        import wandb as wandb_mod  # type: ignore
-    except Exception:  # pragma: no cover
-        wandb_mod = None
-
-    if wandb_mod is not None:
-        if d_samples.size > 0:
-            essential_metrics["geom/d_min_hist"] = wandb_mod.Histogram(d_samples)
-        if matched_samples.size > 0:
-            essential_metrics["match/dist_hist"] = wandb_mod.Histogram(matched_samples)
-        if eligible_samples.size > 0:
-            essential_metrics["match/eligible_hist"] = wandb_mod.Histogram(eligible_samples)
-        if soft_cov_samples.size > 0:
-            essential_metrics["coverage/soft_hist"] = wandb_mod.Histogram(soft_cov_samples)
-        if pairwise_samples.size > 0:
-            essential_metrics["diversity/pairwise_hist"] = wandb_mod.Histogram(pairwise_samples)
-
-    return essential_metrics
+    return result

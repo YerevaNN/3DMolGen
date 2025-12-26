@@ -39,33 +39,77 @@ class GroupMetrics:
     K: int
     M: int
     graph_match_rate: float
-    finite_rmsd_rate: float
-    validity_rate: float
+    graph_match_count: int
+    rdkit_parse_rate: float
+    rdkit_parse_count: int
+    base_valid_rate: float
+    base_valid_count: int
+    final_valid_rate: float
+    valid_rollouts: int
     d_min_mean: float
-    d_min_p50: float
-    d_min_p90: float
-    num_matched: int
+    frac_under_delta: float
+    frac_under_2delta: float
     refs_hit: int
+    cov_ratio: float
+    unique_nearest_refs: int
+    nearest_collision_rate: float
+    num_matched: int
     max_possible_matches: int
     match_efficiency: float
-    r_qual_mean: float
-    r_smcov_mean: float
-    r_match_mean: float
+    eligible_edges: int
+    eligible_edge_density: float
     soft_cov_mean: float
-    pct_gt_0_5: float
-    fraction_under_delta: float
-    matched_dists_sample: np.ndarray
-    eligible_dists_sample: np.ndarray
-    d_min_sample: np.ndarray
-    soft_cov_sample: np.ndarray
-    pairwise_sample: np.ndarray
-    valid_count: int
-    posebusters_checked: int
-    posebusters_passed: int
-    posebusters_failed: int
-    posebusters_errors: int
-    posebusters_time_ms: float
-    sampled_percentiles: bool = False
+    pct_cov_gt_0p1: float
+    pct_cov_gt_0p5: float
+    comp_qual_sum: float
+    comp_smcov_sum: float
+    comp_match_sum: float
+    pose_checked: int
+    pose_passed: int
+    pose_errors: int
+    d_min_values: np.ndarray
+    matched_dists: np.ndarray
+    pairwise_dists: np.ndarray
+    reward_total_values: np.ndarray
+
+
+METRIC_KEYS: List[str] = [
+    "gate/graph_match_rate",
+    "gate/rdkit_parse_rate",
+    "gate/base_valid_rate",
+    "gate/final_valid_rate",
+    "pose/checked_rate",
+    "pose/pass_rate",
+    "pose/error_rate",
+    "rmsd/d_min_mean",
+    "rmsd/d_min_p50",
+    "rmsd/d_min_p90",
+    "rmsd/frac_under_delta",
+    "rmsd/frac_under_2delta",
+    "cov/refs_hit_mean",
+    "cov/refs_hit_p50",
+    "cov/cov_ratio_mean",
+    "cov/unique_nearest_refs_mean",
+    "cov/nearest_collision_rate_mean",
+    "cov/valid_rollouts_mean",
+    "match/num_matched_mean",
+    "match/max_possible_mean",
+    "match/efficiency_mean",
+    "match/matched_dist_p50",
+    "match/matched_dist_p90",
+    "match/eligible_edge_density",
+    "smcov/soft_cov_mean",
+    "smcov/pct_gt_cov_gt_0p1",
+    "smcov/pct_gt_cov_gt_0p5",
+    "smcov/corr_with_refs_hit",
+    "reward/total_mean",
+    "reward/total_std",
+    "reward/comp_qual_mean",
+    "reward/comp_smcov_mean",
+    "reward/comp_match_mean",
+    "reward/comp_smcov_frac",
+    "div/pairwise_rmsd_p50",
+]
 
 
 def group_by_prompt(
@@ -152,51 +196,7 @@ def compute_group_reward(
     r_floor = float(getattr(grpo_cfg, "r_floor", -1.0))
     hard_rmsd_gate = bool(getattr(grpo_cfg, "hard_rmsd_gate", DEFAULT_ENABLE_HARD_RMSD_GATE))
     rmsd_workers = int(getattr(grpo_cfg, "rmsd_workers", 0) or 0)
-
-    reference_mols = get_cached_ground_truths(
-        canonical_smiles,
-        num_gt=grpo_cfg.max_ground_truths,
-    )
     empty_rewards = np.full(K, r_floor, dtype=np.float32)
-
-    def _build_metrics(**overrides) -> GroupMetrics:
-        values = dict(
-            K=K,
-            M=len(reference_mols),
-            graph_match_rate=overrides.get("graph_match_rate", 0.0),
-            finite_rmsd_rate=overrides.get("finite_rmsd_rate", 0.0),
-            validity_rate=overrides.get("validity_rate", 0.0),
-            d_min_mean=overrides.get("d_min_mean", float("nan")),
-            d_min_p50=overrides.get("d_min_p50", float("nan")),
-            d_min_p90=overrides.get("d_min_p90", float("nan")),
-            num_matched=overrides.get("num_matched", 0),
-            refs_hit=overrides.get("refs_hit", 0),
-            max_possible_matches=overrides.get("max_possible_matches", 0),
-            match_efficiency=overrides.get("match_efficiency", 0.0),
-            r_qual_mean=overrides.get("r_qual_mean", 0.0),
-            r_smcov_mean=overrides.get("r_smcov_mean", 0.0),
-            r_match_mean=overrides.get("r_match_mean", 0.0),
-            soft_cov_mean=overrides.get("soft_cov_mean", float("nan")),
-            pct_gt_0_5=overrides.get("pct_gt_0_5", float("nan")),
-            fraction_under_delta=overrides.get("fraction_under_delta", 0.0),
-            matched_dists_sample=overrides.get("matched_dists_sample", EMPTY_FLOAT32),
-            eligible_dists_sample=overrides.get("eligible_dists_sample", EMPTY_FLOAT32),
-            d_min_sample=overrides.get("d_min_sample", EMPTY_FLOAT32),
-            soft_cov_sample=overrides.get("soft_cov_sample", EMPTY_FLOAT32),
-            pairwise_sample=overrides.get("pairwise_sample", EMPTY_FLOAT32),
-            valid_count=overrides.get("valid_count", 0),
-            posebusters_checked=overrides.get("posebusters_checked", 0),
-            posebusters_passed=overrides.get("posebusters_passed", 0),
-            posebusters_failed=overrides.get("posebusters_failed", 0),
-            posebusters_errors=overrides.get("posebusters_errors", 0),
-            posebusters_time_ms=overrides.get("posebusters_time_ms", 0.0),
-            sampled_percentiles=overrides.get("sampled_percentiles", False),
-        )
-        return GroupMetrics(**values)
-
-    if not reference_mols:
-        stats.failed_ground_truth += K
-        return empty_rewards, _build_metrics()
 
     rollout_mols, graph_mask, parsed_mask = parse_rollout_group(
         canonical_smiles,
@@ -204,12 +204,80 @@ def compute_group_reward(
         stats,
         profiler,
     )
-    graph_match_rate = float(np.mean(graph_mask)) if K > 0 else 0.0
+    graph_match_count = int(np.count_nonzero(graph_mask))
+    graph_match_rate = float(graph_match_count) / K if K > 0 else 0.0
+    rdkit_parse_count = int(np.count_nonzero(parsed_mask))
+    rdkit_parse_rate = float(rdkit_parse_count) / K if K > 0 else 0.0
+    base_mask = graph_mask & parsed_mask
+    base_valid_count = int(np.count_nonzero(base_mask))
+    base_valid_rate = float(base_valid_count) / K if K > 0 else 0.0
+
+    reference_mols = get_cached_ground_truths(
+        canonical_smiles,
+        num_gt=grpo_cfg.max_ground_truths,
+    )
+
+    def _build_metrics(**overrides) -> GroupMetrics:
+        values = dict(
+            K=K,
+            M=len(reference_mols),
+            graph_match_rate=overrides.get("graph_match_rate", 0.0),
+            graph_match_count=overrides.get("graph_match_count", 0),
+            rdkit_parse_rate=overrides.get("rdkit_parse_rate", 0.0),
+            rdkit_parse_count=overrides.get("rdkit_parse_count", 0),
+            base_valid_rate=overrides.get("base_valid_rate", 0.0),
+            base_valid_count=overrides.get("base_valid_count", 0),
+            final_valid_rate=overrides.get("final_valid_rate", 0.0),
+            valid_rollouts=overrides.get("valid_rollouts", 0),
+            d_min_mean=overrides.get("d_min_mean", float("nan")),
+            frac_under_delta=overrides.get("frac_under_delta", float("nan")),
+            frac_under_2delta=overrides.get("frac_under_2delta", float("nan")),
+            refs_hit=overrides.get("refs_hit", 0),
+            cov_ratio=overrides.get("cov_ratio", 0.0),
+            unique_nearest_refs=overrides.get("unique_nearest_refs", 0),
+            nearest_collision_rate=overrides.get("nearest_collision_rate", 0.0),
+            num_matched=overrides.get("num_matched", 0),
+            max_possible_matches=overrides.get("max_possible_matches", 0),
+            match_efficiency=overrides.get("match_efficiency", 0.0),
+            eligible_edges=overrides.get("eligible_edges", 0),
+            eligible_edge_density=overrides.get("eligible_edge_density", 0.0),
+            soft_cov_mean=overrides.get("soft_cov_mean", float("nan")),
+            pct_cov_gt_0p1=overrides.get("pct_cov_gt_0p1", float("nan")),
+            pct_cov_gt_0p5=overrides.get("pct_cov_gt_0p5", float("nan")),
+            comp_qual_sum=overrides.get("comp_qual_sum", 0.0),
+            comp_smcov_sum=overrides.get("comp_smcov_sum", 0.0),
+            comp_match_sum=overrides.get("comp_match_sum", 0.0),
+            pose_checked=overrides.get("pose_checked", 0),
+            pose_passed=overrides.get("pose_passed", 0),
+            pose_errors=overrides.get("pose_errors", 0),
+            d_min_values=overrides.get("d_min_values", EMPTY_FLOAT32),
+            matched_dists=overrides.get("matched_dists", EMPTY_FLOAT32),
+            pairwise_dists=overrides.get("pairwise_dists", EMPTY_FLOAT32),
+            reward_total_values=overrides.get("reward_total_values", EMPTY_FLOAT32),
+        )
+        return GroupMetrics(**values)
+
+    if not reference_mols:
+        stats.failed_ground_truth += K
+        return empty_rewards, _build_metrics(
+            graph_match_rate=graph_match_rate,
+            graph_match_count=graph_match_count,
+            rdkit_parse_rate=rdkit_parse_rate,
+            rdkit_parse_count=rdkit_parse_count,
+            base_valid_rate=base_valid_rate,
+            base_valid_count=base_valid_count,
+        )
 
     if not np.any(graph_mask):
-        return empty_rewards, _build_metrics(graph_match_rate=graph_match_rate)
+        return empty_rewards, _build_metrics(
+            graph_match_rate=graph_match_rate,
+            graph_match_count=graph_match_count,
+            rdkit_parse_rate=rdkit_parse_rate,
+            rdkit_parse_count=rdkit_parse_count,
+            base_valid_rate=base_valid_rate,
+            base_valid_count=base_valid_count,
+        )
 
-    base_mask = graph_mask & parsed_mask
     pose_cfg = normalize_posebusters_config(getattr(grpo_cfg, "posebusters", None))
     with profile_section(profiler, "reward_posebusters"):
         pose_mask, pose_summary = apply_posebusters_gate(
@@ -256,7 +324,7 @@ def compute_group_reward(
         mask_for_distance = valid_mask.astype(np.int32, copy=False)
 
     with profile_section(profiler, "reward_smcov"):
-        r_smcov, (soft_cov_mean, soft_cov_pcts, soft_cov_values) = compute_smooth_coverage_reward(
+        r_smcov, (soft_cov_mean, _soft_cov_pcts, soft_cov_values) = compute_smooth_coverage_reward(
             distance_matrix,
             mask_for_distance,
             rho,
@@ -290,33 +358,11 @@ def compute_group_reward(
         r_floor,
     )
 
-    finite_rmsd_rate = float(np.mean(np.isfinite(min_distances))) if K > 0 else 0.0
-    validity_rate = float(np.mean(valid_mask)) if K > 0 else 0.0
-    finite_d_valid = min_distances[valid_mask]
-    finite_d_valid = finite_d_valid[np.isfinite(finite_d_valid)]
-    under_threshold = float(np.mean(finite_d_valid < delta)) if finite_d_valid.size > 0 else 0.0
-
-    def _sample(values: np.ndarray) -> Tuple[np.ndarray, bool]:
-        if values.size == 0:
-            return EMPTY_FLOAT32, False
-        limit = distance_sample_limit if distance_sample_limit > 0 else values.size
-        if limit <= 0:
-            return EMPTY_FLOAT32, False
-        return sample_array(values, limit, rng=rng)
-
     matched_dists = (
         np.array([distance_matrix[i, j] for (i, j) in matched_pairs], dtype=np.float32)
         if matched_pairs
         else EMPTY_FLOAT32
     )
-    eligible_dists = (
-        distance_matrix[eligible_matrix].astype(np.float32) if np.any(eligible_matrix) else EMPTY_FLOAT32
-    )
-
-    matched_sample, matched_sampled = _sample(matched_dists)
-    eligible_sample, eligible_sampled = _sample(eligible_dists)
-    d_min_sample, d_min_sampled = _sample(finite_d_valid.astype(np.float32, copy=False))
-    soft_cov_sample, _ = _sample(soft_cov_values.astype(np.float32, copy=False))
 
     pairwise_sample_cap = (
         pairwise_sample_limit if pairwise_sample_limit is not None else distance_sample_limit
@@ -331,50 +377,91 @@ def compute_group_reward(
     else:
         pairwise_dists = EMPTY_FLOAT32
 
-    valid_count = int(np.count_nonzero(valid_mask))
-    if valid_count > 0:
-        r_qual_mean = float(np.mean(r_qual[valid_mask]))
-        r_smcov_mean = float(np.mean(r_smcov[valid_mask]))
-        r_match_mean = float(np.mean(r_match[valid_mask]))
-    else:
-        r_qual_mean = r_smcov_mean = r_match_mean = 0.0
+    valid_rollouts = int(np.count_nonzero(valid_mask))
+    final_valid_rate = float(valid_rollouts) / K if K > 0 else 0.0
+    finite_d_valid = min_distances[valid_mask]
+    finite_d_valid = finite_d_valid[np.isfinite(finite_d_valid)]
+    d_min_values = (
+        finite_d_valid.astype(np.float32, copy=False) if finite_d_valid.size > 0 else EMPTY_FLOAT32
+    )
+    d_min_mean = float(np.mean(finite_d_valid)) if finite_d_valid.size > 0 else float("nan")
+    frac_under_delta = float(np.mean(finite_d_valid < delta)) if finite_d_valid.size > 0 else float("nan")
+    frac_under_two_delta = (
+        float(np.mean(finite_d_valid < (2 * delta))) if finite_d_valid.size > 0 else float("nan")
+    )
+
+    unique_nearest_refs = 0
+    nearest_collision_rate = 0.0
+    if valid_rollouts > 0 and reference_mols:
+        valid_indices = np.where(valid_mask)[0]
+        nearest_rows = distance_matrix[valid_indices]
+        if nearest_rows.size > 0:
+            nearest_refs = np.argmin(nearest_rows, axis=1)
+            nearest_values = nearest_rows[np.arange(nearest_refs.size), nearest_refs]
+            finite_nearest = np.isfinite(nearest_values)
+            if np.any(finite_nearest):
+                nearest_refs = nearest_refs[finite_nearest]
+                unique_nearest_refs = int(np.unique(nearest_refs).size)
+                total_nearest = int(nearest_refs.size)
+                if total_nearest > 0:
+                    nearest_collision_rate = float(max(0.0, 1.0 - unique_nearest_refs / total_nearest))
+
+    soft_cov_arr = soft_cov_values.astype(np.float32, copy=False)
+    pct_cov_gt_0p1 = float(np.mean(soft_cov_arr > 0.1)) if soft_cov_arr.size > 0 else float("nan")
+    pct_cov_gt_0p5 = float(np.mean(soft_cov_arr > 0.5)) if soft_cov_arr.size > 0 else float("nan")
+
+    reward_total_values = (
+        rewards[valid_mask].astype(np.float32, copy=False) if valid_rollouts > 0 else EMPTY_FLOAT32
+    )
+    comp_qual_sum = float(np.sum((lambda_qual * r_qual)[valid_mask])) if valid_rollouts > 0 else 0.0
+    comp_smcov_sum = float(np.sum((lambda_smcov * r_smcov)[valid_mask])) if valid_rollouts > 0 else 0.0
+    comp_match_sum = float(np.sum((lambda_match * r_match)[valid_mask])) if valid_rollouts > 0 else 0.0
+
+    eligible_edges = int(np.count_nonzero(eligible_matrix))
+    total_edges = K * len(reference_mols)
+    eligible_edge_density = float(eligible_edges) / float(total_edges) if total_edges > 0 else float("nan")
+    cov_ratio = (float(refs_hit) / len(reference_mols)) if reference_mols else float("nan")
 
     for i in range(K):
         if valid_mask[i] and np.isfinite(min_distances[i]):
             stats.add_rmsd(float(min_distances[i]))
 
-    sampling_flag = matched_sampled or eligible_sampled or d_min_sampled
     match_efficiency = float(num_matched) / max_possible_matches if max_possible_matches > 0 else 0.0
 
     metrics = _build_metrics(
         graph_match_rate=graph_match_rate,
-        finite_rmsd_rate=finite_rmsd_rate,
-        validity_rate=validity_rate,
-        d_min_mean=float(np.mean(finite_d_valid)) if finite_d_valid.size > 0 else float("nan"),
-        d_min_p50=float(np.percentile(finite_d_valid, 50)) if finite_d_valid.size > 0 else float("nan"),
-        d_min_p90=float(np.percentile(finite_d_valid, 90)) if finite_d_valid.size > 0 else float("nan"),
-        num_matched=num_matched,
+        graph_match_count=graph_match_count,
+        rdkit_parse_rate=rdkit_parse_rate,
+        rdkit_parse_count=rdkit_parse_count,
+        base_valid_rate=base_valid_rate,
+        base_valid_count=base_valid_count,
+        final_valid_rate=final_valid_rate,
+        valid_rollouts=valid_rollouts,
+        d_min_mean=d_min_mean,
+        frac_under_delta=frac_under_delta,
+        frac_under_2delta=frac_under_two_delta,
         refs_hit=refs_hit,
+        cov_ratio=cov_ratio,
+        unique_nearest_refs=unique_nearest_refs,
+        nearest_collision_rate=nearest_collision_rate,
+        num_matched=num_matched,
         max_possible_matches=max_possible_matches,
         match_efficiency=match_efficiency,
-        r_qual_mean=r_qual_mean,
-        r_smcov_mean=r_smcov_mean,
-        r_match_mean=r_match_mean,
+        eligible_edges=eligible_edges,
+        eligible_edge_density=eligible_edge_density,
         soft_cov_mean=soft_cov_mean,
-        pct_gt_0_5=float(soft_cov_pcts[2]) if len(soft_cov_pcts) >= 3 else float("nan"),
-        fraction_under_delta=under_threshold,
-        matched_dists_sample=matched_sample,
-        eligible_dists_sample=eligible_sample,
-        d_min_sample=d_min_sample,
-        soft_cov_sample=soft_cov_sample,
-        pairwise_sample=pairwise_dists,
-        valid_count=valid_count,
-        posebusters_checked=pose_checked,
-        posebusters_passed=pose_passed,
-        posebusters_failed=pose_failed,
-        posebusters_errors=pose_errors,
-        posebusters_time_ms=pose_summary["time_ms"],
-        sampled_percentiles=sampling_flag,
+        pct_cov_gt_0p1=pct_cov_gt_0p1,
+        pct_cov_gt_0p5=pct_cov_gt_0p5,
+        comp_qual_sum=comp_qual_sum,
+        comp_smcov_sum=comp_smcov_sum,
+        comp_match_sum=comp_match_sum,
+        pose_checked=pose_checked,
+        pose_passed=pose_passed,
+        pose_errors=pose_errors,
+        d_min_values=d_min_values,
+        matched_dists=matched_dists,
+        pairwise_dists=pairwise_dists,
+        reward_total_values=reward_total_values,
     )
 
     return rewards, metrics
@@ -393,9 +480,7 @@ def reward_function(
     del tokenizer  # unused
 
     expected_k = config.grpo.num_generations
-    lambda_qual = float(getattr(config.grpo, "lambda_qual", 1.0))
-    lambda_smcov = float(getattr(config.grpo, "lambda_smcov", 1.0))
-    lambda_match = float(getattr(config.grpo, "lambda_match", 1.0))
+    delta = float(getattr(config.grpo, "delta", 0.75))
     distance_sample_limit = int(getattr(config.grpo, "log_distance_samples_per_group", 0))
     profile_enabled = bool(getattr(config.grpo, "profile_rewards", False))
     profiler = RewardProfiler(enabled=profile_enabled)
@@ -449,39 +534,44 @@ def reward_function(
         metrics_list.append(group_metrics)
 
     with profile_section(profiler, "reward_logging"):
-        essential_metrics = summarize_batch_metrics(metrics_list, lambda_qual, lambda_smcov, lambda_match)
+        raw_metrics = summarize_batch_metrics(metrics_list, delta=delta)
+        metrics = {key: float("nan") for key in METRIC_KEYS}
+        for key, value in raw_metrics.items():
+            if key in metrics:
+                metrics[key] = float(value)
+        assert set(metrics.keys()) == set(METRIC_KEYS)
+
         should_log_metrics = wandb.run is not None and (step_index % log_every_steps == 0)
         if should_log_metrics:
-            wandb.log(essential_metrics, step=step_index)
+            wandb.log(metrics)
 
-        gm = essential_metrics.get("graph_match_rate", 0.0)
-        fr = essential_metrics.get("finite_rmsd_rate", 0.0)
-        vr = essential_metrics.get("validity_rate", 0.0)
-        matched_total = int(essential_metrics.get("match/matched_total", 0.0))
-        max_possible_total = int(essential_metrics.get("match/max_possible_total", 0.0))
-        match_eff = essential_metrics.get("match/match_efficiency", 0.0)
-        rq = essential_metrics.get("reward/component_quality", 0.0)
-        rs = essential_metrics.get("reward/component_smcov", 0.0)
-        rm = essential_metrics.get("reward/component_match", 0.0)
-        pose_checked = int(essential_metrics.get("posebusters/checked_total", 0.0))
-        pose_pass_rate = essential_metrics.get("posebusters/pass_rate", 0.0)
+        gm = metrics["gate/graph_match_rate"]
+        rd = metrics["gate/rdkit_parse_rate"]
+        base_rate = metrics["gate/base_valid_rate"]
+        final_rate = metrics["gate/final_valid_rate"]
+        pose_checked_rate = metrics["pose/checked_rate"]
+        pose_pass_rate = metrics["pose/pass_rate"]
+        pose_error_rate = metrics["pose/error_rate"]
+        rmsd_mean = metrics["rmsd/d_min_mean"]
+        match_eff = metrics["match/efficiency_mean"]
+        reward_mean = metrics["reward/total_mean"]
+        div_p50 = metrics["div/pairwise_rmsd_p50"]
 
         logger.info(
-            "[reward_v3] validity: graph={:.3f}, finite_rmsd={:.3f}, final={:.3f}; "
-            "matching: max_possible={}, matched={}, eff={:.3f}; "
-            "rewards: r_qual={:.3f}, r_smcov={:.3f}, r_match={:.3f}; "
-            "posebusters: checked={}, pass_rate={:.3f}",
+            "[reward_v3] gates: graph={:.3f}, parse={:.3f}, base={:.3f}, final={:.3f}; "
+            "pose: checked_rate={:.3f}, pass={:.3f}, error={:.3f}; "
+            "rmsd_mean={:.3f}, match_eff={:.3f}, reward_mean={:.3f}, div_p50={:.3f}",
             gm,
-            fr,
-            vr,
-            max_possible_total,
-            matched_total,
-            match_eff,
-            rq,
-            rs,
-            rm,
-            pose_checked,
+            rd,
+            base_rate,
+            final_rate,
+            pose_checked_rate,
             pose_pass_rate,
+            pose_error_rate,
+            rmsd_mean,
+            match_eff,
+            reward_mean,
+            div_p50,
         )
 
         if profile_enabled and total_start is not None:
@@ -494,8 +584,6 @@ def reward_function(
                 "profiling/reward_match_s": profiler.sections.get("reward_match", 0.0),
                 "profiling/reward_logging_s": profiler.sections.get("reward_logging", 0.0),
             }
-            if wandb.run is not None:
-                wandb.log(profiling_metrics, step=step_index)
             logger.info(
                 "[reward_v3] profiler totals (s): {}",
                 ", ".join(f"{k.split('/')[-1]}={v:.4f}" for k, v in profiling_metrics.items()),

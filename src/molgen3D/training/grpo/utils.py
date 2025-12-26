@@ -1,8 +1,10 @@
 from numpy.random import f
+import logging
+from contextlib import contextmanager
 from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2
 from molgen3D.utils.utils import get_best_rmsd, load_json, load_pkl
 from pathlib import Path
-from rdkit import Chem
+from rdkit import Chem, RDLogger
 import os
 from loguru import logger
 import numpy as np
@@ -13,6 +15,17 @@ import types
 # Global variables
 _smiles_mapping = None
 _geom_data_path = None
+
+@contextmanager
+def _suppress_rdkit_pickle_warnings():
+    """Temporarily raise RDKit logger level to suppress pickle version warnings."""
+    rd_logger = RDLogger.logger()
+    previous_level = rd_logger.level
+    rd_logger.setLevel(logging.ERROR)
+    try:
+        yield
+    finally:
+        rd_logger.setLevel(previous_level)
 
 def load_smiles_mapping(mapping_path: str) -> None:
     """Load the SMILES mapping from a JSON file.
@@ -68,7 +81,8 @@ def load_ground_truths(key_mol_smiles, num_gt: int = 16):
 
     conformers = None
     try:
-        conformers = load_pkl(Path(filepath))
+        with _suppress_rdkit_pickle_warnings():
+            conformers = load_pkl(Path(filepath))
         return conformers
     except FileNotFoundError as e:
         logger.error(
