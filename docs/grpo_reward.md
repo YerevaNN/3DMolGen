@@ -1,210 +1,210 @@
-# GRPO Reward Design (GEOM-Drugs aligned) — How it works and what each term is meant to do
+# GRPO Reward v3 (GEOM‑Drugs aligned)
 
-This document explains the **design intent** of the GRPO reward function used for 2D→3D conformer generation on GEOM-Drugs.
-The reward is computed **per prompt**, where the policy generates a **set of K rollouts** (completions), and we score each rollout with components that collectively target the benchmark’s goals.
-
----
-
-## 0) Setup and notation
-
-For one prompt (one molecule):
-
-- We have **K rollouts**: generated conformers \(y_1, \dots, y_K\).
-- We load **M ground-truth conformers** \(g_1, \dots, g_M\) for the same canonical SMILES (bounded by `max_ground_truths`).
-
-We compute the distance matrix (RMSD):
-
-\[
-D_{ij} = \text{RMSD}(y_i, g_j)
-\]
-
-We define a validity indicator:
-
-\[
-v_i \in \{0,1\}
-\]
-
-where \(v_i=1\) means rollout \(i\) is considered valid (graph-matched, parseable, finite RMSD if gated), and invalid rollouts receive a fixed floor reward \(r_{\text{floor}}<0\).
+This document describes the **current** “reward_v3” implementation you pasted (the refactored/profiling version). It is written from the *reward-design* perspective: what each term is trying to incentivize, how validity gating works, and how to interpret/tune the key hyperparameters.
 
 ---
 
-## 1) Validity gate (hard constraint before reward shaping)
+## 1) What the reward is optimizing
 
-### What it checks
-A rollout is considered valid if it passes:
-1. **Graph match / same molecule**: the SMILES extracted from the generated conformer corresponds to the same molecular graph as the prompt’s canonical SMILES.
-2. **Parseable conformer**: the completion contains a `[CONFORMER]...[/CONFORMER]` block and decoding produces an RDKit Mol.
-3. (Optional) **Finite RMSD**: if the `hard_rmsd_gate` is enabled, rollouts without finite RMSD to any GT are invalidated.
+For each prompt (a molecule), the policy generates **K rollouts** (conformers). Let:
 
-### Expected effect
-- Prevents the policy from “gaming” rewards with malformed outputs.
-- Forces learning to happen **only on chemically consistent generations**.
-- Creates a strong pressure to produce valid format + correct graph early in training.
+- Prompt molecule (ground truth set): canonical SMILES `s`
+- Generated rollouts: $y_1,\dots,y_K$
+- Reference conformers for this molecule: $g_1,\dots,g_M$ (loaded from GEOM‑Drugs, capped by `max_ground_truths`)
+- RMSD distance matrix:  
+  $$
+  D_{i,j} = \text{RMSD}(y_i, g_j)
+  $$
+  (computed only for valid rollouts; invalid rows remain $+\infty$)
 
-If invalid:
-\[
-r_i = r_{\text{floor}}
-\]
+The per-rollout total reward is:
+$$
+r_i = 
+\begin{cases}
+r_{\text{floor}} & \text{if rollout } i \text{ is invalid}\\
+\lambda_{\text{qual}}\,r^{\text{qual}}_i + \lambda_{\text{smcov}}\,r^{\text{smcov}}_i + \lambda_{\text{match}}\,r^{\text{match}}_i & \text{otherwise}
+\end{cases}
+$$
 
-If valid:
-\[
-r_i = \lambda_{\text{qual}} r^{\text{qual}}_i + \lambda_{\text{smcov}} r^{\text{smcov}}_i + \lambda_{\text{match}} r^{\text{match}}_i
-\]
-
----
-
-## 2) Reward term #1: Dense quality \(r^{\text{qual}}\) (AMR-P proxy)
-
-### Definition
-For a valid rollout \(i\), we take its **best** (minimum) RMSD among GT conformers:
-
-\[
-d_i = \min_j D_{ij}
-\]
-
-Then we shape it into a smooth reward:
-
-\[
-r^{\text{qual}}_i = \exp\left(-\frac{d_i}{\sigma}\right)
-\]
-
-(Your implementation uses this exact form; \(\sigma\) controls how quickly reward decays with RMSD.)
-
-### Design intent
-This is the “make conformers good” term:
-- It gives **dense learning signal** every step (not sparse thresholding).
-- It directly improves “how close is at least one generated conformer to some reference”.
-
-### Expected effect on behavior
-- Pulls generated conformers toward *some* plausible ground-truth modes.
-- Improves distributions of `min RMSD` metrics (`geom/d_min_*` style plots).
-- If this dominates too much, the policy can collapse to a few easy modes (diversity risk).
+So the model is pushed to:
+1) produce **chemically consistent** conformers for the right graph,  
+2) make each rollout **close** to some reference,  
+3) make the **set** of rollouts cover **many different** references (diversity/coverage under small K).
 
 ---
 
-## 3) Reward term #2: Smooth marginal coverage \(r^{\text{smcov}}\) (set-aware, pre-threshold coverage)
+## 2) Validity gating (what counts as “eligible” for reward)
 
-This term is **group-aware**: it is not just about “is this rollout close”, but “does this rollout add new coverage given the other rollouts.”
+A rollout is treated as valid only if it passes **all** of these:
 
-### Step 1: Convert distances to soft coverage strength
-\[
-K_{ij} = \exp\left(-\left(\frac{D_{ij}}{\rho}\right)^2\right)
-\]
+### 2.1 Conformer tag + RDKit parse
+- The completion must contain `"[CONFORMER]" ... "[/CONFORMER]"`.
+- `decode_cartesian_v2()` must succeed (RDKit molecule created).
 
-- If \(D_{ij}\) is small → \(K_{ij}\approx 1\)
-- If \(D_{ij}\) is large → \(K_{ij}\approx 0\)
+### 2.2 Graph match gate (hard)
+- The rollout is decoded to a SMILES string (via `strip_smiles(conformer_text)`).
+- `same_molecular_graph(canonical_smiles, generated_smiles)` must be **True**.
 
-### Step 2: Define a *set-level* soft coverage objective
-For a fixed GT conformer \(g_j\), the probability-like “covered by at least one rollout” quantity is:
+If graph mismatch, the rollout gets `r_floor` (no point rewarding geometry for the wrong molecule).
 
-\[
-\text{soft\_cov}_j(S) = 1 - \prod_{i\in S}(1-K_{ij})
-\]
+### 2.3 Finite RMSD gate (hard)
+Even if graph matches, the rollout must have a **finite** $\min_j D_{i,j}$. If all RMSDs fail / are `inf`, the rollout is treated as invalid and gets `r_floor`.
 
-Where \(S\) is the set of all K rollouts.
-Averaging across GTs defines a set score:
-
-\[
-F(S) = \frac{1}{M}\sum_{j=1}^M \left(1 - \prod_{i\in S}(1-K_{ij})\right)
-\]
-
-### Step 3: Per-rollout credit = marginal contribution to the set score
-Instead of assigning \(F(S)\) to everyone (which would give identical rewards), each rollout receives its marginal contribution:
-
-\[
-r^{\text{smcov}}_i = F(S) - F(S\setminus\{i\})
-\]
-
-This has a closed form:
-
-\[
-r^{\text{smcov}}_i = \frac{1}{M}\sum_{j=1}^M K_{ij}\prod_{k\neq i}(1-K_{kj})
-\]
-
-### Design intent
-This term is meant to improve **coverage with small K** by encouraging complementary rollouts:
-- If rollout \(i\) covers GT \(j\) but others already cover \(j\), then \(\prod_{k\neq i}(1-K_{kj})\) is small → \(i\) gets little credit.
-- If rollout \(i\) covers a GT that others do not, the product term is near 1 → \(i\) gets strong credit.
-
-### Expected effect on behavior
-- Encourages rollouts to spread across distinct GT modes (anti-redundancy).
-- Provides a **dense, pre-threshold** signal even when \(D_{ij}\) is not yet under the hard \(\delta\) threshold.
-- Helps fight mode collapse *if its magnitude is comparable to the other terms* (scaling matters).
+> Note on `hard_rmsd_gate`: in the current code, *finite RMSD is always required* for validity; the knob mainly controls logging/stats messaging. If you intended "graph-valid but no RMSD" to still be considered valid (with e.g. $r^{qual}=0$), that requires a code change.
 
 ---
 
-## 4) Reward term #3: Hard unique matching \(r^{\text{match}}\) (COV-R under \(\delta\) proxy)
+## 3) The three reward components
 
-This term targets the GEOM “recall/coverage under threshold” type metric in a more discrete way.
-
-### Eligibility under threshold
-An edge \((i,j)\) is eligible if:
-\[
-v_i = 1 \quad\text{and}\quad D_{ij} < \delta
-\]
-
-### Max-cardinality one-to-one matching
-We solve a bipartite matching problem between rollouts and GTs:
-- One rollout can match at most one GT.
-- One GT can be matched by at most one rollout.
-- We aim for **max number of matches** (coverage), and use distance as a tie-break (min cost).
-
-Let \(\mathcal{M}\) be the set of matched pairs \((i,j)\).
-
-### Per-rollout match reward (shaped)
-For matched rollouts:
-\[
-r^{\text{match}}_i =
-\max\left(0,\ 1-\frac{D_{ij}}{\delta}\right)
-\quad\text{if }(i,j)\in \mathcal{M}
-\]
-Otherwise:
-\[
-r^{\text{match}}_i = 0
-\]
-
-### Design intent
-This is the “hard coverage” term:
-- Encourages generating **multiple distinct conformers** that each match different GTs under \(\delta\).
-- Enforces uniqueness by construction (one-to-one matching).
-
-### Expected effect on behavior
-- Increases the count of GT conformers that are covered under \(\delta\) when K is limited.
-- Promotes diversity *only insofar as it helps produce more distinct under-\(\delta\) hits*.
-- Can become sparse early if few rollouts ever cross the \(\delta\) threshold (smcov is meant to help before that).
+### 3.1 Quality term $r^{qual}$: "be close to *some* ground truth"
+For each rollout $i$, define:
+$$
+d_i = \min_j D_{i,j}
+$$
+Then:
+$$
+r^{\text{qual}}_i = \exp(-d_i/\sigma)
+$$
+- **Effect:** pushes each rollout toward *any* plausible conformer in the reference set.  
+- **$\sigma$** controls how quickly reward decays with RMSD (smaller $\sigma$ = harsher).
 
 ---
 
-## 5) Final combined reward
+### 3.2 Smooth marginal coverage $r^{smcov}$: "don't all crowd the same GT"
+This is the **group-aware** term. It rewards rollouts that contribute **new** coverage of the reference set *given what the other rollouts already cover*.
 
-For each rollout \(i\):
+Define a soft "hit kernel":
+$$
+K_{i,j} = \exp\!\left( -(D_{i,j}/\rho)^2 \right)
+$$
+Soft probability reference $j$ is covered by the **set**:
+$$
+\text{soft\_cov}_j = 1 - \prod_{i=1}^{K} (1 - K_{i,j})
+$$
+Marginal contribution of rollout $i$ for reference $j$:
+$$
+\Delta_{i,j} = K_{i,j}\prod_{i'\neq i}(1 - K_{i',j})
+$$
+Rollout reward:
+$$
+r^{\text{smcov}}_i = \frac{1}{M}\sum_{j=1}^{M}\Delta_{i,j}
+$$
 
-- If invalid:
-\[
-r_i = r_{\text{floor}}
-\]
-
-- If valid:
-\[
-r_i = \lambda_{\text{qual}} r^{\text{qual}}_i
-    + \lambda_{\text{smcov}} r^{\text{smcov}}_i
-    + \lambda_{\text{match}} r^{\text{match}}_i
-\]
-
-### What each coefficient does
-- \(\lambda_{\text{qual}}\): prioritizes “make at least one conformer very close”.
-- \(\lambda_{\text{smcov}}\): prioritizes “make the set cover more GT modes (softly)”.
-- \(\lambda_{\text{match}}\): prioritizes “hit as many distinct GT conformers under \(\delta\) as possible”.
+- **Intuition:** if a reference is already covered by other rollouts, the product term becomes small, so you get **little** marginal credit for also covering it. If it is *not* covered, you get **more** credit.
+- **$\rho$** controls the softness radius (larger $\rho$ = more forgiving distances contribute to coverage).
 
 ---
 
-## 6) Intuition: why these 3 together
+### 3.3 Hard matching bonus $r^{match}$: "unique coverage under $\delta$"
+Define eligible edges if:
+$$
+D_{i,j} < \delta
+$$
+Then compute a **max-cardinality one-to-one matching** (Hungarian assignment). This uses `scipy.optimize.linear_sum_assignment`. 
 
-- **Quality** makes outputs geometrically plausible and improves RMSD distribution.
-- **Smooth coverage** provides dense, set-aware shaping so rollouts become complementary even before they cross the hard threshold.
-- **Hard matching** directly targets the “unique hits under \(\delta\)” notion needed for recall/coverage metrics in GEOM-Drugs, especially when K is small.
+Matched rollout shaping:
+$$
+r^{\text{match}}_i = \max\left(0,\ 1-\frac{D_{i,j}}{\delta}\right)
+$$
 
-In short:
-- \(r^{\text{qual}}\): *“be good”*
-- \(r^{\text{smcov}}\): *“be non-redundant as a set (softly)”*
-- \(r^{\text{match}}\): *“be non-redundant as a set under the benchmark threshold”*
+- **Effect:** directly rewards "unique hits" under a hard threshold $\delta$.
+- **$\delta$** should usually be aligned to the evaluation threshold you care about.
+
+---
+
+## 4) What gets logged (and how to interpret it)
+
+### Validity
+- `graph_match_rate`: fraction whose SMILES graph matches
+- `finite_rmsd_rate`: fraction with finite $d_i$
+- `validity_rate`: fraction that pass all validity gates
+
+### Geometry quality
+- `geom/d_min_mean`, `p50`, `p90`: stats of $d_i$ over valid rollouts (should go **down**)
+
+### Coverage / matching
+- `match/refs_hit`: distinct references with any eligible rollout under $\delta$
+- `match/num_matched`: mean matched count per group
+- `match/match_efficiency`: matched / max_possible
+
+### Reward decomposition (inflation checks)
+- `reward/component_quality = λ_qual * mean(r_qual)`
+- `reward/component_smcov = λ_smcov * mean(r_smcov)`
+- `reward/component_match = λ_match * mean(r_match)`
+
+### Optional diversity proxy
+- `diversity/pairwise_mean`: mean pairwise RMSD among valid rollouts (logged only when enabled)
+
+---
+
+## 5) Hyperparameters: meaning + practical tuning guidance
+
+### 5.1 Reward-shape hyperparameters
+
+**`sigma` (quality sharpness)**  
+- Smaller = only very close conformers get meaningful $r^{qual}$.  
+- Bigger = broader gradient signal but may tolerate sloppier geometry.  
+- Typical: 0.25–0.45.
+
+**`rho` (coverage softness radius)**  
+- Larger = broader "soft hits", stronger set-level shaping from farther RMSDs.  
+- Too large can make everything look covered (weak uniqueness pressure).  
+- Typical: 0.6–1.0.
+
+**`delta` (hard coverage threshold)**  
+- Too low → almost no eligible edges → `r_match` mostly 0.  
+- Too high → matching becomes easy but less meaningful.  
+- Typical: 0.75–0.85.
+
+**`lambda_*` (component weights)**  
+- `lambda_qual`: "find a plausible conformer"
+- `lambda_smcov`: "spread out across references"
+- `lambda_match`: "hard unique hits under $\delta$"
+
+A stable pattern: keep `lambda_qual` and `lambda_match` ~1, tune `lambda_smcov` (e.g., 2 → 8).
+
+**`r_floor` (invalid penalty)**  
+Typical: -0.5 to -1.0.
+
+**`max_ground_truths`**  
+Controls CPU cost $O(KM)$. Higher = richer target set but slower reward.
+
+---
+
+### 5.2 GRPO training hyperparameters (clip/LR intuition)
+
+In TRL’s GRPO, the key stability controls are the ratio clipping parameters in `GRPOConfig`:
+- `epsilon`: ratio clipping range  
+- `delta`: “target clipping” parameter  
+- `epsilon_high`: alternative upper clipping used in TR‑DPO style clipping
+
+Practical rule:
+- **Higher reward weights / higher variance rewards → lower LR and/or tighter clipping.**
+
+Suggested starting region:
+- `learning_rate`: **1e‑5 to 3e‑5**
+- clip range (your `epsilon_*`): **2e‑4 to 6e‑4**
+- `max_grad_norm`: 0.5–1.0
+- `temperature`: 0.8–1.2
+
+---
+
+## 6) How to verify smcov is helping (not inflating)
+
+When increasing `lambda_smcov` or `rho`, you want **at least two** of these to improve:
+
+- **Hard coverage improves:** `match/match_efficiency` and `match/refs_hit` trend up
+- **Quality improves:** `geom/d_min_p50` / `geom/d_min_mean` trend down
+- **No collapse:** optional `diversity/pairwise_mean` does not fall sharply
+
+If only `reward/component_smcov` rises while the others don’t move, smcov is likely being exploited as an easy soft term.
+
+---
+
+## 7) Implementation notes
+
+- Matching uses Hungarian assignment via `linear_sum_assignment` and is disabled if SciPy is missing. 
+- Reward is computed per prompt group (set-aware), then mapped back to the flat batch.
+- Optional profiling can log per-section CPU times to W&B.
+
+---
