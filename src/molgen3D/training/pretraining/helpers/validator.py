@@ -517,6 +517,7 @@ class MolGenNumericalValidator(BaseMolGenValidatorClass):
             numerical_val_enabled
             and numerical_val_freq > 0
             and step % numerical_val_freq == 0
+            and step > 1
         )
         
         if should_run_numerical:

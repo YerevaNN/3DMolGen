@@ -77,6 +77,7 @@ def ensure_completion_length_tracking():
 
 def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     initialize_random_seed(config.grpo.seed)
+    os.environ["TOKENIZERS_PARALLELISM"] = "true" if config.trainer.tokenizers_parallelism else "false"
 
     # Set up output and checkpoint directories if not already configured
     if output_dir is None and config.grpo.output_dir is None:
@@ -191,15 +192,15 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
                 completion_lengths=completion_lengths,
             )
 
-    elif reward_strategy == "multi_component":
-        logger.info("Using multi-component reward calculator")
-        mc_calculator = MultiComponentRewardCalculator(config=config, stats=stats, tokenizer=tokenizer)
-
-        def reward_func(prompts, completions, **kwargs):
-            return mc_calculator(prompts, completions, **kwargs)
-
     else:
+        if reward_strategy != "legacy":
+            raise ValueError(
+                f"Unsupported reward_strategy '{reward_strategy}'. "
+                "Supported values: 'v3', 'legacy'."
+            )
+
         logger.info("Using legacy reward function")
+
         def reward_func(prompts, completions, **kwargs):
             return reward_function(prompts, completions, stats, tokenizer, config)
 

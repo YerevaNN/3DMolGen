@@ -41,6 +41,12 @@ class RunStatistics:
     numerical_val_rmsd_max_values: list = field(default_factory=list)
     numerical_val_rmsd_avg_values: list = field(default_factory=list)
     numerical_val_failure_counts: Dict[str, int] = field(default_factory=dict)
+    posebusters_successes: int = 0  # Legacy field used by older reward components
+    posebusters_failures: int = 0   # Legacy field used by older reward components
+    posebusters_checked: int = 0
+    posebusters_failed: int = 0
+    posebusters_errors: int = 0
+    posebusters_time_ms: float = 0.0
     
     def add_rmsd(self, rmsd: float) -> None:
         """Track RMSD values for averaging"""
@@ -115,7 +121,13 @@ class RunStatistics:
     def log_global_stats(self):
         """Log global statistics for the entire run."""
         failure_rates = self.failure_rates
-        posebusters_checks = self.posebusters_successes + self.posebusters_failures
+        posebusters_checks_legacy = self.posebusters_successes + self.posebusters_failures
+        posebusters_checks = self.posebusters_checked or posebusters_checks_legacy
+        posebusters_passes = (
+            self.posebusters_checked - self.posebusters_failed - self.posebusters_errors
+            if self.posebusters_checked
+            else self.posebusters_successes
+        )
 
         def safe_mean(values):
             return float(np.nanmean(values)) if values else 0.0
@@ -153,7 +165,7 @@ class RunStatistics:
             "posebusters_failures": self.posebusters_failures,
             "posebusters_checks": posebusters_checks,
             "posebusters_pass_rate": (
-                self.posebusters_successes / posebusters_checks if posebusters_checks > 0 else 0.0
+                posebusters_passes / posebusters_checks if posebusters_checks > 0 else 0.0
             ),
 
             # Numerical validation metrics
@@ -169,6 +181,10 @@ class RunStatistics:
             "numerical_val_rmsd_max_mean": safe_mean(self.numerical_val_rmsd_max_values),
             "numerical_val_rmsd_avg_mean": safe_mean(self.numerical_val_rmsd_avg_values),
             "numerical_val_failure_counts": self.numerical_val_failure_counts,
+            "posebusters_checked": self.posebusters_checked,
+            "posebusters_failed": self.posebusters_failed,
+            "posebusters_errors": self.posebusters_errors,
+            "posebusters_time_ms": self.posebusters_time_ms,
         }
         return stats
 
@@ -229,6 +245,10 @@ class RunStatistics:
                 "numerical_val_rmsd_max_values": [],
                 "numerical_val_rmsd_avg_values": [],
                 "numerical_val_failure_counts": {},
+                "posebusters_checked": 0,
+                "posebusters_failed": 0,
+                "posebusters_errors": 0,
+                "posebusters_time_ms": 0.0,
             }
             for file in stats_files:
                 with open(file, 'r', encoding='utf-8', errors='replace') as f:
@@ -283,6 +303,10 @@ class RunStatistics:
                         aggregate["numerical_val_failure_counts"][fail_type] = (
                             aggregate["numerical_val_failure_counts"].get(fail_type, 0) + count
                         )
+                    aggregate["posebusters_checked"] += stats.get("posebusters_checked", 0)
+                    aggregate["posebusters_failed"] += stats.get("posebusters_failed", 0)
+                    aggregate["posebusters_errors"] += stats.get("posebusters_errors", 0)
+                    aggregate["posebusters_time_ms"] += stats.get("posebusters_time_ms", 0.0)
             aggregate["success_rate"] = (
                 aggregate["successful_generations"] / aggregate["processed_prompts"]
                 if aggregate["processed_prompts"] > 0 else 0.0
@@ -312,8 +336,16 @@ class RunStatistics:
                 if aggregate["reward_coverage_opportunities"] > 0 else 0.0
             )
             aggregate["posebusters_pass_rate"] = (
-                aggregate["posebusters_successes"] / aggregate["posebusters_checks"]
-                if aggregate["posebusters_checks"] > 0 else 0.0
+                (
+                    (aggregate["posebusters_checked"] - aggregate["posebusters_failed"] - aggregate["posebusters_errors"])
+                    / aggregate["posebusters_checked"]
+                )
+                if aggregate["posebusters_checked"] > 0
+                else (
+                    aggregate["posebusters_successes"] / aggregate["posebusters_checks"]
+                    if aggregate["posebusters_checks"] > 0
+                    else 0.0
+                )
             )
 
             # Finalize numerical validation metrics

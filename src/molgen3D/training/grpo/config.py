@@ -28,6 +28,14 @@ class ProcessingConfig:
 
 
 @dataclass
+class PoseBustersGateConfig:
+    mode: str = "off"
+    max_workers: int = 0
+    chunk_size: int = 100
+    energy_num_threads: int = 1
+
+
+@dataclass
 class GRPOConfig:
     # Required parameters (no defaults)
     output_base_dir: str
@@ -93,6 +101,7 @@ class GRPOConfig:
     enable_pairwise_rmsd_logging: bool = False
     pairwise_rmsd_log_every: int = 50
     log_every_steps: int = 1
+    posebusters: PoseBustersGateConfig = field(default_factory=PoseBustersGateConfig)
 
     # Runtime parameters (set during execution)
     output_dir: Optional[str] = None
@@ -164,6 +173,8 @@ class TrainerConfig:
     # Model loading
     torch_dtype: str = "bfloat16"
     attn_implementation: str = "flash_attention_2"
+    # Tokenizer settings
+    tokenizers_parallelism: bool = False
 
 
 @dataclass
@@ -240,6 +251,19 @@ class Config:
             }
             advanced_reward = AdvancedRewardConfig(weights=weights, **advanced_kwargs)
         grpo_dict_raw['advanced_reward'] = advanced_reward
+
+        posebusters_raw = grpo_dict_raw.get('posebusters')
+        if isinstance(posebusters_raw, PoseBustersGateConfig):
+            posebusters_config = posebusters_raw
+        elif posebusters_raw is None:
+            posebusters_config = PoseBustersGateConfig()
+        elif isinstance(posebusters_raw, dict):
+            posebusters_config = PoseBustersGateConfig(**posebusters_raw)
+        elif isinstance(posebusters_raw, str):
+            posebusters_config = PoseBustersGateConfig(mode=posebusters_raw)
+        else:
+            raise TypeError("grpo.posebusters must be a dict, string, or PoseBustersGateConfig instance")
+        grpo_dict_raw['posebusters'] = posebusters_config
         
         return cls(
             model=ModelConfig(**config_dict['model']),

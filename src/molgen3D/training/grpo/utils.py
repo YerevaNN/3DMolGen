@@ -1,8 +1,10 @@
 from numpy.random import f
+import logging
+from contextlib import contextmanager
 from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2
 from molgen3D.utils.utils import get_best_rmsd, load_json, load_pkl
 from pathlib import Path
-from rdkit import Chem
+from rdkit import Chem, RDLogger
 import os
 from loguru import logger
 import numpy as np
@@ -13,6 +15,15 @@ import types
 # Global variables
 _smiles_mapping = None
 _geom_data_path = None
+
+@contextmanager
+def _suppress_rdkit_pickle_warnings():
+    """Temporarily mute rdApp warnings emitted during RDKit pickle loading."""
+    RDLogger.DisableLog("rdApp.warning")
+    try:
+        yield
+    finally:
+        RDLogger.EnableLog("rdApp.warning")
 
 def load_smiles_mapping(mapping_path: str) -> None:
     """Load the SMILES mapping from a JSON file.
@@ -63,23 +74,24 @@ def load_ground_truths(key_mol_smiles, num_gt: int = 16):
     # Get the original GEOM SMILES from the mapping
     filepath = _smiles_mapping.get(key_mol_smiles)
     if filepath is None:
-        logger.error("Missing SMILES mapping for pad key %s", key_mol_smiles)
+        logger.error("Missing SMILES mapping for pad key {}", key_mol_smiles)
         return None
 
     conformers = None
     try:
-        conformers = load_pkl(Path(filepath))
+        with _suppress_rdkit_pickle_warnings():
+            conformers = load_pkl(Path(filepath))
         return conformers
     except FileNotFoundError as e:
         logger.error(
-            "Ground-truth pickle missing for %s at %s: %s",
+            "Ground-truth pickle missing for {} at {}: {}",
             key_mol_smiles,
             filepath,
             e,
         )
     except Exception as e:
-        logger.error(
-            "Error loading ground truth for %s at %s: %s\n%r",
+        logger.exception(
+            "Error loading ground truth for {} at {}: {}\nPayload snapshot: {}",
             key_mol_smiles,
             filepath,
             e,
