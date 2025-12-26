@@ -213,9 +213,15 @@ install_dependencies() {
 
     cd "$SCRIPT_DIR"
 
+    # Install tomli first (Python 3.10 doesn't have tomllib)
+    uv pip install tomli --quiet
+
     # Extract and install dependencies from pyproject.toml (without installing the package)
     python3 << DEPS_EOF
-import tomllib
+try:
+    import tomllib  # Python 3.11+
+except ImportError:
+    import tomli as tomllib  # Python 3.10 backport
 import subprocess
 import sys
 
