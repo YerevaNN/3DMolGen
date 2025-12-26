@@ -8,7 +8,7 @@ dataset:
   dataset_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/geom_processed/grpo/train_smiles.jsonl
   smiles_mapping_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/geom_processed/grpo/train_smiles_to_pickle.jsonl
 device:
-  device_type: a100
+  device_type: local
   num_gpus: 2
 generation:
   do_sample: true
@@ -28,7 +28,7 @@ grpo:
   max_ground_truths: 64
   max_steps: 4000
   num_epochs: 1
-  num_generations: 16
+  num_generations: 8
   num_iterations: 4
   output_base_dir: ./grpo_outputs
   output_dir: /auto/home/menuab/code/3DMolGen/grpo_outputs/2025-09-30-16:14_380m_1e_lr5e-5_32bs*16comp*6gpu*8ga_1e_full_beta0.05_alignFalse

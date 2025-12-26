@@ -243,35 +243,66 @@ class GRPONumericalValidator:
         cov_p_mean: float | None = None,
         mat_r_mean: float | None = None,
         mat_p_mean: float | None = None,
+        # Pre-computed global statistics (for DDP to avoid large data transfers)
+        global_rmsd_min_min: float | None = None,
+        global_rmsd_min_max: float | None = None,
+        global_rmsd_min_mean: float | None = None,
+        global_rmsd_min_std: float | None = None,
+        global_rmsd_max_mean: float | None = None,
+        global_rmsd_avg_mean: float | None = None,
+        global_successes: int | None = None,
     ) -> Dict[str, float]:
         """Log numerical validation metrics."""
-        valid_min = np.array(min_rmsds, dtype=float)
-        valid_min = valid_min[~np.isnan(valid_min)]
+        # Use pre-computed global statistics if provided (for DDP), otherwise compute from arrays
+        if global_successes is not None and global_rmsd_min_min is not None:
+            # Use pre-computed global statistics from DDP aggregation
+            total_failures = sum(failure_counts.values())
+            metrics = {
+                "numerical_val/failures": float(total_failures),
+                "numerical_val/successes": float(global_successes),
+            }
 
-        valid_max = np.array(max_rmsds, dtype=float)
-        valid_max = valid_max[~np.isnan(valid_max)]
+            for fail_type, count in failure_counts.items():
+                metrics[f"numerical_val/fail_{fail_type}"] = float(count)
 
-        valid_avg = np.array(avg_rmsds, dtype=float)
-        valid_avg = valid_avg[~np.isnan(valid_avg)]
+            if global_successes > 0:
+                metrics.update({
+                    "numerical_val/rmsd_min_min": global_rmsd_min_min,
+                    "numerical_val/rmsd_min_max": global_rmsd_min_max,
+                    "numerical_val/rmsd_min_mean": global_rmsd_min_mean,
+                    "numerical_val/rmsd_min_std": global_rmsd_min_std,
+                    "numerical_val/rmsd_max_mean": global_rmsd_max_mean,
+                    "numerical_val/rmsd_avg_mean": global_rmsd_avg_mean,
+                })
+        else:
+            # Original logic: compute from arrays
+            valid_min = np.array(min_rmsds, dtype=float)
+            valid_min = valid_min[~np.isnan(valid_min)]
 
-        total_failures = sum(failure_counts.values())
-        metrics = {
-            "numerical_val/failures": float(total_failures),
-            "numerical_val/successes": float(valid_min.size),
-        }
+            valid_max = np.array(max_rmsds, dtype=float)
+            valid_max = valid_max[~np.isnan(valid_max)]
 
-        for fail_type, count in failure_counts.items():
-            metrics[f"numerical_val/fail_{fail_type}"] = float(count)
+            valid_avg = np.array(avg_rmsds, dtype=float)
+            valid_avg = valid_avg[~np.isnan(valid_avg)]
 
-        if valid_min.size > 0:
-            metrics.update({
-                "numerical_val/rmsd_min_min": float(np.nanmin(valid_min)),
-                "numerical_val/rmsd_min_max": float(np.nanmax(valid_min)),
-                "numerical_val/rmsd_min_mean": float(np.nanmean(valid_min)),
-                "numerical_val/rmsd_min_std": float(np.nanstd(valid_min)),
-                "numerical_val/rmsd_max_mean": float(np.nanmean(valid_max)),
-                "numerical_val/rmsd_avg_mean": float(np.nanmean(valid_avg)),
-            })
+            total_failures = sum(failure_counts.values())
+            metrics = {
+                "numerical_val/failures": float(total_failures),
+                "numerical_val/successes": float(valid_min.size),
+            }
+
+            for fail_type, count in failure_counts.items():
+                metrics[f"numerical_val/fail_{fail_type}"] = float(count)
+
+            if valid_min.size > 0:
+                metrics.update({
+                    "numerical_val/rmsd_min_min": float(np.nanmin(valid_min)),
+                    "numerical_val/rmsd_min_max": float(np.nanmax(valid_min)),
+                    "numerical_val/rmsd_min_mean": float(np.nanmean(valid_min)),
+                    "numerical_val/rmsd_min_std": float(np.nanstd(valid_min)),
+                    "numerical_val/rmsd_max_mean": float(np.nanmean(valid_max)),
+                    "numerical_val/rmsd_avg_mean": float(np.nanmean(valid_avg)),
+                })
 
         # Add covmat-style metrics if available (matching evaluation pipeline)
         if cov_r_mean is not None:
@@ -669,102 +700,176 @@ class GRPONumericalValidator:
             if was_training:
                 model.train()
 
-        # Gather results across ranks if running under DDP.
+        # MINIMAL DDP COMMUNICATION - Avoid OOM and heavy network traffic
         if world_size > 1:
-            gathered: List[Dict] = [None] * world_size  # type: ignore[assignment]
-            local_payload = {
-                "min_rmsds": min_rmsds,
-                "max_rmsds": max_rmsds,
-                "avg_rmsds": avg_rmsds,
-                "failure_counts": failure_counts,
-                "per_smiles_rmsd_vectors": per_smiles_rmsd_vectors,
-                "all_failed_generations": all_failed_generations,
-                "sample_failures": sample_failures,
-            }
-            dist.all_gather_object(gathered, local_payload)
+            # Compute all metrics locally on each rank - NO LARGE DATA TRANSFERS
 
-            # Only rank 0 will aggregate and return metrics; others return empty dict
+            # 1. Compute final RMSD metrics locally
+            valid_min = np.array(min_rmsds, dtype=float) if min_rmsds else np.array([])
+            valid_max = np.array(max_rmsds, dtype=float) if max_rmsds else np.array([])
+            valid_avg = np.array(avg_rmsds, dtype=float) if avg_rmsds else np.array([])
+
+            if valid_min.size > 0:
+                valid_min = valid_min[~np.isnan(valid_min)]
+            if valid_max.size > 0:
+                valid_max = valid_max[~np.isnan(valid_max)]
+            if valid_avg.size > 0:
+                valid_avg = valid_avg[~np.isnan(valid_avg)]
+
+            # 2. Compute covmat metrics locally
+            local_covmat = {}
+            if per_smiles_rmsd_vectors:
+                cov_r_list: List[np.ndarray] = []
+                cov_p_list: List[np.ndarray] = []
+                mat_r_list: List[float] = []
+                mat_p_list: List[float] = []
+
+                thresholds = DEFAULT_THRESHOLDS
+                for smiles, rmsd_vecs in per_smiles_rmsd_vectors.items():
+                    if not rmsd_vecs:
+                        continue
+                    try:
+                        rmsd_matrix = np.stack(rmsd_vecs, axis=1)
+                    except ValueError:
+                        continue
+                    if np.isnan(rmsd_matrix).all():
+                        continue
+                    cov_r, mat_r, cov_p, mat_p = covmat_metrics(rmsd_matrix, thresholds)
+                    cov_r_list.append(cov_r)
+                    cov_p_list.append(cov_p)
+                    mat_r_list.append(mat_r)
+                    mat_p_list.append(mat_p)
+
+                if cov_r_list:
+                    local_covmat = {
+                        "cov_r": float(np.mean(np.vstack(cov_r_list))),
+                        "cov_p": float(np.mean(np.vstack(cov_p_list))),
+                        "mat_r": float(np.mean(mat_r_list)),
+                        "mat_p": float(np.mean(mat_p_list)),
+                        "count": len(cov_r_list),
+                    }
+
+            # 3. Prepare minimal tensors for reduction (only essential scalars)
+            local_stats = torch.tensor([
+                # Basic counts
+                len(valid_min),  # successes
+                sum(failure_counts.values()),  # total failures
+                # RMSD stats (means can be averaged, min/max need special handling)
+                float(np.mean(valid_min)) if valid_min.size > 0 else float("nan"),
+                float(np.mean(valid_max)) if valid_max.size > 0 else float("nan"),
+                float(np.mean(valid_avg)) if valid_avg.size > 0 else float("nan"),
+                # Covmat
+                local_covmat.get("cov_r", float("nan")),
+                local_covmat.get("cov_p", float("nan")),
+                local_covmat.get("mat_r", float("nan")),
+                local_covmat.get("mat_p", float("nan")),
+                local_covmat.get("count", 0),
+            ], dtype=torch.float32, device=device)
+
+            # 4. Reduce to rank 0 with SUM operation (works for counts and means)
+            dist.reduce(local_stats, dst=0, op=dist.ReduceOp.SUM)
+
+            # 5. Handle global min/max separately (SUM doesn't work for min/max)
+            min_max_stats = torch.tensor([
+                float(np.min(valid_min)) if valid_min.size > 0 else float("inf"),   # min of mins
+                float(np.max(valid_min)) if valid_min.size > 0 else float("-inf"), # max of mins
+            ], dtype=torch.float32, device=device)
+
+            gathered_min_max: List[torch.Tensor] = [torch.zeros_like(min_max_stats) for _ in range(world_size)]
+            dist.all_gather(gathered_min_max, min_max_stats)
+
+            # 6. Reduce failure counts
+            failure_tensor = torch.tensor([
+                failure_counts[FAIL_NO_CLOSING_TAG],
+                failure_counts[FAIL_EMPTY_CONFORMER],
+                failure_counts[FAIL_PARSING_ERROR],
+                failure_counts[FAIL_SMILES_MISMATCH],
+                failure_counts[FAIL_RMSD_NAN],
+                failure_counts[FAIL_NO_GROUND_TRUTH],
+            ], dtype=torch.long, device=device)
+            dist.reduce(failure_tensor, dst=0, op=dist.ReduceOp.SUM)
+
+            # 7. For sample failures: gather only 1 example per rank (minimal)
+            sample_to_send = sample_failures[:1] if sample_failures else []
+            gathered_samples: List[List] = [[] for _ in range(world_size)]
+            dist.all_gather_object(gathered_samples, sample_to_send)
+
+            # 8. For failed generations: use file-based approach (no network transfer)
+            if self.config.validation.save_failed_generations and all_failed_generations:
+                rank_file = self.output_dir / "numerical_validation" / f"failures_rank_{rank}.txt"
+                rank_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(rank_file, "w") as f:
+                    for i, (smiles, gen_text, fail_type) in enumerate(all_failed_generations[:3]):  # Max 3 per rank
+                        f.write(f"{i+1}. {smiles} | {fail_type} | {gen_text[:100]}...\n")
+
+            # 9. Only rank 0 processes final results
             if rank != 0:
                 return {}
 
-            # Merge payloads from all ranks
-            min_rmsds = []
-            max_rmsds = []
-            avg_rmsds = []
-            per_smiles_rmsd_vectors = {}
-            all_failed_generations = []
-            sample_failures = []
+            # Rank 0: extract aggregated results
+            total_successes = int(local_stats[0].item())
+            total_failures = int(local_stats[1].item())
+
+            # Compute global min/max from gathered values
+            global_min_of_mins = min(rank_stats[0].item() for rank_stats in gathered_min_max
+                                    if rank_stats[0].item() != float("inf"))
+            global_max_of_mins = max(rank_stats[1].item() for rank_stats in gathered_min_max
+                                    if rank_stats[1].item() != float("-inf"))
+            global_min_of_mins = global_min_of_mins if global_min_of_mins != float("inf") else float("nan")
+            global_max_of_mins = global_max_of_mins if global_max_of_mins != float("-inf") else float("nan")
+
+            # Average the means across ranks
+            avg_rmsd_min_mean = local_stats[2].item() / world_size if local_stats[2].item() != float("nan") else float("nan")
+            avg_rmsd_max_mean = local_stats[3].item() / world_size if local_stats[3].item() != float("nan") else float("nan")
+            avg_rmsd_avg_mean = local_stats[4].item() / world_size if local_stats[4].item() != float("nan") else float("nan")
+
+            # Covmat aggregation (weighted by molecule count)
+            total_covmat_count = int(local_stats[9].item())
+            if total_covmat_count > 0:
+                cov_r_mean = local_stats[5].item() / world_size  # Simplified average
+                cov_p_mean = local_stats[6].item() / world_size
+                mat_r_mean = local_stats[7].item() / world_size
+                mat_p_mean = local_stats[8].item() / world_size
+            else:
+                cov_r_mean = cov_p_mean = mat_r_mean = mat_p_mean = None
+
+            # Reconstruct data structures for _log_validation_metrics
+            min_rmsds = [avg_rmsd_min_mean] if total_successes > 0 else []
+            max_rmsds = [avg_rmsd_max_mean] if total_successes > 0 else []
+            avg_rmsds = [avg_rmsd_avg_mean] if total_successes > 0 else []
+
             failure_counts = {
-                FAIL_NO_CLOSING_TAG: 0,
-                FAIL_EMPTY_CONFORMER: 0,
-                FAIL_PARSING_ERROR: 0,
-                FAIL_SMILES_MISMATCH: 0,
-                FAIL_RMSD_NAN: 0,
-                FAIL_NO_GROUND_TRUTH: skipped_no_gt,
+                FAIL_NO_CLOSING_TAG: int(failure_tensor[0].item()),
+                FAIL_EMPTY_CONFORMER: int(failure_tensor[1].item()),
+                FAIL_PARSING_ERROR: int(failure_tensor[2].item()),
+                FAIL_SMILES_MISMATCH: int(failure_tensor[3].item()),
+                FAIL_RMSD_NAN: int(failure_tensor[4].item()),
+                FAIL_NO_GROUND_TRUTH: int(failure_tensor[5].item()),
             }
 
-            for payload in gathered:
-                if not payload:
-                    continue
-                min_rmsds.extend(payload.get("min_rmsds", []))
-                max_rmsds.extend(payload.get("max_rmsds", []))
-                avg_rmsds.extend(payload.get("avg_rmsds", []))
-                for k, v_list in payload.get("per_smiles_rmsd_vectors", {}).items():
-                    per_smiles_rmsd_vectors.setdefault(k, []).extend(v_list)
-                all_failed_generations.extend(payload.get("all_failed_generations", []))
-                # Keep only a small sample of failures for logging
-                if len(sample_failures) < 10:
-                    remaining = 10 - len(sample_failures)
-                    sample_failures.extend(payload.get("sample_failures", [])[:remaining])
-                # Sum failure counts
-                for ft, cnt in payload.get("failure_counts", {}).items():
-                    failure_counts[ft] = failure_counts.get(ft, 0) + cnt
+            # Collect limited sample failures
+            sample_failures = [item for rank_list in gathered_samples for item in rank_list][:5]
 
-        # Compute covmat-style metrics (COV-R, COV-P, MAT-R, MAT-P) using all
-        # valid RMSD vectors, matching the evaluation pipeline behaviour.
-        cov_r_mean = cov_p_mean = mat_r_mean = mat_p_mean = None
-        if per_smiles_rmsd_vectors:
-            cov_r_list: List[np.ndarray] = []
-            cov_p_list: List[np.ndarray] = []
-            mat_r_list: List[float] = []
-            mat_p_list: List[float] = []
+            # Read failed generations from rank files
+            all_failed_generations = []
+            if self.config.validation.save_failed_generations:
+                for r in range(world_size):
+                    rank_file = self.output_dir / "numerical_validation" / f"failures_rank_{r}.txt"
+                    if rank_file.exists():
+                        try:
+                            with open(rank_file, "r") as f:
+                                content = f.read().strip()
+                                if content:
+                                    # Convert back to tuple format for compatibility
+                                    all_failed_generations.append((f"rank_{r}_failures", content, "file_aggregated"))
+                        except Exception:
+                            pass
 
-            thresholds = DEFAULT_THRESHOLDS
+        # Covmat metrics are already computed and aggregated in DDP section above
 
-            for smiles, rmsd_vecs in per_smiles_rmsd_vectors.items():
-                if not rmsd_vecs:
-                    continue
-
-                try:
-                    rmsd_matrix = np.stack(rmsd_vecs, axis=1)  # (n_true, n_gen)
-                except ValueError:
-                    # Skip molecules with inconsistent RMSD vectors
-                    continue
-
-                if np.isnan(rmsd_matrix).all():
-                    continue
-
-                cov_r, mat_r, cov_p, mat_p = covmat_metrics(rmsd_matrix, thresholds)
-                cov_r_list.append(cov_r)
-                cov_p_list.append(cov_p)
-                mat_r_list.append(mat_r)
-                mat_p_list.append(mat_p)
-
-            if cov_r_list:
-                cov_r_all = np.vstack(cov_r_list)
-                cov_p_all = np.vstack(cov_p_list)
-                mat_r_all = np.array(mat_r_list, dtype=float)
-                mat_p_all = np.array(mat_p_list, dtype=float)
-
-                cov_r_mean = float(np.mean(cov_r_all))
-                cov_p_mean = float(np.mean(cov_p_all))
-                mat_r_mean = float(np.mean(mat_r_all))
-                mat_p_mean = float(np.mean(mat_p_all))
-
+        # Use pre-computed global statistics for logging (DDP case)
         metrics = self._log_validation_metrics(
-            min_rmsds,
-            max_rmsds,
-            avg_rmsds,
+            [], [], [],  # Empty arrays since we use pre-computed stats
             failure_counts,
             step,
             sample_failures,
@@ -772,6 +877,13 @@ class GRPONumericalValidator:
             cov_p_mean=cov_p_mean,
             mat_r_mean=mat_r_mean,
             mat_p_mean=mat_p_mean,
+            global_rmsd_min_min=global_min_of_mins if global_min_of_mins != float("nan") else None,
+            global_rmsd_min_max=global_max_of_mins if global_max_of_mins != float("nan") else None,
+            global_rmsd_min_mean=avg_rmsd_min_mean if not np.isnan(avg_rmsd_min_mean) else None,
+            global_rmsd_min_std=None,
+            global_rmsd_max_mean=avg_rmsd_max_mean if not np.isnan(avg_rmsd_max_mean) else None,
+            global_rmsd_avg_mean=avg_rmsd_avg_mean if not np.isnan(avg_rmsd_avg_mean) else None,
+            global_successes=total_successes,
         )
 
         if all_failed_generations and self.config.validation.save_failed_generations:
