@@ -3,11 +3,11 @@
 # but keeps outputs/job names isolated for sweeps.
 #SBATCH --job-name=torchtitan-qwen3-sweep
 #SBATCH --cpus-per-task=32
-#SBATCH --partition=h100
+#SBATCH --partition=a100
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:4
 #SBATCH --mem=200G
-#SBATCH --time=20:00:00
+#SBATCH --time=6-00:00:00
 #SBATCH --output=outputs/slurm_jobs/titan_sweep/%j.out
 #SBATCH --error=outputs/slurm_jobs/titan_sweep/%j.err
 
@@ -17,6 +17,8 @@ export WANDB_GROUP=${WANDB_GROUP:-pretrain}
 export WANDB_JOB_TYPE=${WANDB_JOB_TYPE:-pretrain}
 export WANDB_CONFIG=${WANDB_CONFIG:-'{"run_type": "pretrain"}'}
 export TORCH_COMPILE=${TORCH_COMPILE:-0}
+export TOKENIZERS_PARALLELISM=${TOKENIZERS_PARALLELISM:-false}
+# export MOLGEN3D_REPO_ROOT=${MOLGEN3D_REPO_ROOT:-}
 
 TRAIN_TOML=${TRAIN_TOML:-src/molgen3D/config/pretrain/qwen3_06b.toml}
 

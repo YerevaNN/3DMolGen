@@ -133,11 +133,11 @@ class RunStatistics:
         stats_dir.mkdir(parents=True, exist_ok=True)
         own_stats = self.log_global_stats()
         own_stats_file = stats_dir / f"statistics_{pid}.json"
-        with open(own_stats_file, 'w') as f:
+        with open(own_stats_file, 'w', encoding='utf-8') as f:
             json.dump(own_stats, f, indent=4)
         lock_file = stats_dir / "statistics.lock"
         aggregate = {}
-        with open(lock_file, 'w') as lock:
+        with open(lock_file, 'w', encoding='utf-8') as lock:
             acquired = False
             while not acquired:
                 try:
@@ -175,7 +175,7 @@ class RunStatistics:
                 "posebusters_checks": 0,
             }
             for file in stats_files:
-                with open(file, 'r') as f:
+                with open(file, 'r', encoding='utf-8', errors='replace') as f:
                     try:
                         stats = json.load(f)
                     except json.JSONDecodeError:
@@ -245,7 +245,7 @@ class RunStatistics:
                 if aggregate["posebusters_checks"] > 0 else 0.0
             )
             stats_file = stats_dir / "statistics.json"
-            with open(stats_file, 'w') as f:
+            with open(stats_file, 'w', encoding='utf-8') as f:
                 json.dump(aggregate, f, indent=4)
             fcntl.flock(lock, fcntl.LOCK_UN)
         return aggregate

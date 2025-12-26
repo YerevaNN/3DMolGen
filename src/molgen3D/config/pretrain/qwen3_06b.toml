@@ -1,6 +1,5 @@
 [job]
-description = "qwen3_06b_pre_4e_72effb"
-# description = "qwen3_06b_hf_test_run"
+description = "qwen3_06b_scr_4e_48effb_4kseq"
 dump_folder = "pretrain_runs"
 print_config = true
 custom_config_module = "molgen3D.training.pretraining.config.custom_job_config"
@@ -35,7 +34,7 @@ enable = true
 dataset = "molgen_jsonl"
 dataset_path = "data:conformers_valid"
 local_batch_size = 4
-seq_len = 2048
+seq_len = 4096
 freq = 500
 steps = 200
 numerical_validation = true
@@ -71,7 +70,7 @@ weight_decay = 0.1
 [wsds_scheduler]
 enable = true
 warmup_steps = 500
-checkpoints = [40000, 80000, 120000, 160000]
+checkpoints = [30000, 60000, 90000, 120000]
 lr_min = 0
 decay_frac = 0.1
 
