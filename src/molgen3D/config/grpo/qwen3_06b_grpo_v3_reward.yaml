@@ -21,42 +21,42 @@ grpo:
   adam_beta2: 0.95
   beta: 0
   checkpoint_base_dir: /nfs/h100/raid/chem/checkpoints/conf_grpo
-  delta: 0.85
+  delta: 0.75
+  enable_pairwise_rmsd_logging: true
   enable_posebusters: true
-  epsilon_high: 5e-4
-  epsilon_low: 1e-4
+  epsilon_high: 8e-4
+  epsilon_low: 3e-4
   grad_acc_steps: 2
   importance_sampling_level: sequence
-  lambda_match: 1.0
-  lambda_qual: 1.0
-  lambda_smcov: 8.0
+  lambda_match: 2.0
+  lambda_qual: 2.0
+  lambda_smcov: 4.0
   learning_rate: 3.0e-05
+  log_distance_samples_per_group: 64
   max_grad_norm: 1.0
   max_ground_truths: 30
-  max_steps: 4000
+  max_steps: 8000
   num_epochs: 1
   num_generations: 16
   num_iterations: 1
   output_base_dir: ./grpo_outputs
-  per_device_batch_size: 16
+  pairwise_rmsd_log_every: 50
+  per_device_batch_size: 32
   posebusters:
     chunk_size: 16
     energy_num_threads: 1
     max_workers: 8
     mode: geometry
-  enable_pairwise_rmsd_logging: true
-  pairwise_rmsd_log_every: 10
-  log_distance_samples_per_group: 128
-  r_floor: -0.75
+  r_floor: -1.0
   reward_strategy: v3
-  rho: 0.9
+  rho: 0.6
   rmsd_const: 0.75
   scheduler: cosine
   seed: 1
-  sigma: 0.35
+  sigma: 0.25
   steps_per_generation: 8
   temperature: 1.0
-  warmup_ratio: 0.05
+  warmup_ratio: 0.03
   weight_decay: 0.0
 model:
   checkpoint_path: /nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b/251210-1955-d79f-qwen3_06b_pre_4e_144effb/step-80000-hf/
@@ -73,7 +73,7 @@ processing:
   eos_token_id: 151672
 run:
   log_level: INFO
-  name: qwen3_v3_match_qual_gspo_8*2*16comp_16steps
+  name: qwen3_v3_match_qual_gspo_8*2*32comp_16steps
 trainer:
   attn_implementation: flash_attention_2
   log_on_each_node: false

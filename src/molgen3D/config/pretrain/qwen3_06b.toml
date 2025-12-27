@@ -1,5 +1,5 @@
 [job]
-description = "qwen3_06b_pre_4e_48effb_4kseq"
+description = "qwen3_06b_pre_5e_48effb_4kseq"
 dump_folder = "pretrain_runs"
 print_config = true
 custom_config_module = "molgen3D.training.pretraining.config.custom_job_config"
@@ -20,9 +20,9 @@ custom_import = "molgen3D.training.pretraining.torchtitan_model.qwen3_custom"
 
 [training]
 seq_len = 4096
-local_batch_size = 3
+local_batch_size = 2
 global_batch_size = 48
-steps = 120000
+steps = 150000
 max_norm = 1.0
 dtype = "bfloat16"
 seed = 1234
@@ -70,13 +70,13 @@ weight_decay = 0.1
 [wsds_scheduler]
 enable = true
 warmup_steps = 500
-checkpoints = [30000, 60000, 90000, 120000]
+checkpoints = [30000, 60000, 90000, 120000, 150000]
 lr_min = 0
 decay_frac = 0.1
 
 [checkpoint]
 enable = true
-interval = 20000
+interval = 30000
 keep_latest_k = 4
 folder = "checkpoint"
 create_seed_checkpoint = false

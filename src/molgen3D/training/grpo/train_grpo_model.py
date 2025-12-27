@@ -159,7 +159,7 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         prompts = [
             line.strip()
             for line in f
-            if line.strip() and len(line.strip()) <= 170
+            if line.strip() and len(line.strip()) <= 150
         ]
     dataset = Dataset.from_dict({"prompt": prompts})
     dataset = dataset.shuffle(seed=config.grpo.seed)
