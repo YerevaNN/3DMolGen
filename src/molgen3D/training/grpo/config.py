@@ -28,14 +28,6 @@ class ProcessingConfig:
 
 
 @dataclass
-class PoseBustersGateConfig:
-    mode: str = "off"
-    max_workers: int = 0
-    chunk_size: int = 100
-    energy_num_threads: int = 1
-
-
-@dataclass
 class GRPOConfig:
     # Required parameters (no defaults)
     output_base_dir: str
@@ -68,7 +60,7 @@ class GRPOConfig:
     num_iterations: int = 1
     max_steps: Optional[int] = None
     num_epochs: Optional[int] = None
-    importance_sampling_level: str = "sequence"
+    importance_sampling_level: str = "token"
     epsilon_low: float = 3e-4
     epsilon_high: float = 4e-4
     steps_per_generation: int = 4
@@ -96,12 +88,6 @@ class GRPOConfig:
     lambda_match: float = 1.0  # Weight for matching term
     r_floor: float = -1.0      # Reward for invalid samples
     hard_rmsd_gate: bool = True  # Drop PoseBusters-valid but RMSD-invalid rollouts
-    profile_rewards: bool = False
-    log_distance_samples_per_group: int = 32
-    enable_pairwise_rmsd_logging: bool = False
-    pairwise_rmsd_log_every: int = 50
-    log_every_steps: int = 1
-    posebusters: PoseBustersGateConfig = field(default_factory=PoseBustersGateConfig)
 
     # Runtime parameters (set during execution)
     output_dir: Optional[str] = None
@@ -135,25 +121,6 @@ class DataLoaderConfig:
     drop_last: bool = False
 
 @dataclass
-class ValidationConfig:
-    # Numerical validation settings
-    enable_numerical_validation: bool = True
-    num_val_molecules: int = 10
-    max_conformer_tokens: int = 3500
-    validation_batch_size: int = 8
-    save_failed_generations: bool = True
-    sampling_config: str = "greedy"
-
-    # Evaluation dataset settings (for TRL GRPO trainer)
-    eval_dataset_path: Optional[str] = None
-    eval_steps: Optional[int] = None
-    eval_accumulation_steps: Optional[int] = None
-    eval_delay: Optional[float] = None
-    num_generations_eval: Optional[int] = None
-    per_device_eval_batch_size: Optional[int] = None
-
-
-@dataclass
 class TrainerConfig:
     # Checkpointing and saving
     save_strategy: str = "steps"
@@ -161,7 +128,7 @@ class TrainerConfig:
     save_total_limit: int = 8
     save_on_each_node: bool = False
     save_safetensors: bool = True
-
+    
     # Logging
     log_on_each_node: bool = False
     logging_steps: int = 1
@@ -173,8 +140,6 @@ class TrainerConfig:
     # Model loading
     torch_dtype: str = "bfloat16"
     attn_implementation: str = "flash_attention_2"
-    # Tokenizer settings
-    tokenizers_parallelism: bool = False
 
 
 @dataclass
@@ -212,7 +177,6 @@ class Config:
     device: DeviceConfig
     trainer: TrainerConfig
     dataloader: DataLoaderConfig
-    validation: ValidationConfig = field(default_factory=ValidationConfig)
 
     @classmethod
     def from_yaml(cls, yaml_path: str) -> 'Config':
@@ -224,7 +188,7 @@ class Config:
         Returns:
             Config: A Config instance with all parameters loaded from the YAML file
         """
-        with open(yaml_path, 'r', encoding='utf-8', errors='replace') as f:
+        with open(yaml_path, 'r') as f:
             config_dict = yaml.safe_load(f)
 
         grpo_dict_raw = dict(config_dict['grpo'])
@@ -251,19 +215,6 @@ class Config:
             }
             advanced_reward = AdvancedRewardConfig(weights=weights, **advanced_kwargs)
         grpo_dict_raw['advanced_reward'] = advanced_reward
-
-        posebusters_raw = grpo_dict_raw.get('posebusters')
-        if isinstance(posebusters_raw, PoseBustersGateConfig):
-            posebusters_config = posebusters_raw
-        elif posebusters_raw is None:
-            posebusters_config = PoseBustersGateConfig()
-        elif isinstance(posebusters_raw, dict):
-            posebusters_config = PoseBustersGateConfig(**posebusters_raw)
-        elif isinstance(posebusters_raw, str):
-            posebusters_config = PoseBustersGateConfig(mode=posebusters_raw)
-        else:
-            raise TypeError("grpo.posebusters must be a dict, string, or PoseBustersGateConfig instance")
-        grpo_dict_raw['posebusters'] = posebusters_config
         
         return cls(
             model=ModelConfig(**config_dict['model']),
@@ -274,6 +225,5 @@ class Config:
             run=RunConfig(**config_dict['run']),
             device=DeviceConfig(**config_dict['device']),
             trainer=TrainerConfig(**config_dict.get('trainer', {})),
-            dataloader=DataLoaderConfig(**config_dict.get('dataloader', {})),
-            validation=ValidationConfig(**config_dict.get('validation', {}))
+            dataloader=DataLoaderConfig(**config_dict.get('dataloader', {}))
         )

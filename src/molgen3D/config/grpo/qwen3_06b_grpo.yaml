@@ -8,7 +8,7 @@ dataset:
   dataset_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/geom_processed/grpo/train_smiles.jsonl
   smiles_mapping_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/geom_processed/grpo/train_smiles_to_pickle.jsonl
 device:
-  device_type: local
+  device_type: a100
   num_gpus: 2
 generation:
   do_sample: true
@@ -75,4 +75,4 @@ validation:
   num_val_molecules: 8
   sampling_config: greedy
   save_failed_generations: true
-  validation_batch_size: 32
+  validation_batch_size: 64
