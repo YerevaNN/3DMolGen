@@ -47,8 +47,13 @@ A rollout is treated as valid only if it passes **all** of these:
 
 If graph mismatch, the rollout gets `r_floor` (no point rewarding geometry for the wrong molecule).
 
-### 2.3 Finite RMSD gate (hard)
-Even if graph matches, the rollout must have a **finite** $\min_j D_{i,j}$. If all RMSDs fail / are `inf`, the rollout is treated as invalid and gets `r_floor`.
+### 2.3 PoseBusters gate (configurable but hard when enabled)
+- If `grpo.posebusters.mode` is anything other than `"off"`, every **base-valid** rollout is checked with PoseBusters before geometry rewards are computed.
+- Rollouts that fail the selected PoseBusters suite (or cause PoseBusters to error) are marked invalid and receive `r_floor`.  
+- The metrics `pose/checked_rate`, `pose/pass_rate`, and `pose/error_rate` respectively track how many base-valid samples reached PoseBusters, how many of those passed, and what fraction errored.
+
+### 2.4 Finite RMSD gate (hard)
+Even if PoseBusters (or the base gate) passes, the rollout must have a **finite** $\min_j D_{i,j}$. If all RMSDs fail / are `inf`, the rollout is treated as invalid and gets `r_floor`.
 
 > Note on `hard_rmsd_gate`: in the current code, *finite RMSD is always required* for validity; the knob mainly controls logging/stats messaging. If you intended "graph-valid but no RMSD" to still be considered valid (with e.g. $r^{qual}=0$), that requires a code change.
 
@@ -114,26 +119,38 @@ $$
 
 ## 4) What gets logged (and how to interpret it)
 
-### Validity
-- `graph_match_rate`: fraction whose SMILES graph matches
-- `finite_rmsd_rate`: fraction with finite $d_i$
-- `validity_rate`: fraction that pass all validity gates
+Metrics are emitted to W&B (when a `wandb.run` is active) under these keys:
+
+### Validity & gating
+- `gate/graph_match_rate`, `gate/rdkit_parse_rate`, `gate/base_valid_rate`, `gate/final_valid_rate`
+- `pose/checked_rate`, `pose/pass_rate`, `pose/error_rate`
 
 ### Geometry quality
-- `geom/d_min_mean`, `p50`, `p90`: stats of $d_i$ over valid rollouts (should go **down**)
+- `rmsd/d_min_mean`, `rmsd/d_min_p50`, `rmsd/d_min_p90`
+- `rmsd/frac_under_delta`, `rmsd/frac_under_2delta`
 
-### Coverage / matching
-- `match/refs_hit`: distinct references with any eligible rollout under $\delta$
-- `match/num_matched`: mean matched count per group
-- `match/match_efficiency`: matched / max_possible
+### Coverage & utilization
+- `cov/refs_hit_mean`, `cov/refs_hit_p50`, `cov/cov_ratio_mean`
+- `cov/unique_nearest_refs_mean`, `cov/nearest_collision_rate_mean`
+- `cov/valid_rollouts_mean`
 
-### Reward decomposition (inflation checks)
-- `reward/component_quality = λ_qual * mean(r_qual)`
-- `reward/component_smcov = λ_smcov * mean(r_smcov)`
-- `reward/component_match = λ_match * mean(r_match)`
+### Matching diagnostics
+- `match/num_matched_mean`, `match/max_possible_mean`, `match/efficiency_mean`
+- `match/matched_dist_p50`, `match/matched_dist_p90`
+- `match/eligible_edge_density`
+
+### Smooth marginal coverage
+- `smcov/soft_cov_mean`
+- `smcov/pct_gt_cov_gt_0p1`, `smcov/pct_gt_cov_gt_0p5`
+- `smcov/corr_with_refs_hit`
+
+### Reward decomposition
+- `reward/total_mean`, `reward/total_std`
+- `reward/comp_qual_mean`, `reward/comp_smcov_mean`, `reward/comp_match_mean`
+- `reward/comp_smcov_frac`
 
 ### Optional diversity proxy
-- `diversity/pairwise_mean`: mean pairwise RMSD among valid rollouts (logged only when enabled)
+- `div/pairwise_rmsd_p50`: median pairwise RMSD among PoseBusters+RMSD-valid rollouts (logged only when pairwise logging is enabled)
 
 ---
 
@@ -193,11 +210,11 @@ Suggested starting region:
 
 When increasing `lambda_smcov` or `rho`, you want **at least two** of these to improve:
 
-- **Hard coverage improves:** `match/match_efficiency` and `match/refs_hit` trend up
-- **Quality improves:** `geom/d_min_p50` / `geom/d_min_mean` trend down
-- **No collapse:** optional `diversity/pairwise_mean` does not fall sharply
+- **Hard coverage improves:** `match/efficiency_mean` and `cov/refs_hit_mean` trend up
+- **Quality improves:** `rmsd/d_min_p50` / `rmsd/d_min_mean` trend down
+- **No collapse:** optional `div/pairwise_rmsd_p50` does not fall sharply
 
-If only `reward/component_smcov` rises while the others don’t move, smcov is likely being exploited as an easy soft term.
+If only `reward/comp_smcov_mean` rises while the others don’t move, smcov is likely being exploited as an easy soft term.
 
 ---
 
