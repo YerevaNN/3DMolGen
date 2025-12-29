@@ -160,7 +160,7 @@ def setup_job_executor(device_type, num_gpus, run_name):
             timeout_min=24 * 24 * 60,  # 24 hours
             nodes=1,
             mem_gb=80,
-            cpus_per_task=num_gpus * 21,
+            cpus_per_task=num_gpus * 8,
             slurm_additional_parameters={
                 "partition": device_type,
                 "gres": f"gpu:{num_gpus}"
@@ -174,7 +174,7 @@ def setup_job_executor(device_type, num_gpus, run_name):
             gpus_per_node=num_gpus,
             nodes=1,
             mem_gb=80,
-            cpus_per_task=num_gpus * 20,
+            cpus_per_task=num_gpus * 8,
             slurm_additional_parameters={"partition": device_type},
         )
     

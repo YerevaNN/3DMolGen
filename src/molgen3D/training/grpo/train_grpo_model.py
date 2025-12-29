@@ -2,7 +2,9 @@
 # Standard library imports
 import argparse
 import os
+import random
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # Ensure the snapshot/repo sources take precedence over any installed package.
@@ -16,15 +18,17 @@ if package_container and str(package_container) not in sys.path:
     sys.path.insert(0, str(package_container))
 
 # Third-party imports
+import numpy as np
+import torch
 from datasets import Dataset
 from loguru import logger
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import GRPOConfig as TRLGRPOConfig
 from trl import GRPOTrainer
+from trl.trainer import grpo_trainer as trl_grpo_module
 
 # Local imports
 from molgen3D.training.grpo.config import Config
-# from molgen3D.training.grpo.grpo_trainer import GRPOTrainer
 from molgen3D.training.grpo.stats import RunStatistics
 from molgen3D.training.grpo.utils import (
     load_smiles_mapping,
@@ -34,14 +38,60 @@ from molgen3D.training.grpo.utils import (
 )
 from molgen3D.training.grpo.rewards import reward_function
 from molgen3D.training.grpo.multi_component_reward import MultiComponentRewardCalculator
+from molgen3D.training.grpo.grpo_reward_v3 import reward_function as reward_function_v3
+
+
+def initialize_random_seed(seed: int) -> None:
+    """Seed all RNGs so the data order and sampling stays consistent."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
+def ensure_completion_length_tracking():
+    """Register a runtime hook so TRL always exposes completion lengths."""
+    if getattr(trl_grpo_module, "_molgen3d_completion_length_hook", False):
+        return
+
+    original_generate = GRPOTrainer._generate
+
+    def _generate_with_lengths(self, prompts):
+        result = original_generate(self, prompts)
+        _, completion_ids, tool_mask, *_ = result
+        device = self.accelerator.device
+
+        if tool_mask is not None:
+            lengths = torch.tensor([sum(mask) for mask in tool_mask], device=device)
+        else:
+            lengths = torch.tensor([len(ids) for ids in completion_ids], device=device)
+
+        trl_grpo_module.completion_lengths = lengths
+        return result
+
+    GRPOTrainer._generate = _generate_with_lengths
+    trl_grpo_module._molgen3d_completion_length_hook = True
 
 
 def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
-    # Use the runtime output_dir if available, otherwise use the base directory
+    initialize_random_seed(config.grpo.seed)
+
+    # Set up output and checkpoint directories if not already configured
+    if output_dir is None and config.grpo.output_dir is None:
+        timestamp = datetime.now().strftime("%y%m%d-%H%M")
+        output_base = Path(config.grpo.output_base_dir)
+        output_base.mkdir(parents=True, exist_ok=True)
+
+        output_dir = output_base / f"{timestamp}_{config.run.name}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        config.grpo.output_dir = str(output_dir)
+
+        # Create checkpoint directory
+        checkpoint_dir = os.path.join(config.grpo.checkpoint_base_dir, f"{timestamp}_{config.run.name}")
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        config.grpo.checkpoint_dir = checkpoint_dir
+
     actual_output_dir = output_dir or config.grpo.output_dir
-    if actual_output_dir is None:
-        raise ValueError("Output directory not specified in config or as parameter")
-    
     setup_logging(actual_output_dir, config.run.log_level)
     
     logger.info(f"Running GRPO")
@@ -80,9 +130,12 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         logging_steps=config.trainer.logging_steps,
         max_steps=config.grpo.max_steps,
         # num_train_epochs=config.grpo.num_epochs,
-        use_liger_loss=config.trainer.use_liger_loss,
+        use_liger_kernel=config.trainer.use_liger_loss,
         loss_type=config.trainer.loss_type,
         num_iterations=config.grpo.num_iterations,
+        importance_sampling_level=config.grpo.importance_sampling_level,
+        steps_per_generation=config.grpo.steps_per_generation,
+        seed=config.grpo.seed,
     )
 
     # Convert string dtype to torch dtype
@@ -100,7 +153,17 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     tokenizer = AutoTokenizer.from_pretrained(
         config.model.tokenizer_path,
     )
-    dataset = Dataset.from_csv(config.dataset.dataset_path)
+
+    # Load dataset from text file and create prompt column
+    with open(config.dataset.dataset_path, 'r') as f:
+        prompts = [
+            line.strip()
+            for line in f
+            if line.strip() and len(line.strip()) <= 170
+        ]
+    dataset = Dataset.from_dict({"prompt": prompts})
+    dataset = dataset.shuffle(seed=config.grpo.seed)
+    logger.info(f"Loaded {len(dataset)} prompts from {config.dataset.dataset_path}")
 
     tokenizer.pad_token_id = tokenizer.convert_tokens_to_ids(config.model.pad_token)
     mol_end_token_id = tokenizer.convert_tokens_to_ids(config.model.mol_tags[1])
@@ -110,15 +173,35 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     logger.info(f"Set model pad_token_id to {model.config.pad_token_id}")
 
     reward_strategy = config.grpo.reward_strategy.lower()
-    if reward_strategy == "multi_component":
+
+    if reward_strategy == "v3":
+        logger.info("Using GRPO reward function v3 (GEOM-Drugs aligned: quality + smooth coverage + hard matching)")
+        def reward_func(prompts, completions, **kwargs):
+            completion_entropies = kwargs.get("mean_token_entropy")
+            completion_lengths = kwargs.get("completion_lengths")
+            return reward_function_v3(
+                prompts,
+                completions,
+                stats,
+                tokenizer,
+                config,
+                completion_entropies=completion_entropies,
+                completion_lengths=completion_lengths,
+            )
+
+    elif reward_strategy == "multi_component":
+        logger.info("Using multi-component reward calculator")
         mc_calculator = MultiComponentRewardCalculator(config=config, stats=stats, tokenizer=tokenizer)
 
         def reward_func(prompts, completions, **kwargs):
             return mc_calculator(prompts, completions, **kwargs)
 
     else:
+        logger.info("Using legacy reward function")
         def reward_func(prompts, completions, **kwargs):
             return reward_function(prompts, completions, stats, tokenizer, config)
+
+    ensure_completion_length_tracking()
 
     # Set DataLoader parameters from YAML config
     training_args.dataloader_num_workers = config.dataloader.num_workers
@@ -134,6 +217,13 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         args=training_args,
         train_dataset=dataset,
     )
+    
+    # Set epsilon parameters on trainer (not available in GRPOConfig)
+    epsilon_low = float(config.grpo.epsilon_low)
+    epsilon_high = float(config.grpo.epsilon_high)
+    trainer.epsilon_low = epsilon_low
+    trainer.epsilon_high = epsilon_high
+    logger.info(f"Set epsilon_low={epsilon_low}, epsilon_high={epsilon_high} on GRPO trainer")
     
     trainer.train()
     stats.update_stats()

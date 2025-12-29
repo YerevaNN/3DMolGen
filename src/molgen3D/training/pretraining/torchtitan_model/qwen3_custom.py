@@ -15,8 +15,11 @@ from torchtitan.models.qwen3.model.state_dict_adapter import Qwen3StateDictAdapt
 
 from molgen3D.training.pretraining.dataprocessing.dataloader import (
     build_molgen_dataloader,
+)
+from molgen3D.training.pretraining.helpers.validator import (
     build_molgen_validator,
 )
+
 from molgen3D.training.pretraining.helpers.wsds_scheduler import (
     build_wsds_lr_schedulers,
 )

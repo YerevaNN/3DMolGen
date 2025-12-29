@@ -44,17 +44,51 @@ class GRPOConfig:
     max_grad_norm: float
     beta: float
     seed: int
-    reward_weight_rmsd: float
-    reward_weight_match: float
-    rmsd_const: float
     max_ground_truths: int
     checkpoint_base_dir: str
+
+    # Legacy reward parameters (with defaults for backward compatibility)
+    reward_weight_rmsd: float = 0.85
+    reward_weight_match: float = 0.15
+    rmsd_const: float = 0.75
+
+    # Strategy selection
     reward_strategy: str = "legacy"
     advanced_reward: "AdvancedRewardConfig" = field(default_factory=lambda: AdvancedRewardConfig())
+
     # Optional parameters (with defaults)
     num_iterations: int = 1
     max_steps: Optional[int] = None
     num_epochs: Optional[int] = None
+    importance_sampling_level: str = "sequence"
+    epsilon_low: float = 3e-4
+    epsilon_high: float = 4e-4
+    steps_per_generation: int = 4
+
+    # V2 reward parameters (optional, with defaults matching spec)
+    coverage_delta: float = 0.75
+    coverage_scale: float = 0.5
+    enable_diversity: bool = True
+    diversity_scale: float = 1.0
+    precision_scale: float = 0.5
+    enable_posebusters: bool = True
+    match_partial_credit: bool = False
+    weight_precision: float = 0.4
+    weight_coverage: float = 0.3
+    weight_match: float = 0.2
+    weight_validity: float = 0.1
+    weight_diversity: float = 0.05
+
+    # V3 reward parameters (GEOM-Drugs aligned)
+    delta: float = 0.75        # RMSD threshold (Å)
+    sigma: float = 0.25        # Quality scale (Å)
+    rho: float = 0.75          # Smooth coverage kernel scale (Å)
+    lambda_qual: float = 1.0   # Weight for quality term
+    lambda_smcov: float = 1.0  # Weight for smooth coverage term
+    lambda_match: float = 1.0  # Weight for matching term
+    r_floor: float = -1.0      # Reward for invalid samples
+    hard_rmsd_gate: bool = True  # Drop PoseBusters-valid but RMSD-invalid rollouts
+
     # Runtime parameters (set during execution)
     output_dir: Optional[str] = None
     checkpoint_dir: Optional[str] = None
@@ -160,6 +194,10 @@ class Config:
         grpo_dict_raw = dict(config_dict['grpo'])
         reward_strategy = grpo_dict_raw.get('reward_strategy', 'legacy')
         grpo_dict_raw['reward_strategy'] = reward_strategy
+
+        # Backward compatibility: map 'epsilon' to 'epsilon_low' if present
+        if 'epsilon' in grpo_dict_raw and 'epsilon_low' not in grpo_dict_raw:
+            grpo_dict_raw['epsilon_low'] = grpo_dict_raw.pop('epsilon')
 
         advanced_reward_dict = grpo_dict_raw.get('advanced_reward', {})
         if advanced_reward_dict is None:

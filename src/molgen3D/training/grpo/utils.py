@@ -1,3 +1,4 @@
+from numpy.random import f
 from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2
 from molgen3D.utils.utils import get_best_rmsd, load_json, load_pkl
 from pathlib import Path
@@ -50,36 +51,41 @@ def remove_chiral_info(mol):
 
 def load_ground_truths(key_mol_smiles, num_gt: int = 16):
     """Load ground truth conformers for a given canonical SMILES.
-    
+
     Args:
         key_mol_smiles: Canonical SMILES string
         num_gt: Number of ground truth conformers to load
-        
+
     Returns:
         List of RDKit molecules representing ground truth conformers
     """
-    
-    # Get the original GEOM SMILES from the mapping
-    geom_smiles = _smiles_mapping.get(key_mol_smiles)
-    if geom_smiles is None:
-        logger.warning(f"No mapping found for SMILES: {key_mol_smiles}")
-        return None
-    
-    filename = geom_smiles.replace("/", "_").replace("|", "_")
 
-    try:
-        mol_pickle = load_pkl(os.path.join("/nfs/ap/mnt/sxtn2/chem/GEOM_data/rdkit_folder", "drugs", filename + ".pickle"))
-        conformers: list = mol_pickle["conformers"]
-        if len(conformers) > 1:
-            rng = np.random.default_rng()
-            rng.shuffle(conformers)
-        mol_confs = conformers[:num_gt]
-        del mol_pickle
-        mols = [conf['rd_mol'] for conf in mol_confs]
-        return mols
-    except Exception as e:
-        logger.error(f"Error loading ground truth for {key_mol_smiles} {geom_smiles}: {e}")
+    # Get the original GEOM SMILES from the mapping
+    filepath = _smiles_mapping.get(key_mol_smiles)
+    if filepath is None:
+        logger.error("Missing SMILES mapping for pad key %s", key_mol_smiles)
         return None
+
+    conformers = None
+    try:
+        conformers = load_pkl(Path(filepath))
+        return conformers
+    except FileNotFoundError as e:
+        logger.error(
+            "Ground-truth pickle missing for %s at %s: %s",
+            key_mol_smiles,
+            filepath,
+            e,
+        )
+    except Exception as e:
+        logger.error(
+            "Error loading ground truth for %s at %s: %s\n%r",
+            key_mol_smiles,
+            filepath,
+            e,
+            conformers,
+        )
+    return None
 
 def get_rmsd(ground_truths, generated_conformer, align: bool = False) -> float:
     try:

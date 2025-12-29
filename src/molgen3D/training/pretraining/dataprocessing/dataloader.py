@@ -56,10 +56,13 @@ except Exception:  # pragma: no cover
 
 
 def _json_loads(raw):
-    if isinstance(raw, bytes):
-        raw = raw.decode("utf-8")
+    """Parse JSON from either str or bytes."""
     if _fast_json is not None:
-        return _fast_json.loads(raw)
+        # orjson expects bytes
+        if isinstance(raw, bytes):
+            return _fast_json.loads(raw)
+        return _fast_json.loads(raw.encode("utf-8"))
+    # stdlib json.loads accepts both str and bytes
     return json.loads(raw)
 
 
@@ -94,6 +97,10 @@ def _resolve_special_token_id(tokenizer, attr_name: str, fallback_tokens: Sequen
     """
     Attempts to resolve a tokenizer special token id, falling back to common aliases.
     """
+    # Handle wrapped tokenizers (e.g. TorchTitan's HuggingFaceTokenizer)
+    if not hasattr(tokenizer, "convert_tokens_to_ids") and hasattr(tokenizer, "tokenizer"):
+        tokenizer = tokenizer.tokenizer
+
     token_id = getattr(tokenizer, attr_name, None)
     if token_id is not None:
         try:
@@ -104,7 +111,14 @@ def _resolve_special_token_id(tokenizer, attr_name: str, fallback_tokens: Sequen
     for token in fallback_tokens:
         if not token:
             continue
-        converted = tokenizer.convert_tokens_to_ids(token)
+        
+        if hasattr(tokenizer, "convert_tokens_to_ids"):
+            converted = tokenizer.convert_tokens_to_ids(token)
+        elif hasattr(tokenizer, "token_to_id"):
+            converted = tokenizer.token_to_id(token)
+        else:
+            converted = None
+
         if isinstance(converted, int) and converted >= 0:
             return int(converted)
 
@@ -606,10 +620,11 @@ def build_dataloader(
     effective_persistent = (
         persistent_workers if persistent_workers is not None else (num_workers > 0)
     )
+    # prefetch_factor must be None when num_workers=0
     effective_prefetch = (
-        prefetch_factor
-        if prefetch_factor is not None
-        else (4 if num_workers > 0 else None)
+        (prefetch_factor if prefetch_factor is not None else 4)
+        if num_workers > 0
+        else None
     )
     return TitanStatefulDataLoader(
         ds,
@@ -704,6 +719,12 @@ def _resolve_validation_path(job_config: MolGenJobConfig) -> str:
 
 if Validator is not None:
     class MolGenValidator(Validator):
+        """
+        Base MolGen validator that wraps TorchTitan's Validator with dataloader setup.
+        
+        This class handles the basic validation dataloader setup. For extended functionality
+        like numerical conformer validation, see helpers/validator.py which extends this class.
+        """
         def __init__(
             self,
             job_config: MolGenJobConfig,
@@ -721,6 +742,7 @@ if Validator is not None:
             pp_has_last_stage=None,
         ):
             self.job_config = job_config
+            self.tokenizer = tokenizer
             self.parallel_dims = parallel_dims
             self.loss_fn = loss_fn
             self.validation_dataloader = validation_dataloader
@@ -739,6 +761,7 @@ if Validator is not None:
 
     MolGenValidatorClass = MolGenValidator
 
+
 def build_molgen_validator(
     job_config: MolGenJobConfig,
     dp_world_size: int,
@@ -752,7 +775,16 @@ def build_molgen_validator(
     pp_schedule=None,
     pp_has_first_stage=None,
     pp_has_last_stage=None,
+    validator_class=None,
 ) -> BaseValidator:
+    """
+    Build a MolGen validator with the validation dataloader.
+    
+    Args:
+        validator_class: Optional custom validator class to use instead of the base MolGenValidator.
+                        This allows extended validators (like the numerical validator) to reuse
+                        the dataloader setup logic.
+    """
     if MolGenValidatorClass is None:
         raise RuntimeError(
             "Torchtitan validator bindings are unavailable. Install torchtitan "
@@ -780,7 +812,7 @@ def build_molgen_validator(
         num_workers=val_num_workers,
         pin_memory=data_cfg.pin_memory,
         shuffle_lines=False,
-        # Mirror TorchTitan’s default: only allow finite validation when the user
+        # Mirror TorchTitan's default: only allow finite validation when the user
         # explicitly sets steps=-1, otherwise keep the loader infinite so every
         # rank can always advance to the requested step count.
         infinite=infinite_validation,
@@ -794,7 +826,10 @@ def build_molgen_validator(
         preview_enabled=False,
     )
 
-    return MolGenValidatorClass(  # type: ignore[arg-type]
+    # Use custom validator class if provided, otherwise use base MolGenValidator
+    cls = validator_class if validator_class is not None else MolGenValidatorClass
+
+    return cls(  # type: ignore[arg-type]
         job_config=job_config,
         dp_world_size=dp_world_size,
         dp_rank=dp_rank,
@@ -809,3 +844,5 @@ def build_molgen_validator(
         pp_has_first_stage=pp_has_first_stage,
         pp_has_last_stage=pp_has_last_stage,
     )
+
+
