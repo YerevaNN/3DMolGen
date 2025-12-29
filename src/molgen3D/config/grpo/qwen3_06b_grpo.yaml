@@ -9,7 +9,7 @@ dataset:
   smiles_mapping_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/geom_processed/grpo/train_smiles_to_pickle.jsonl
 device:
   device_type: a100
-  num_gpus: 2
+  num_gpus: 4
 generation:
   do_sample: true
   max_completion_length: 1000
@@ -28,7 +28,7 @@ grpo:
   max_ground_truths: 64
   max_steps: 4000
   num_epochs: 1
-  num_generations: 8
+  num_generations: 16
   num_iterations: 4
   output_base_dir: ./grpo_outputs
   output_dir: /auto/home/menuab/code/3DMolGen/grpo_outputs/2025-09-30-16:14_380m_1e_lr5e-5_32bs*16comp*6gpu*8ga_1e_full_beta0.05_alignFalse
@@ -58,7 +58,7 @@ run:
   log_level: INFO
   name: qwen3_test
 trainer:
-  attn_implementation: sdpa
+  attn_implementation: flash_attention_2
   log_on_each_node: false
   logging_steps: 1
   loss_type: grpo
