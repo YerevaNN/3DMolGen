@@ -39,6 +39,12 @@ data:
   conformers_train: "geom_processed/geom_cartesian_v3/processed_strings/train"
   conformers_valid: "geom_processed/geom_cartesian_v3/processed_strings/valid"
   conformers_test: "geom_processed/geom_cartesian_v3/processed_strings/test"
+
+
+  binned_conformers_train: "3DMolGen_data/binned/binned_3digits/processed_strings/train"
+  binned_conformers_valid: "3DMolGen_data/binned/binned_3digits/processed_strings/valid"
+  binned_conformers_test: "3DMolGen_data/binned/binned_3digits/processed_strings/test"
+
 tokenizers:
   llama3_chem_v1: "src/molgen3D/training/tokenizers/Llama-3.2-chem-1B-v1"
   qwen3_0.6b_custom: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_custom"

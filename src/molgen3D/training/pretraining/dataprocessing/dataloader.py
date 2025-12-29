@@ -55,9 +55,11 @@ except Exception:  # pragma: no cover
     _fast_json = None
 
 
-def _json_loads(raw: str):
+def _json_loads(raw):
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
     if _fast_json is not None:
-        return _fast_json.loads(raw.encode("utf-8"))
+        return _fast_json.loads(raw)
     return json.loads(raw)
 
 

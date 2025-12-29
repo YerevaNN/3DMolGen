@@ -28,6 +28,9 @@ GEOM_DATA_KEYS = {
     "conformers_train",
     "conformers_valid",
     "conformers_test",
+    "binned_conformers_train",
+    "binned_conformers_valid",
+    "binned_conformers_test",
 }
 
 
