@@ -11,20 +11,21 @@ For each prompt (a molecule), the policy generates **K rollouts** (conformers). 
 - Prompt molecule (ground truth set): canonical SMILES `s`
 - Generated rollouts: $y_1,\dots,y_K$
 - Reference conformers for this molecule: $g_1,\dots,g_M$ (loaded from GEOM‑Drugs, capped by `max_ground_truths`)
-- RMSD distance matrix:  
-  $$
-  D_{i,j} = \text{RMSD}(y_i, g_j)
-  $$
+- RMSD distance matrix:
+
+```math
+D_{i,j} = \mathrm{RMSD}(y_i, g_j)
+```
   (computed only for valid rollouts; invalid rows remain $+\infty$)
 
 The per-rollout total reward is:
-$$
-r_i = 
+```math
+r_i =
 \begin{cases}
 r_{\text{floor}} & \text{if rollout } i \text{ is invalid}\\
 \lambda_{\text{qual}}\,r^{\text{qual}}_i + \lambda_{\text{smcov}}\,r^{\text{smcov}}_i + \lambda_{\text{match}}\,r^{\text{match}}_i & \text{otherwise}
 \end{cases}
-$$
+```
 
 So the model is pushed to:
 1) produce **chemically consistent** conformers for the right graph,  
@@ -63,13 +64,13 @@ Even if PoseBusters (or the base gate) passes, the rollout must have a **finite*
 
 ### 3.1 Quality term $r^{\mathrm{qual}}$: "be close to *some* ground truth"
 For each rollout $i$, define:
-$$
+```math
 d_i = \min_j D_{i,j}
-$$
+```
 Then:
-$$
+```math
 r^{\text{qual}}_i = \exp(-d_i/\sigma)
-$$
+```
 - **Effect:** pushes each rollout toward *any* plausible conformer in the reference set.  
 - **$\sigma$** controls how quickly reward decays with RMSD (smaller $\sigma$ = harsher).
 
@@ -79,21 +80,21 @@ $$
 This is the **group-aware** term. It rewards rollouts that contribute **new** coverage of the reference set *given what the other rollouts already cover*.
 
 Define a soft "hit kernel":
-$$
+```math
 K_{i,j} = \exp\!\left( -(D_{i,j}/\rho)^2 \right)
-$$
+```
 Soft probability reference $j$ is covered by the **set**:
-$$
+```math
 \text{soft\_cov}_j = 1 - \prod_{i=1}^{K} (1 - K_{i,j})
-$$
+```
 Marginal contribution of rollout $i$ for reference $j$:
-$$
+```math
 \Delta_{i,j} = K_{i,j}\prod_{i'\neq i}(1 - K_{i',j})
-$$
+```
 Rollout reward:
-$$
+```math
 r^{\text{smcov}}_i = \frac{1}{M}\sum_{j=1}^{M}\Delta_{i,j}
-$$
+```
 
 - **Intuition:** if a reference is already covered by other rollouts, the product term becomes small, so you get **little** marginal credit for also covering it. If it is *not* covered, you get **more** credit.
 - **$\rho$** controls the softness radius (larger $\rho$ = more forgiving distances contribute to coverage).
@@ -102,15 +103,15 @@ $$
 
 ### 3.3 Hard matching bonus $r^{\mathrm{match}}$: "unique coverage under $\delta$"
 Define eligible edges if:
-$$
+```math
 D_{i,j} < \delta
-$$
+```
 Then compute a **max-cardinality one-to-one matching** (Hungarian assignment). This uses `scipy.optimize.linear_sum_assignment`. 
 
 Matched rollout shaping:
-$$
+```math
 r^{\text{match}}_i = \max\left(0,\ 1-\frac{D_{i,j}}{\delta}\right)
-$$
+```
 
 - **Effect:** directly rewards "unique hits" under a hard threshold $\delta$.
 - **$\delta$** should usually be aligned to the evaluation threshold you care about.
