@@ -55,13 +55,13 @@ If graph mismatch, the rollout gets `r_floor` (no point rewarding geometry for t
 ### 2.4 Finite RMSD gate (hard)
 Even if PoseBusters (or the base gate) passes, the rollout must have a **finite** $\min_j D_{i,j}$. If all RMSDs fail / are `inf`, the rollout is treated as invalid and gets `r_floor`.
 
-> Note on `hard_rmsd_gate`: in the current code, *finite RMSD is always required* for validity; the knob mainly controls logging/stats messaging. If you intended "graph-valid but no RMSD" to still be considered valid (with e.g. $r^{qual}=0$), that requires a code change.
+> Note on `hard_rmsd_gate`: in the current code, *finite RMSD is always required* for validity; the knob mainly controls logging/stats messaging. If you intended "graph-valid but no RMSD" to still be considered valid (with e.g. $r^{\mathrm{qual}}=0$), that requires a code change.
 
 ---
 
 ## 3) The three reward components
 
-### 3.1 Quality term $r^{qual}$: "be close to *some* ground truth"
+### 3.1 Quality term $r^{\mathrm{qual}}$: "be close to *some* ground truth"
 For each rollout $i$, define:
 $$
 d_i = \min_j D_{i,j}
@@ -75,7 +75,7 @@ $$
 
 ---
 
-### 3.2 Smooth marginal coverage $r^{smcov}$: "don't all crowd the same GT"
+### 3.2 Smooth marginal coverage $r^{\mathrm{smcov}}$: "don't all crowd the same GT"
 This is the **group-aware** term. It rewards rollouts that contribute **new** coverage of the reference set *given what the other rollouts already cover*.
 
 Define a soft "hit kernel":
@@ -100,7 +100,7 @@ $$
 
 ---
 
-### 3.3 Hard matching bonus $r^{match}$: "unique coverage under $\delta$"
+### 3.3 Hard matching bonus $r^{\mathrm{match}}$: "unique coverage under $\delta$"
 Define eligible edges if:
 $$
 D_{i,j} < \delta
@@ -159,7 +159,7 @@ Metrics are emitted to W&B (when a `wandb.run` is active) under these keys:
 ### 5.1 Reward-shape hyperparameters
 
 **`sigma` (quality sharpness)**  
-- Smaller = only very close conformers get meaningful $r^{qual}$.  
+- Smaller = only very close conformers get meaningful $r^{\mathrm{qual}}$.  
 - Bigger = broader gradient signal but may tolerate sloppier geometry.  
 - Typical: 0.25–0.45.
 
