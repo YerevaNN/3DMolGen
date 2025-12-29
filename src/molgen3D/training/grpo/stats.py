@@ -30,8 +30,12 @@ class RunStatistics:
     final_rewards: list = field(default_factory=list)
     coverage_claims: int = 0
     coverage_opportunities: int = 0
-    posebusters_successes: int = 0
-    posebusters_failures: int = 0
+    posebusters_successes: int = 0  # Legacy field used by older reward components
+    posebusters_failures: int = 0   # Legacy field used by older reward components
+    posebusters_checked: int = 0
+    posebusters_failed: int = 0
+    posebusters_errors: int = 0
+    posebusters_time_ms: float = 0.0
     
     def add_rmsd(self, rmsd: float) -> None:
         """Track RMSD values for averaging"""
@@ -80,7 +84,13 @@ class RunStatistics:
     def log_global_stats(self):
         """Log global statistics for the entire run."""
         failure_rates = self.failure_rates
-        posebusters_checks = self.posebusters_successes + self.posebusters_failures
+        posebusters_checks_legacy = self.posebusters_successes + self.posebusters_failures
+        posebusters_checks = self.posebusters_checked or posebusters_checks_legacy
+        posebusters_passes = (
+            self.posebusters_checked - self.posebusters_failed - self.posebusters_errors
+            if self.posebusters_checked
+            else self.posebusters_successes
+        )
 
         def safe_mean(values):
             return float(np.nanmean(values)) if values else 0.0
@@ -118,8 +128,12 @@ class RunStatistics:
             "posebusters_failures": self.posebusters_failures,
             "posebusters_checks": posebusters_checks,
             "posebusters_pass_rate": (
-                self.posebusters_successes / posebusters_checks if posebusters_checks > 0 else 0.0
+                posebusters_passes / posebusters_checks if posebusters_checks > 0 else 0.0
             ),
+            "posebusters_checked": self.posebusters_checked,
+            "posebusters_failed": self.posebusters_failed,
+            "posebusters_errors": self.posebusters_errors,
+            "posebusters_time_ms": self.posebusters_time_ms,
         }
         return stats
 
@@ -133,11 +147,11 @@ class RunStatistics:
         stats_dir.mkdir(parents=True, exist_ok=True)
         own_stats = self.log_global_stats()
         own_stats_file = stats_dir / f"statistics_{pid}.json"
-        with open(own_stats_file, 'w') as f:
+        with open(own_stats_file, 'w', encoding='utf-8') as f:
             json.dump(own_stats, f, indent=4)
         lock_file = stats_dir / "statistics.lock"
         aggregate = {}
-        with open(lock_file, 'w') as lock:
+        with open(lock_file, 'w', encoding='utf-8') as lock:
             acquired = False
             while not acquired:
                 try:
@@ -173,9 +187,13 @@ class RunStatistics:
                 "posebusters_successes": 0,
                 "posebusters_failures": 0,
                 "posebusters_checks": 0,
+                "posebusters_checked": 0,
+                "posebusters_failed": 0,
+                "posebusters_errors": 0,
+                "posebusters_time_ms": 0.0,
             }
             for file in stats_files:
-                with open(file, 'r') as f:
+                with open(file, 'r', encoding='utf-8', errors='replace') as f:
                     try:
                         stats = json.load(f)
                     except json.JSONDecodeError:
@@ -212,6 +230,10 @@ class RunStatistics:
                     aggregate["posebusters_successes"] += stats.get("posebusters_successes", 0)
                     aggregate["posebusters_failures"] += stats.get("posebusters_failures", 0)
                     aggregate["posebusters_checks"] += stats.get("posebusters_checks", 0)
+                    aggregate["posebusters_checked"] += stats.get("posebusters_checked", 0)
+                    aggregate["posebusters_failed"] += stats.get("posebusters_failed", 0)
+                    aggregate["posebusters_errors"] += stats.get("posebusters_errors", 0)
+                    aggregate["posebusters_time_ms"] += stats.get("posebusters_time_ms", 0.0)
             aggregate["success_rate"] = (
                 aggregate["successful_generations"] / aggregate["processed_prompts"]
                 if aggregate["processed_prompts"] > 0 else 0.0
@@ -241,11 +263,19 @@ class RunStatistics:
                 if aggregate["reward_coverage_opportunities"] > 0 else 0.0
             )
             aggregate["posebusters_pass_rate"] = (
-                aggregate["posebusters_successes"] / aggregate["posebusters_checks"]
-                if aggregate["posebusters_checks"] > 0 else 0.0
+                (
+                    (aggregate["posebusters_checked"] - aggregate["posebusters_failed"] - aggregate["posebusters_errors"])
+                    / aggregate["posebusters_checked"]
+                )
+                if aggregate["posebusters_checked"] > 0
+                else (
+                    aggregate["posebusters_successes"] / aggregate["posebusters_checks"]
+                    if aggregate["posebusters_checks"] > 0
+                    else 0.0
+                )
             )
             stats_file = stats_dir / "statistics.json"
-            with open(stats_file, 'w') as f:
+            with open(stats_file, 'w', encoding='utf-8') as f:
                 json.dump(aggregate, f, indent=4)
             fcntl.flock(lock, fcntl.LOCK_UN)
         return aggregate

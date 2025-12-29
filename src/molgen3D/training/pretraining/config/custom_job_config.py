@@ -121,10 +121,14 @@ class MolGenRunConfig:
 class MolGenValidationConfig(TorchTitanValidation):
     """
     Extend validation settings with optional numerical conformer evaluation.
+    
+    Regular validation runs at the frequency specified by `freq` (inherited from TorchTitanValidation).
+    Numerical validation runs independently at the frequency specified by `numerical_validation_freq`.
     """
 
     numerical_validation: bool = False
     num_val_molecules: int = 10
+    numerical_validation_freq: int = 0  # Step frequency for numerical validation (0 = disabled)
 
 
 @dataclass
