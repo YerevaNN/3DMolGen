@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict, List, Tuple
+import time
 
 import cloudpickle
 import numpy as np
@@ -333,7 +334,12 @@ class GRPONumericalValidator:
             )
 
         suffix = ""
-        if valid_min.size > 0:
+        # Check if we have RMSD metrics (either from DDP global stats or computed arrays)
+        has_rmsd_metrics = (
+            (global_successes is not None and global_rmsd_min_min is not None) or
+            (not (global_successes is not None and global_rmsd_min_min is not None) and valid_min.size > 0)
+        )
+        if has_rmsd_metrics:
             suffix = (
                 f" | rmsd min_mean={metrics.get('numerical_val/rmsd_min_mean', float('nan')):.4f}"
                 f" max_mean={metrics.get('numerical_val/rmsd_max_mean', float('nan')):.4f}"
@@ -424,6 +430,9 @@ class GRPONumericalValidator:
                 f"step={step}, world_size={world_size}"
             )
 
+        # Start timing the validation process
+        validation_start_time = time.time()
+
         min_rmsds: List[float] = []
         max_rmsds: List[float] = []
         avg_rmsds: List[float] = []
@@ -446,16 +455,26 @@ class GRPONumericalValidator:
         model.eval()
 
         try:
-            # Get validation batch size from config
+            # Get validation batch size from config, scale down for DDP to reduce memory pressure
             validation_batch_size = getattr(self.config.validation, "validation_batch_size", 8)
+            if world_size > 1:
+                # Scale batch size down for multi-GPU to avoid OOM
+                # Each rank processes validation_batch_size sequences simultaneously
+                validation_batch_size = max(1, validation_batch_size // world_size)
 
             # Determine if sampling is enabled for validation
             gen_cfg = sampling_configs[self.config.validation.sampling_config]
             sampling_enabled = bool(getattr(gen_cfg, "do_sample", False))
 
-            # Prepare all valid prompts.
-            # If sampling is enabled, we generate approximately 2k conformers per molecule,
-            # where k is the number of ground-truth conformers for that molecule.
+            # Shard molecules first, then expand prompts per rank for better load balancing
+            if world_size > 1:
+                sharded_smiles_list: List[str] = []
+                for idx, smiles in enumerate(valid_prompts):
+                    if idx % world_size == rank:
+                        sharded_smiles_list.append(smiles)
+                valid_prompts = sharded_smiles_list
+
+            # Now expand prompts on each rank
             prepared_prompts: List[torch.Tensor] = []
             prepared_smiles: List[str] = []
 
@@ -474,17 +493,7 @@ class GRPONumericalValidator:
                     prepared_prompts.append(prompt)
                     prepared_smiles.append(smiles)
 
-            # Shard work across DDP ranks, if any
             total_prompts_before_sharding = len(prepared_prompts)
-            if world_size > 1:
-                sharded_prompts: List[torch.Tensor] = []
-                sharded_smiles: List[str] = []
-                for idx, (p, s) in enumerate(zip(prepared_prompts, prepared_smiles)):
-                    if idx % world_size == rank:
-                        sharded_prompts.append(p)
-                        sharded_smiles.append(s)
-                prepared_prompts = sharded_prompts
-                prepared_smiles = sharded_smiles
 
             if not prepared_prompts:
                 # Log for all ranks to ensure all are aware when validation is skipped
@@ -742,10 +751,10 @@ class GRPONumericalValidator:
 
                 if cov_r_list:
                     local_covmat = {
-                        "cov_r": float(np.mean(np.vstack(cov_r_list))),
-                        "cov_p": float(np.mean(np.vstack(cov_p_list))),
-                        "mat_r": float(np.mean(mat_r_list)),
-                        "mat_p": float(np.mean(mat_p_list)),
+                        "cov_r_sum": float(np.sum(np.vstack(cov_r_list))),
+                        "cov_p_sum": float(np.sum(np.vstack(cov_p_list))),
+                        "mat_r_sum": float(np.sum(mat_r_list)),
+                        "mat_p_sum": float(np.sum(mat_p_list)),
                         "count": len(cov_r_list),
                     }
 
@@ -754,29 +763,32 @@ class GRPONumericalValidator:
                 # Basic counts
                 len(valid_min),  # successes
                 sum(failure_counts.values()),  # total failures
-                # RMSD stats (means can be averaged, min/max need special handling)
-                float(np.mean(valid_min)) if valid_min.size > 0 else float("nan"),
-                float(np.mean(valid_max)) if valid_max.size > 0 else float("nan"),
-                float(np.mean(valid_avg)) if valid_avg.size > 0 else float("nan"),
-                # Covmat
-                local_covmat.get("cov_r", float("nan")),
-                local_covmat.get("cov_p", float("nan")),
-                local_covmat.get("mat_r", float("nan")),
-                local_covmat.get("mat_p", float("nan")),
+                # RMSD stats (send sums for proper weighted averaging)
+                float(np.sum(valid_min)) if valid_min.size > 0 else 0.0,
+                float(np.sum(valid_max)) if valid_max.size > 0 else 0.0,
+                float(np.sum(valid_avg)) if valid_avg.size > 0 else 0.0,
+                # Covmat (send sums for proper weighted averaging)
+                local_covmat.get("cov_r_sum", 0.0),
+                local_covmat.get("cov_p_sum", 0.0),
+                local_covmat.get("mat_r_sum", 0.0),
+                local_covmat.get("mat_p_sum", 0.0),
                 local_covmat.get("count", 0),
             ], dtype=torch.float32, device=device)
 
             # 4. Reduce to rank 0 with SUM operation (works for counts and means)
             dist.reduce(local_stats, dst=0, op=dist.ReduceOp.SUM)
 
-            # 5. Handle global min/max separately (SUM doesn't work for min/max)
-            min_max_stats = torch.tensor([
-                float(np.min(valid_min)) if valid_min.size > 0 else float("inf"),   # min of mins
-                float(np.max(valid_min)) if valid_min.size > 0 else float("-inf"), # max of mins
-            ], dtype=torch.float32, device=device)
+            # 5. Handle global min/max using reduce for better scaling
+            # Each rank computes its local min/max of RMSD minimums
+            local_min_of_mins = float(np.min(valid_min)) if valid_min.size > 0 else float("inf")
+            local_max_of_mins = float(np.max(valid_min)) if valid_min.size > 0 else float("-inf")
 
-            gathered_min_max: List[torch.Tensor] = [torch.zeros_like(min_max_stats) for _ in range(world_size)]
-            dist.all_gather(gathered_min_max, min_max_stats)
+            # Reduce to rank 0 using MIN and MAX operations
+            global_min_tensor = torch.tensor([local_min_of_mins], dtype=torch.float32, device=device)
+            global_max_tensor = torch.tensor([local_max_of_mins], dtype=torch.float32, device=device)
+
+            dist.reduce(global_min_tensor, dst=0, op=dist.ReduceOp.MIN)
+            dist.reduce(global_max_tensor, dst=0, op=dist.ReduceOp.MAX)
 
             # 6. Reduce failure counts
             failure_tensor = torch.tensor([
@@ -790,9 +802,11 @@ class GRPONumericalValidator:
             dist.reduce(failure_tensor, dst=0, op=dist.ReduceOp.SUM)
 
             # 7. For sample failures: gather only 1 example per rank (minimal)
-            sample_to_send = sample_failures[:1] if sample_failures else []
-            gathered_samples: List[List] = [[] for _ in range(world_size)]
-            dist.all_gather_object(gathered_samples, sample_to_send)
+            # Use rank 0's samples only to avoid unnecessary communication
+            if rank == 0:
+                gathered_samples = [sample_failures[:1] if sample_failures else []]
+            else:
+                gathered_samples = [[]]
 
             # 8. For failed generations: use file-based approach (no network transfer)
             if self.config.validation.save_failed_generations and all_failed_generations:
@@ -810,26 +824,26 @@ class GRPONumericalValidator:
             total_successes = int(local_stats[0].item())
             total_failures = int(local_stats[1].item())
 
-            # Compute global min/max from gathered values
-            global_min_of_mins = min(rank_stats[0].item() for rank_stats in gathered_min_max
-                                    if rank_stats[0].item() != float("inf"))
-            global_max_of_mins = max(rank_stats[1].item() for rank_stats in gathered_min_max
-                                    if rank_stats[1].item() != float("-inf"))
-            global_min_of_mins = global_min_of_mins if global_min_of_mins != float("inf") else float("nan")
-            global_max_of_mins = global_max_of_mins if global_max_of_mins != float("-inf") else float("nan")
+            # Extract global min/max from reduced tensors
+            global_min_of_mins = float(global_min_tensor.item()) if global_min_tensor.item() != float("inf") else float("nan")
+            global_max_of_mins = float(global_max_tensor.item()) if global_max_tensor.item() != float("-inf") else float("nan")
 
-            # Average the means across ranks
-            avg_rmsd_min_mean = local_stats[2].item() / world_size if local_stats[2].item() != float("nan") else float("nan")
-            avg_rmsd_max_mean = local_stats[3].item() / world_size if local_stats[3].item() != float("nan") else float("nan")
-            avg_rmsd_avg_mean = local_stats[4].item() / world_size if local_stats[4].item() != float("nan") else float("nan")
+            # Compute weighted averages for RMSD metrics
+            total_successes = int(local_stats[0].item())
+            if total_successes > 0:
+                avg_rmsd_min_mean = local_stats[2].item() / total_successes
+                avg_rmsd_max_mean = local_stats[3].item() / total_successes
+                avg_rmsd_avg_mean = local_stats[4].item() / total_successes
+            else:
+                avg_rmsd_min_mean = avg_rmsd_max_mean = avg_rmsd_avg_mean = float("nan")
 
             # Covmat aggregation (weighted by molecule count)
             total_covmat_count = int(local_stats[9].item())
             if total_covmat_count > 0:
-                cov_r_mean = local_stats[5].item() / world_size  # Simplified average
-                cov_p_mean = local_stats[6].item() / world_size
-                mat_r_mean = local_stats[7].item() / world_size
-                mat_p_mean = local_stats[8].item() / world_size
+                cov_r_mean = local_stats[5].item() / total_covmat_count
+                cov_p_mean = local_stats[6].item() / total_covmat_count
+                mat_r_mean = local_stats[7].item() / total_covmat_count
+                mat_p_mean = local_stats[8].item() / total_covmat_count
             else:
                 cov_r_mean = cov_p_mean = mat_r_mean = mat_p_mean = None
 
@@ -847,8 +861,8 @@ class GRPONumericalValidator:
                 FAIL_NO_GROUND_TRUTH: int(failure_tensor[5].item()),
             }
 
-            # Collect limited sample failures
-            sample_failures = [item for rank_list in gathered_samples for item in rank_list][:5]
+            # Collect limited sample failures (only rank 0 has data)
+            sample_failures = gathered_samples[0][:5] if gathered_samples and gathered_samples[0] else []
 
             # Read failed generations from rank files
             all_failed_generations = []
@@ -888,6 +902,21 @@ class GRPONumericalValidator:
 
         if all_failed_generations and self.config.validation.save_failed_generations:
             self._save_failed_generations(all_failed_generations, step)
+
+        # Log timing and statistics
+        validation_end_time = time.time()
+        validation_duration = validation_end_time - validation_start_time
+
+        # Count total conformers generated (before sharding in DDP case)
+        total_conformers_generated = total_prompts_before_sharding
+        num_unique_smiles = len(valid_prompts)
+
+        if rank == 0:
+            logger.info(
+                f"Numerical validation completed in {validation_duration:.2f}s: "
+                f"{num_unique_smiles} unique SMILES, "
+                f"{total_conformers_generated} conformers generated"
+            )
 
         return metrics
 

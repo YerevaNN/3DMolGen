@@ -64,6 +64,9 @@ class GRPOConfig:
     epsilon_low: float = 3e-4
     epsilon_high: float = 4e-4
     steps_per_generation: int = 4
+    enable_pairwise_rmsd_logging: bool = False
+    pairwise_rmsd_log_every: int = 10
+    log_distance_samples_per_group: int = 128
 
     # V2 reward parameters (optional, with defaults matching spec)
     coverage_delta: float = 0.75
@@ -88,6 +91,9 @@ class GRPOConfig:
     lambda_match: float = 1.0  # Weight for matching term
     r_floor: float = -1.0      # Reward for invalid samples
     hard_rmsd_gate: bool = True  # Drop PoseBusters-valid but RMSD-invalid rollouts
+
+    # Posebusters configuration
+    posebusters: Optional[dict] = None
 
     # Runtime parameters (set during execution)
     output_dir: Optional[str] = None
@@ -120,6 +126,18 @@ class DataLoaderConfig:
     prefetch_factor: int = 2
     drop_last: bool = False
 
+
+@dataclass
+class ValidationConfig:
+    # Numerical validation settings
+    enable_numerical_validation: bool = True
+    max_conformer_tokens: int = 2000
+    num_val_molecules: int = 200
+    sampling_config: str = "top_p_low_temperature"
+    save_failed_generations: bool = True
+    validation_batch_size: int = 64
+    eval_steps: Optional[int] = None
+
 @dataclass
 class TrainerConfig:
     # Checkpointing and saving
@@ -140,6 +158,9 @@ class TrainerConfig:
     # Model loading
     torch_dtype: str = "bfloat16"
     attn_implementation: str = "flash_attention_2"
+
+    # Parallelism
+    tokenizers_parallelism: bool = False
 
 
 @dataclass
@@ -177,6 +198,7 @@ class Config:
     device: DeviceConfig
     trainer: TrainerConfig
     dataloader: DataLoaderConfig
+    validation: ValidationConfig
 
     @classmethod
     def from_yaml(cls, yaml_path: str) -> 'Config':
@@ -225,5 +247,6 @@ class Config:
             run=RunConfig(**config_dict['run']),
             device=DeviceConfig(**config_dict['device']),
             trainer=TrainerConfig(**config_dict.get('trainer', {})),
-            dataloader=DataLoaderConfig(**config_dict.get('dataloader', {}))
+            dataloader=DataLoaderConfig(**config_dict.get('dataloader', {})),
+            validation=ValidationConfig(**config_dict.get('validation', {}))
         )

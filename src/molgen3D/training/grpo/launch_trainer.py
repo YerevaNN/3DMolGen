@@ -26,6 +26,7 @@ from molgen3D.training.grpo.config import (
     ProcessingConfig,
     RunConfig,
     TrainerConfig,
+    ValidationConfig,
 )
 from molgen3D.training.grpo.utils import create_code_snapshot
 def ensure_snapshot_has_grpo_code(snapshot_dir: Path) -> None:
@@ -106,7 +107,8 @@ def create_directories(config_data, args, project_root: Path):
         run=RunConfig(**config_data['run']),
         device=DeviceConfig(**config_data['device']),
         trainer=TrainerConfig(**config_data.get('trainer', {})),
-        dataloader=DataLoaderConfig(**config_data.get('dataloader', {}))
+        dataloader=DataLoaderConfig(**config_data.get('dataloader', {})),
+        validation=ValidationConfig(**config_data.get('validation', {}))
     )
     
     timestamp = datetime.now().strftime("%y%m%d-%H%M")

@@ -37,7 +37,6 @@ from molgen3D.training.grpo.utils import (
     get_torch_dtype
 )
 from molgen3D.training.grpo.rewards import reward_function
-from molgen3D.training.grpo.multi_component_reward import MultiComponentRewardCalculator
 from molgen3D.training.grpo.numerical_validator import GRPONumericalValidator
 from molgen3D.training.grpo.numerical_validation_callback import NumericalValidationCallback
 from molgen3D.training.grpo.grpo_reward_v3 import reward_function as reward_function_v3
@@ -138,7 +137,7 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         num_iterations=config.grpo.num_iterations,
         importance_sampling_level=config.grpo.importance_sampling_level,
         steps_per_generation=config.grpo.steps_per_generation,
-        seed=config.grpo.seed,
+        seed=config.grpo.seed
     )
 
     # Convert string dtype to torch dtype
@@ -155,6 +154,7 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
 
     tokenizer = AutoTokenizer.from_pretrained(
         config.model.tokenizer_path,
+        padding_side="left",
     )
 
     # Load dataset from text file and create prompt column
