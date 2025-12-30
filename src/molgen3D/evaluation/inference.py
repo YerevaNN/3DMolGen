@@ -1,4 +1,5 @@
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from rdkit import RDLogger, rdBase
 import torch
 import cloudpickle
 import random
@@ -13,16 +14,32 @@ import submitit
 import os
 import argparse
 from datetime import datetime
+import time
+
 torch.set_grad_enabled(False)
+torch.set_float32_matmul_precision("high")
+torch.backends.cuda.matmul.allow_tf32 = True
 
 # from utils import parse_molecule_with_coordinates
 from molgen3D.data_processing.utils import decode_cartesian_raw
 from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2, strip_smiles
-from molgen3D.evaluation.utils import extract_between, same_molecular_graph
+from molgen3D.evaluation.utils import (
+    extract_between,
+    same_molecular_graph,
+    log_cuda_memory,
+    log_cuda_summary,
+    estimate_decoder_flops_per_token,
+    detect_peak_flops,
+    log_mfu,
+)
 from molgen3D.config.paths import get_ckpt, get_tokenizer_path, get_data_path, get_base_path
 from molgen3D.config.sampling_config import sampling_configs, gen_num_codes
 
 torch.backends.cudnn.benchmark = False
+RDLogger.DisableLog("rdApp.warning")
+RDLogger.DisableLog("rdApp.error")
+rdBase.DisableLog("rdApp.warning")
+rdBase.DisableLog("rdApp.error")
 
 
 def set_seed(seed=42):
@@ -35,14 +52,44 @@ def set_seed(seed=42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def load_model_tokenizer(model_path, tokenizer_path, torch_dtype="bfloat16", attention_imp="flash_attention_2", device="auto"):
-    tokenizer  = AutoTokenizer.from_pretrained(str(tokenizer_path), padding_side='left', local_files_only=True)
-    model = AutoModelForCausalLM.from_pretrained(str(model_path),
-                                                 torch_dtype=getattr(torch, torch_dtype),
-                                                 attn_implementation=attention_imp,
-                                                 device_map=device,
-                                                 trust_remote_code=True,
-                                                 local_files_only=True).eval()
+def load_model_tokenizer(
+    model_path,
+    tokenizer_path,
+    torch_dtype="bfloat16",
+    attention_imp="flash_attention_2",
+    device="auto",
+):
+    tokenizer = AutoTokenizer.from_pretrained(
+        str(tokenizer_path), padding_side="left", local_files_only=True
+    )
+    dtype_obj = getattr(torch, torch_dtype) if isinstance(torch_dtype, str) else torch_dtype
+
+    model = AutoModelForCausalLM.from_pretrained(
+        str(model_path),
+        dtype=dtype_obj,
+        attn_implementation=attention_imp,
+        device_map=device,
+        trust_remote_code=True,
+        local_files_only=True,
+    ).eval()
+    model._flops_per_token = estimate_decoder_flops_per_token(model.config)
+    model._peak_device_flops = detect_peak_flops(model.device)
+
+    log_cuda_memory("Post-load")
+
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+        model = torch.compile(model, mode="reduce-overhead")
+        logger.info(
+            f"torch.compile succeeded; using optimized graph. Compiled type={type(model)}"
+        )
+        log_cuda_summary("Post-compile")
+    except Exception as compile_err:
+        logger.warning(f"torch.compile failed, continuing with eager mode: {compile_err}")
+    finally:
+        log_cuda_memory("Post-compile")
+
     tokenizer.pad_token = tokenizer.eos_token
     model.generation_config.pad_token_id = tokenizer.pad_token_id
     print(f"{model.dtype=}, {model.device=}")
@@ -64,19 +111,36 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id)
     prompts = [item[1] for item in batch]
     geom_smiles_list = [item[0] for item in batch]
     
-    tokenized_prompts = tokenizer(prompts, return_tensors="pt", padding=True)
+    tokenized_prompts = tokenizer(prompts,
+                                  return_tensors="pt",
+                                  padding=True,
+                                  pad_to_multiple_of=8)
     tokenized_prompts = {k: v.to(model.device, non_blocking=True) for k, v in tokenized_prompts.items()}
+    tokenized_prompts["attention_mask"] = tokenized_prompts["attention_mask"].contiguous()
+    start_time = time.perf_counter()
     with torch.inference_mode():
         outputs = model.generate(
             input_ids=tokenized_prompts["input_ids"], 
             attention_mask=tokenized_prompts["attention_mask"],
-            max_new_tokens=4000,
+            max_new_tokens=2500,
             eos_token_id=eos_token_id, 
             generation_config=gen_config,
             use_cache=True,
-            return_dict_in_generate=False,
+            return_dict_in_generate=True,
+            output_attentions=False,
+            output_hidden_states=False,
         )
-    decoded_outputs = tokenizer.batch_decode(outputs)
+        sequences = outputs.sequences.detach().cpu()
+        del outputs
+    elapsed = time.perf_counter() - start_time
+    prompt_lens = tokenized_prompts["attention_mask"].sum(dim=1).cpu()
+    seq_pad_mask = (sequences != tokenizer.pad_token_id).to(torch.int32)
+    seq_lens = seq_pad_mask.sum(dim=1)
+    gen_lens = (seq_lens - prompt_lens).clamp(min=0)
+    total_generated_tokens = int(gen_lens.sum().item())
+    log_mfu(model, total_generated_tokens, elapsed)
+    log_cuda_memory("Post-first-forward")
+    decoded_outputs = tokenizer.batch_decode(sequences, skip_special_tokens=True)
     for i, out in enumerate(decoded_outputs):
         canonical_smiles = extract_between(out, "[SMILES]", "[/SMILES]")
         generated_conformer = extract_between(out, "[CONFORMER]", "[/CONFORMER]")
@@ -121,8 +185,7 @@ def run_inference(inference_config: dict):
 
     model, tokenizer = load_model_tokenizer(model_path=inference_config["model_path"],
                                             tokenizer_path=inference_config["tokenizer_path"],
-                                            torch_dtype=inference_config["torch_dtype"],
-                                            device=inference_config["device"])
+                                            torch_dtype=inference_config["torch_dtype"])
     logger.info(f"model loaded: {model.dtype=}, {model.device=}")
     
     # eos_token_id = tokenizer.encode("[/CONFORMER]", add_special_tokens=False)
@@ -191,16 +254,16 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
     node = device if device in ["a100", "h100"] else "local"
     executor = None
     if device in ["a100", "h100"]:
-        executor = submitit.AutoExecutor(folder="~/slurm_jobs/conf_gen/job_%j")
+        executor = submitit.AutoExecutor(folder="outputs/slurm_jobs/conf_gen/job_%j")
     elif device == "local":
-        executor = submitit.LocalExecutor(folder="~/slurm_jobs/conf_gen/job_%j")
+        executor = submitit.LocalExecutor(folder="outputs/slurm_jobs/conf_gen/job_%j")
     executor.update_parameters(
         name="conf_gen",
         timeout_min=24 * 24 * 60,
         gpus_per_node=n_gpus,
         nodes=1,
         mem_gb=80,
-        cpus_per_task=n_gpus * 4,
+        cpus_per_task=n_gpus * 12,
         slurm_additional_parameters={"partition": node},
     )
     
@@ -209,7 +272,7 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         "model_path": get_ckpt("m380_conf_v2","2e"),
         "tokenizer_path": get_tokenizer_path("qwen3_0.6b_custom"),
         "torch_dtype": "bfloat16",
-        "batch_size": 128,
+        "batch_size": 256,
         "num_gens": gen_num_codes["2k_per_conf"],
         "gen_config": sampling_configs["top_p_sampling1"],
         "device": "cuda",
@@ -221,7 +284,9 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
     if grid_run_inference:
         param_grid = {
             # "model_path": [("m380_conf_v2", "4e")],
-            "model_path": [("m600_qwen", "3e"), ("m600_qwen", "1e"), ("m600_qwen", "2e")],
+            # "model_path": [("m600_qwen_pre", "4e"), ("m600_qwen_scr", "4e")],
+            "model_path": [("qwen3_grpo_251226_1635", "4000")],
+            # , ("qwen3_grpo_251224_1839", "2000"), ("qwen3_grpo_251228_1438", "4000"), ("qwen3_grpo_251228_1438", "2000")],
             # "model_path": [("m380_conf_v2", "1e")],
         }
         jobs = []

@@ -11,20 +11,21 @@ For each prompt (a molecule), the policy generates **K rollouts** (conformers). 
 - Prompt molecule (ground truth set): canonical SMILES `s`
 - Generated rollouts: $y_1,\dots,y_K$
 - Reference conformers for this molecule: $g_1,\dots,g_M$ (loaded from GEOM‑Drugs, capped by `max_ground_truths`)
-- RMSD distance matrix:  
-  $$
-  D_{i,j} = \text{RMSD}(y_i, g_j)
-  $$
+- RMSD distance matrix:
+
+```math
+D_{i,j} = \mathrm{RMSD}(y_i, g_j)
+```
   (computed only for valid rollouts; invalid rows remain $+\infty$)
 
 The per-rollout total reward is:
-$$
-r_i = 
+```math
+r_i =
 \begin{cases}
 r_{\text{floor}} & \text{if rollout } i \text{ is invalid}\\
 \lambda_{\text{qual}}\,r^{\text{qual}}_i + \lambda_{\text{smcov}}\,r^{\text{smcov}}_i + \lambda_{\text{match}}\,r^{\text{match}}_i & \text{otherwise}
 \end{cases}
-$$
+```
 
 So the model is pushed to:
 1) produce **chemically consistent** conformers for the right graph,  
@@ -47,65 +48,70 @@ A rollout is treated as valid only if it passes **all** of these:
 
 If graph mismatch, the rollout gets `r_floor` (no point rewarding geometry for the wrong molecule).
 
-### 2.3 Finite RMSD gate (hard)
-Even if graph matches, the rollout must have a **finite** $\min_j D_{i,j}$. If all RMSDs fail / are `inf`, the rollout is treated as invalid and gets `r_floor`.
+### 2.3 PoseBusters gate (configurable but hard when enabled)
+- If `grpo.posebusters.mode` is anything other than `"off"`, every **base-valid** rollout is checked with PoseBusters before geometry rewards are computed.
+- Rollouts that fail the selected PoseBusters suite (or cause PoseBusters to error) are marked invalid and receive `r_floor`.  
+- The metrics `pose/checked_rate`, `pose/pass_rate`, and `pose/error_rate` respectively track how many base-valid samples reached PoseBusters, how many of those passed, and what fraction errored.
 
-> Note on `hard_rmsd_gate`: in the current code, *finite RMSD is always required* for validity; the knob mainly controls logging/stats messaging. If you intended "graph-valid but no RMSD" to still be considered valid (with e.g. $r^{qual}=0$), that requires a code change.
+### 2.4 Finite RMSD gate (hard)
+Even if PoseBusters (or the base gate) passes, the rollout must have a **finite** $\min_j D_{i,j}$. If all RMSDs fail / are `inf`, the rollout is treated as invalid and gets `r_floor`.
+
+> Note on `hard_rmsd_gate`: in the current code, *finite RMSD is always required* for validity; the knob mainly controls logging/stats messaging. If you intended "graph-valid but no RMSD" to still be considered valid (with e.g. $r^{\mathrm{qual}}=0$), that requires a code change.
 
 ---
 
 ## 3) The three reward components
 
-### 3.1 Quality term $r^{qual}$: "be close to *some* ground truth"
+### 3.1 Quality term $r^{\mathrm{qual}}$: "be close to *some* ground truth"
 For each rollout $i$, define:
-$$
+```math
 d_i = \min_j D_{i,j}
-$$
+```
 Then:
-$$
+```math
 r^{\text{qual}}_i = \exp(-d_i/\sigma)
-$$
+```
 - **Effect:** pushes each rollout toward *any* plausible conformer in the reference set.  
 - **$\sigma$** controls how quickly reward decays with RMSD (smaller $\sigma$ = harsher).
 
 ---
 
-### 3.2 Smooth marginal coverage $r^{smcov}$: "don't all crowd the same GT"
+### 3.2 Smooth marginal coverage $r^{\mathrm{smcov}}$: "don't all crowd the same GT"
 This is the **group-aware** term. It rewards rollouts that contribute **new** coverage of the reference set *given what the other rollouts already cover*.
 
 Define a soft "hit kernel":
-$$
+```math
 K_{i,j} = \exp\!\left( -(D_{i,j}/\rho)^2 \right)
-$$
+```
 Soft probability reference $j$ is covered by the **set**:
-$$
+```math
 \text{soft\_cov}_j = 1 - \prod_{i=1}^{K} (1 - K_{i,j})
-$$
+```
 Marginal contribution of rollout $i$ for reference $j$:
-$$
+```math
 \Delta_{i,j} = K_{i,j}\prod_{i'\neq i}(1 - K_{i',j})
-$$
+```
 Rollout reward:
-$$
+```math
 r^{\text{smcov}}_i = \frac{1}{M}\sum_{j=1}^{M}\Delta_{i,j}
-$$
+```
 
 - **Intuition:** if a reference is already covered by other rollouts, the product term becomes small, so you get **little** marginal credit for also covering it. If it is *not* covered, you get **more** credit.
 - **$\rho$** controls the softness radius (larger $\rho$ = more forgiving distances contribute to coverage).
 
 ---
 
-### 3.3 Hard matching bonus $r^{match}$: "unique coverage under $\delta$"
+### 3.3 Hard matching bonus $r^{\mathrm{match}}$: "unique coverage under $\delta$"
 Define eligible edges if:
-$$
+```math
 D_{i,j} < \delta
-$$
+```
 Then compute a **max-cardinality one-to-one matching** (Hungarian assignment). This uses `scipy.optimize.linear_sum_assignment`. 
 
 Matched rollout shaping:
-$$
+```math
 r^{\text{match}}_i = \max\left(0,\ 1-\frac{D_{i,j}}{\delta}\right)
-$$
+```
 
 - **Effect:** directly rewards "unique hits" under a hard threshold $\delta$.
 - **$\delta$** should usually be aligned to the evaluation threshold you care about.
@@ -114,26 +120,38 @@ $$
 
 ## 4) What gets logged (and how to interpret it)
 
-### Validity
-- `graph_match_rate`: fraction whose SMILES graph matches
-- `finite_rmsd_rate`: fraction with finite $d_i$
-- `validity_rate`: fraction that pass all validity gates
+Metrics are emitted to W&B (when a `wandb.run` is active) under these keys:
+
+### Validity & gating
+- `gate/graph_match_rate`, `gate/rdkit_parse_rate`, `gate/base_valid_rate`, `gate/final_valid_rate`
+- `pose/checked_rate`, `pose/pass_rate`, `pose/error_rate`
 
 ### Geometry quality
-- `geom/d_min_mean`, `p50`, `p90`: stats of $d_i$ over valid rollouts (should go **down**)
+- `rmsd/d_min_mean`, `rmsd/d_min_p50`, `rmsd/d_min_p90`
+- `rmsd/frac_under_delta`, `rmsd/frac_under_2delta`
 
-### Coverage / matching
-- `match/refs_hit`: distinct references with any eligible rollout under $\delta$
-- `match/num_matched`: mean matched count per group
-- `match/match_efficiency`: matched / max_possible
+### Coverage & utilization
+- `cov/refs_hit_mean`, `cov/refs_hit_p50`, `cov/cov_ratio_mean`
+- `cov/unique_nearest_refs_mean`, `cov/nearest_collision_rate_mean`
+- `cov/valid_rollouts_mean`
 
-### Reward decomposition (inflation checks)
-- `reward/component_quality = λ_qual * mean(r_qual)`
-- `reward/component_smcov = λ_smcov * mean(r_smcov)`
-- `reward/component_match = λ_match * mean(r_match)`
+### Matching diagnostics
+- `match/num_matched_mean`, `match/max_possible_mean`, `match/efficiency_mean`
+- `match/matched_dist_p50`, `match/matched_dist_p90`
+- `match/eligible_edge_density`
+
+### Smooth marginal coverage
+- `smcov/soft_cov_mean`
+- `smcov/pct_gt_cov_gt_0p1`, `smcov/pct_gt_cov_gt_0p5`
+- `smcov/corr_with_refs_hit`
+
+### Reward decomposition
+- `reward/total_mean`, `reward/total_std`
+- `reward/comp_qual_mean`, `reward/comp_smcov_mean`, `reward/comp_match_mean`
+- `reward/comp_smcov_frac`
 
 ### Optional diversity proxy
-- `diversity/pairwise_mean`: mean pairwise RMSD among valid rollouts (logged only when enabled)
+- `div/pairwise_rmsd_p50`: median pairwise RMSD among PoseBusters+RMSD-valid rollouts (logged only when pairwise logging is enabled)
 
 ---
 
@@ -142,7 +160,7 @@ $$
 ### 5.1 Reward-shape hyperparameters
 
 **`sigma` (quality sharpness)**  
-- Smaller = only very close conformers get meaningful $r^{qual}$.  
+- Smaller = only very close conformers get meaningful $r^{\mathrm{qual}}$.  
 - Bigger = broader gradient signal but may tolerate sloppier geometry.  
 - Typical: 0.25–0.45.
 
@@ -193,11 +211,11 @@ Suggested starting region:
 
 When increasing `lambda_smcov` or `rho`, you want **at least two** of these to improve:
 
-- **Hard coverage improves:** `match/match_efficiency` and `match/refs_hit` trend up
-- **Quality improves:** `geom/d_min_p50` / `geom/d_min_mean` trend down
-- **No collapse:** optional `diversity/pairwise_mean` does not fall sharply
+- **Hard coverage improves:** `match/efficiency_mean` and `cov/refs_hit_mean` trend up
+- **Quality improves:** `rmsd/d_min_p50` / `rmsd/d_min_mean` trend down
+- **No collapse:** optional `div/pairwise_rmsd_p50` does not fall sharply
 
-If only `reward/component_smcov` rises while the others don’t move, smcov is likely being exploited as an easy soft term.
+If only `reward/comp_smcov_mean` rises while the others don’t move, smcov is likely being exploited as an easy soft term.
 
 ---
 
