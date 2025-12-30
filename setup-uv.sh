@@ -389,13 +389,11 @@ print_instructions() {
     echo ""
     echo "  source ${ENV_DIR}/.venv/bin/activate"
     echo ""
-    if [[ -d "/scratch" ]]; then
-        echo "For Slurm jobs, add to your script:"
-        echo ""
-        echo "  export UV_CACHE_DIR=/scratch/\${USER}/.cache/uv"
-        echo "  source ${ENV_DIR}/.venv/bin/activate"
-        echo ""
-    fi
+    echo "For Slurm jobs, add to your script:"
+    echo ""
+    echo "  export UV_CACHE_DIR=${UV_CACHE_DIR}"
+    echo "  source ${ENV_DIR}/.venv/bin/activate"
+    echo ""
 }
 
 # =============================================================================
