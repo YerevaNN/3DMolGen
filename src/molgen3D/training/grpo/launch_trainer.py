@@ -26,6 +26,7 @@ from molgen3D.training.grpo.config import (
     ProcessingConfig,
     RunConfig,
     TrainerConfig,
+    ValidationConfig,
 )
 from molgen3D.training.grpo.utils import create_code_snapshot
 def ensure_snapshot_has_grpo_code(snapshot_dir: Path) -> None:
@@ -106,7 +107,8 @@ def create_directories(config_data, args, project_root: Path):
         run=RunConfig(**config_data['run']),
         device=DeviceConfig(**config_data['device']),
         trainer=TrainerConfig(**config_data.get('trainer', {})),
-        dataloader=DataLoaderConfig(**config_data.get('dataloader', {}))
+        dataloader=DataLoaderConfig(**config_data.get('dataloader', {})),
+        validation=ValidationConfig(**config_data.get('validation', {}))
     )
     
     timestamp = datetime.now().strftime("%y%m%d-%H%M")
@@ -220,6 +222,8 @@ def save_updated_config(config, config_file_path):
 def main():
     setup_launcher_logging()
     project_root = get_project_root()
+    # Ensure snapshot jobs resolve data paths against the real repo root
+    os.environ.setdefault("MOLGEN3D_REPO_ROOT", str(project_root))
     
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Launch GRPO training job")

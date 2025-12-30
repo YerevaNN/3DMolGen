@@ -86,3 +86,11 @@ trainer:
   save_total_limit: 8
   torch_dtype: bfloat16
   use_liger_loss: false
+validation:
+  enable_numerical_validation: true
+  eval_steps: 100
+  max_conformer_tokens: 2000
+  num_val_molecules: 200
+  sampling_config: top_p_sampling1
+  save_failed_generations: true
+  validation_batch_size: 64

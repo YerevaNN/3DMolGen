@@ -28,6 +28,9 @@ GEOM_DATA_KEYS = {
     "conformers_train",
     "conformers_valid",
     "conformers_test",
+    "pretokenized_prompts",
+    "validation_pickle",
+
 }
 
 
