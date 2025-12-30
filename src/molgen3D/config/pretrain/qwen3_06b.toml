@@ -39,7 +39,7 @@ freq = 500
 steps = 200
 numerical_validation = true
 num_val_molecules = 10
-numerical_validation_freq = 1000
+numerical_validation_freq = 10000
 
 [molgen_data]
 train_path_key = "conformers_train"
