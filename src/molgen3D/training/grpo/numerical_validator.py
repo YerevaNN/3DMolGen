@@ -18,7 +18,6 @@ import numpy as np
 import torch
 import torch.distributed as dist
 from loguru import logger
-from transformers import StoppingCriteria, StoppingCriteriaList
 
 from molgen3D.data_processing.smiles_encoder_decoder import (
     decode_cartesian_v2,
@@ -40,48 +39,6 @@ FAIL_EMPTY_CONFORMER = "empty_conformer"
 FAIL_PARSING_ERROR = "parsing_error"
 FAIL_SMILES_MISMATCH = "smiles_mismatch"
 FAIL_RMSD_NAN = "rmsd_nan"
-FAIL_NO_GROUND_TRUTH = "no_ground_truth"
-
-
-class ConformerEndStoppingCriteria(StoppingCriteria):
-    """
-    Stopping criteria that explicitly documents stopping at the [/CONFORMER] token.
-    
-    Note: Per-sequence stopping is handled by eos_token_id in model.generate().
-    This stopping criteria provides explicit documentation of the stopping behavior
-    and can be extended for additional stopping logic if needed in the future.
-    
-    The actual stopping is handled by setting eos_token_id=self._conformer_end_id,
-    which stops each sequence independently when it encounters the [/CONFORMER] token.
-    """
-    
-    def __init__(self, conformer_end_token_id: int):
-        """
-        Initialize the stopping criteria.
-        
-        Args:
-            conformer_end_token_id: Token ID for [/CONFORMER]
-        """
-        super().__init__()
-        self.conformer_end_token_id = conformer_end_token_id
-    
-    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> bool:
-        """
-        Check if generation should stop for the entire batch.
-        
-        Note: Per-sequence stopping is handled by eos_token_id. This method
-        could be extended for batch-level stopping logic if needed.
-        
-        Args:
-            input_ids: Current generated token IDs
-            scores: Logits for next token prediction
-            
-        Returns:
-            False - per-sequence stopping is handled by eos_token_id
-        """
-        # Per-sequence stopping is handled by eos_token_id parameter
-        # This stopping criteria is kept for explicit documentation
-        return False
 
 
 class GRPONumericalValidator:
@@ -149,9 +106,10 @@ class GRPONumericalValidator:
             prompts.append(str(key).strip())
             if len(prompts) >= self.config.validation.num_val_molecules:
                 break
+        ground_truths = {key: gt_dict[key] for key in prompts}
 
         logger.info(f"Loaded {len(prompts)} validation SMILES keys from validation_pickle")
-        return prompts
+        return prompts, ground_truths
 
     def _build_prompt_tensor(
         self, smiles: str, device: torch.device
@@ -162,18 +120,6 @@ class GRPONumericalValidator:
         return torch.tensor(tokens, device=device, dtype=torch.long).unsqueeze(0)
 
 
-    def _extract_conformer_text(self, token_tensor: torch.Tensor) -> str:
-        """Extract conformer text directly from token tensor."""
-        tokens = (
-            token_tensor[0].tolist()
-            if token_tensor.dim() == 2
-            else token_tensor.tolist()
-        )
-        decoded = self.tokenizer.decode(tokens, skip_special_tokens=False)
-
-        conformer = extract_between(decoded, "[CONFORMER]", "[/CONFORMER]")
-
-        return conformer.strip() if conformer else ""
 
     def _compute_rmsd_stats(
         self, generated_mol, ground_truths: List
@@ -221,14 +167,12 @@ class GRPONumericalValidator:
         with open(output_path, "w") as f:
             f.write(f"Failed Numerical Validation Generations - Step {step}\n")
             f.write(f"Total failures: {len(failed_generations)}\n")
-            f.write("=" * 80 + "\n\n")
+            f.write("Format: Prompt | error code | generated text\n")
+            f.write("=" * 80 + "\n")
 
-            for i, (smiles, full_generated, fail_type) in enumerate(failed_generations, 1):
-                f.write(f"--- Failure #{i} ---\n")
-                f.write(f"SMILES: {smiles}\n\n")
-                f.write(f"Full Generated String:\n{full_generated}\n\n")
-                f.write(f"Fail Type: {fail_type}\n")
-                f.write("-" * 80 + "\n\n")
+            for smiles, full_generated, fail_type in failed_generations:
+                # Keep the full generated text as-is (don't clean newlines)
+                f.write(f"{smiles} | {fail_type} | {full_generated}\n")
 
         logger.info(f"Saved {len(failed_generations)} failed generations to {output_path}")
 
@@ -355,15 +299,15 @@ class GRPONumericalValidator:
 
         # Log sample failures for debugging
         if sample_failures:
-            logger.info(f"Sample failures (first {min(3, len(sample_failures))}):")
-            for smiles, fail_type, details in sample_failures[:3]:
-                logger.info(f"  [{fail_type}] {smiles[:50]}... : {details[:100]}")
+            logger.info(f"Sample failures (first {min(50, len(sample_failures))}):")
+            for smiles, fail_type, details in sample_failures[:50]:
+                logger.info(f"  [{fail_type}] {smiles[:50]}... : {details[:200]}")
 
-        # Log to W&B if available
+        # Log to W&B if available (following GRPO logging pattern without explicit step)
         try:
             import wandb
             if wandb.run is not None:
-                wandb.log(metrics, step=step)
+                wandb.log(metrics)
         except ModuleNotFoundError:
             logger.debug("Could not log numerical validation metrics to W&B (not installed).")
 
@@ -391,18 +335,8 @@ class GRPONumericalValidator:
             return {}
 
         if not self._validation_prompts:
-            self._validation_prompts = self._load_validation_prompts()
-        if not self._ground_truths:
-            gt_path = get_data_path("validation_pickle")
-            logger.info(f"Loading numerical validation ground truths from {gt_path}")
+            self._validation_prompts, self._ground_truths = self._load_validation_prompts()
 
-            with open(gt_path, "rb") as fh:
-                gt_dict = cloudpickle.load(fh)
-
-            for key in self._validation_prompts:
-                confs = gt_dict.get(key)
-                if confs:
-                    self._ground_truths[key] = confs
 
         device = next(model.parameters()).device
 
@@ -413,20 +347,11 @@ class GRPONumericalValidator:
             world_size = dist.get_world_size()
             rank = dist.get_rank()
 
-        valid_prompts = [
-            smiles for smiles in self._validation_prompts
-            if smiles in self._ground_truths
-        ]
-        skipped_no_gt = len(self._validation_prompts) - len(valid_prompts)
-
-        if not valid_prompts:
-            if rank == 0:
-                logger.warning("Numerical validation skipped: no prompts with ground truths")
-            return {}
+        valid_prompts = self._validation_prompts
 
         if rank == 0:
             logger.info(
-                f"Starting numerical validation: {len(valid_prompts)} prompts, "
+                f"Starting numerical validation: {len(valid_prompts)} prompts, {sum(len(self._ground_truths[smiles]) for smiles in valid_prompts)} ground truths"
                 f"step={step}, world_size={world_size}"
             )
 
@@ -446,7 +371,6 @@ class GRPONumericalValidator:
             FAIL_PARSING_ERROR: 0,
             FAIL_SMILES_MISMATCH: 0,
             FAIL_RMSD_NAN: 0,
-            FAIL_NO_GROUND_TRUTH: skipped_no_gt,
         }
         sample_failures: List[Tuple[str, str, str]] = []  # (smiles, fail_type, details)
         all_failed_generations: List[Tuple[str, str, str]] = []  # (smiles, full_generated, fail_type)
@@ -476,9 +400,11 @@ class GRPONumericalValidator:
 
             # Now expand prompts on each rank
             prepared_prompts: List[torch.Tensor] = []
+            prepared_texts: List[str] = []
             prepared_smiles: List[str] = []
 
             for smiles in valid_prompts:
+                prompt_text = f"[SMILES]{smiles}[/SMILES][CONFORMER]"
                 prompt = self._build_prompt_tensor(smiles, device)
 
                 # Number of generations to request for this molecule
@@ -491,6 +417,7 @@ class GRPONumericalValidator:
 
                 for _ in range(num_generations):
                     prepared_prompts.append(prompt)
+                    prepared_texts.append(prompt_text)
                     prepared_smiles.append(smiles)
 
             total_prompts_before_sharding = len(prepared_prompts)
@@ -507,6 +434,7 @@ class GRPONumericalValidator:
                 for batch_start in range(0, len(prepared_prompts), validation_batch_size):
                     batch_end = min(batch_start + validation_batch_size, len(prepared_prompts))
                     batch_prompts = prepared_prompts[batch_start:batch_end]
+                    batch_texts = prepared_texts[batch_start:batch_end]
                     batch_smiles = prepared_smiles[batch_start:batch_end]
 
                     if rank == 0:
@@ -517,32 +445,22 @@ class GRPONumericalValidator:
 
                     if not batch_prompts:
                         continue
+                    
+                    encodings = self.tokenizer(
+                        batch_texts,
+                        add_special_tokens=False,  # Already added in prompt construction
+                        padding=True,
+                        truncation=False,
+                        return_tensors="pt",
+                        padding_side="left",
+                    )
 
-                    # Pad prompts to same length for batching
-                    max_prompt_len = max(p.shape[1] for p in batch_prompts)
-                    padded_prompts = []
+                    # Move to device and ensure proper types
+                    input_ids = encodings['input_ids'].to(device)
+                    attention_mask = encodings['attention_mask'].to(device)
 
-                    for prompt in batch_prompts:
-                        pad_len = max_prompt_len - prompt.shape[1]
-                        if pad_len > 0:
-                            # Pad with pad_token_id
-                            pad_tensor = torch.full(
-                                (1, pad_len),
-                                self._pad_id or 0,
-                                device=device,
-                                dtype=torch.long,
-                            )
-                            padded_prompt = torch.cat([pad_tensor, prompt], dim=1)
-                        else:
-                            padded_prompt = prompt
-
-                        padded_prompts.append(padded_prompt)
-
-                    # Stack into batch
-                    input_ids = torch.cat(padded_prompts, dim=0)
-                    attention_mask = (input_ids != (self._pad_id or 0)).long()
-
-                    # Calculate max new tokens
+                    # Calculate max new tokens based on padded prompt length
+                    max_prompt_len = input_ids.shape[1]
                     available = max(max_seq_len - max_prompt_len, 1)
                     max_new_tokens = min(
                         self.config.validation.max_conformer_tokens, available
@@ -554,11 +472,6 @@ class GRPONumericalValidator:
                             f"available={available}, max_new_tokens={max_new_tokens}"
                         )
 
-                    # Generate batch
-                    # Create explicit stopping criteria to stop at [/CONFORMER] token
-                    stopping_criteria = StoppingCriteriaList([
-                        ConformerEndStoppingCriteria(self._conformer_end_id)
-                    ])
                     
                     generated_outputs = model.generate(
                         input_ids=input_ids,
@@ -569,7 +482,6 @@ class GRPONumericalValidator:
                         max_new_tokens=max_new_tokens,
                         pad_token_id=self._pad_id,
                         eos_token_id=self._conformer_end_id,  # Stop at [/CONFORMER] token
-                        stopping_criteria=stopping_criteria,  # Explicit stopping criteria for clarity
                     )
                     if rank == 0:
                         logger.info(f"Generated outputs shape: {generated_outputs.shape}")
@@ -578,18 +490,21 @@ class GRPONumericalValidator:
                     for batch_idx, smiles in enumerate(batch_smiles):
                         # Extract the generated sequence for this sample
                         generated_seq = generated_outputs[batch_idx : batch_idx + 1]
-                        # Remove the input prompt part
-                        generated_tokens = generated_seq[0, max_prompt_len:]
 
-                        # Decode full generated string for logging
-                        tokens = generated_tokens.tolist()
+                        # Decode full generated output (including prompt) for extraction
                         full_decoded = self.tokenizer.decode(
-                            tokens, skip_special_tokens=False
+                            generated_seq[0], skip_special_tokens=False
                         )
 
-                        # Extract conformer text
-                        conformer_text = self._extract_conformer_text(
-                            generated_tokens.unsqueeze(0)
+                        # Extract SMILES and conformer similar to inference.py
+                        canonical_smiles = extract_between(full_decoded, "[SMILES]", "[/SMILES]")
+                        conformer_text = extract_between(full_decoded, "[CONFORMER]", "[/CONFORMER]")
+
+                        # For logging failures, also get the generated part only
+                        prompt_len = attention_mask[batch_idx].sum().item()
+                        generated_tokens = generated_seq[0, prompt_len:]
+                        generated_only_decoded = self.tokenizer.decode(
+                            generated_tokens, skip_special_tokens=False
                         )
 
                         # Check for empty/missing conformer
@@ -597,39 +512,30 @@ class GRPONumericalValidator:
                             # Check if [/CONFORMER] is missing
                             if (
                                 "[/CONFORMER]" not in full_decoded
-                                and "[/CONFORMERS]" not in full_decoded
                             ):
                                 failure_counts[FAIL_NO_CLOSING_TAG] += 1
                                 all_failed_generations.append(
-                                    (smiles, full_decoded, FAIL_NO_CLOSING_TAG)
+                                    (smiles, generated_only_decoded, FAIL_NO_CLOSING_TAG)
                                 )
-                                if len(sample_failures) < 10:
-                                    # Show what was generated after [CONFORMER]
-                                    conf_start_idx = full_decoded.find("[CONFORMER]")
-                                    if conf_start_idx >= 0:
-                                        gen_part = full_decoded[
-                                            conf_start_idx : conf_start_idx + 150
-                                        ]
-                                    else:
-                                        gen_part = full_decoded[-150:]
+                                if len(sample_failures) < 1000:
                                     sample_failures.append(
                                         (
                                             smiles,
                                             FAIL_NO_CLOSING_TAG,
-                                            f"generated: {gen_part}",
+                                            f"generated: {generated_only_decoded[:200]}",
                                         )
                                     )
                             else:
                                 failure_counts[FAIL_EMPTY_CONFORMER] += 1
                                 all_failed_generations.append(
-                                    (smiles, full_decoded, FAIL_EMPTY_CONFORMER)
+                                    (smiles, generated_only_decoded, FAIL_EMPTY_CONFORMER)
                                 )
-                                if len(sample_failures) < 10:
+                                if len(sample_failures) < 1000:
                                     sample_failures.append(
                                         (
                                             smiles,
                                             FAIL_EMPTY_CONFORMER,
-                                            f"decoded: {full_decoded[-100:]}",
+                                            f"generated: {generated_only_decoded[:200]}",
                                         )
                                     )
                             continue
@@ -640,7 +546,7 @@ class GRPONumericalValidator:
                         except Exception as e:
                             failure_counts[FAIL_PARSING_ERROR] += 1
                             all_failed_generations.append(
-                                (smiles, full_decoded, FAIL_PARSING_ERROR)
+                                (smiles, generated_only_decoded, FAIL_PARSING_ERROR)
                             )
                             if len(sample_failures) < 10:
                                 sample_failures.append(
@@ -652,19 +558,19 @@ class GRPONumericalValidator:
                                 )
                             continue
 
-                        # Check SMILES match
+                        # Check SMILES match (similar to inference.py)
                         generated_smiles = strip_smiles(conformer_text)
-                        if not same_molecular_graph(smiles, generated_smiles):
+                        if not same_molecular_graph(canonical_smiles, generated_smiles):
                             failure_counts[FAIL_SMILES_MISMATCH] += 1
                             all_failed_generations.append(
-                                (smiles, full_decoded, FAIL_SMILES_MISMATCH)
+                                (smiles, generated_only_decoded, FAIL_SMILES_MISMATCH)
                             )
                             if len(sample_failures) < 10:
                                 sample_failures.append(
                                     (
                                         smiles,
                                         FAIL_SMILES_MISMATCH,
-                                        f"got: {generated_smiles}",
+                                        f"canonical: {canonical_smiles}, got: {generated_smiles}",
                                     )
                                 )
                             continue
@@ -678,7 +584,7 @@ class GRPONumericalValidator:
                         if np.isnan(min_val):
                             failure_counts[FAIL_RMSD_NAN] += 1
                             all_failed_generations.append(
-                                (smiles, full_decoded, FAIL_RMSD_NAN)
+                                (smiles, generated_only_decoded, FAIL_RMSD_NAN)
                             )
                             if len(sample_failures) < 10:
                                 sample_failures.append(
@@ -709,6 +615,41 @@ class GRPONumericalValidator:
             if was_training:
                 model.train()
 
+        # Compute covmat metrics lists (computed once, used for both single-GPU and DDP aggregation)
+        cov_r_list: List[np.ndarray] = []
+        cov_p_list: List[np.ndarray] = []
+        mat_r_list: List[float] = []
+        mat_p_list: List[float] = []
+
+        if per_smiles_rmsd_vectors:
+            thresholds = DEFAULT_THRESHOLDS
+            for smiles, rmsd_vecs in per_smiles_rmsd_vectors.items():
+                if not rmsd_vecs:
+                    continue
+                try:
+                    rmsd_matrix = np.stack(rmsd_vecs, axis=1)
+                except ValueError:
+                    continue
+                if np.isnan(rmsd_matrix).all():
+                    continue
+                cov_r, mat_r, cov_p, mat_p = covmat_metrics(rmsd_matrix, thresholds)
+                cov_r_list.append(cov_r)
+                cov_p_list.append(cov_p)
+                mat_r_list.append(mat_r)
+                mat_p_list.append(mat_p)
+
+        # Compute final covmat metrics based on world_size
+        cov_r_mean = cov_p_mean = mat_r_mean = mat_p_mean = None
+        if cov_r_list:
+            if world_size == 1:
+                # Single-GPU case: compute means directly (matching evaluation pipeline)
+                cov_r_matrix = np.vstack(cov_r_list)  # shape: (num_molecules, num_thresholds)
+                cov_p_matrix = np.vstack(cov_p_list)
+                cov_r_mean = float(np.mean(cov_r_matrix)) if cov_r_matrix.size > 0 else None
+                cov_p_mean = float(np.mean(cov_p_matrix)) if cov_p_matrix.size > 0 else None
+                mat_r_mean = float(np.mean(mat_r_list)) if mat_r_list else None
+                mat_p_mean = float(np.mean(mat_p_list)) if mat_p_list else None
+
         # MINIMAL DDP COMMUNICATION - Avoid OOM and heavy network traffic
         if world_size > 1:
             # Compute all metrics locally on each rank - NO LARGE DATA TRANSFERS
@@ -725,38 +666,23 @@ class GRPONumericalValidator:
             if valid_avg.size > 0:
                 valid_avg = valid_avg[~np.isnan(valid_avg)]
 
-            # 2. Compute covmat metrics locally
+            # 2. Prepare covmat metrics for DDP aggregation (reuse already computed lists)
             local_covmat = {}
-            if per_smiles_rmsd_vectors:
-                cov_r_list: List[np.ndarray] = []
-                cov_p_list: List[np.ndarray] = []
-                mat_r_list: List[float] = []
-                mat_p_list: List[float] = []
+            if cov_r_list:  # cov_r_list was already computed above
+                # Stack coverage arrays to compute proper aggregation (matching evaluation code)
+                cov_r_matrix = np.vstack(cov_r_list)  # shape: (num_molecules, num_thresholds)
+                cov_p_matrix = np.vstack(cov_p_list)
 
-                thresholds = DEFAULT_THRESHOLDS
-                for smiles, rmsd_vecs in per_smiles_rmsd_vectors.items():
-                    if not rmsd_vecs:
-                        continue
-                    try:
-                        rmsd_matrix = np.stack(rmsd_vecs, axis=1)
-                    except ValueError:
-                        continue
-                    if np.isnan(rmsd_matrix).all():
-                        continue
-                    cov_r, mat_r, cov_p, mat_p = covmat_metrics(rmsd_matrix, thresholds)
-                    cov_r_list.append(cov_r)
-                    cov_p_list.append(cov_p)
-                    mat_r_list.append(mat_r)
-                    mat_p_list.append(mat_p)
-
-                if cov_r_list:
-                    local_covmat = {
-                        "cov_r_sum": float(np.sum(np.vstack(cov_r_list))),
-                        "cov_p_sum": float(np.sum(np.vstack(cov_p_list))),
-                        "mat_r_sum": float(np.sum(mat_r_list)),
-                        "mat_p_sum": float(np.sum(mat_p_list)),
-                        "count": len(cov_r_list),
-                    }
+                local_covmat = {
+                    # Store sums of all coverage values (for DDP reduction)
+                    "cov_r_sum": float(np.sum(cov_r_matrix)),
+                    "cov_p_sum": float(np.sum(cov_p_matrix)),
+                    "mat_r_sum": float(np.sum(mat_r_list)),
+                    "mat_p_sum": float(np.sum(mat_p_list)),
+                    # Store total number of coverage elements (molecules × thresholds)
+                    "cov_count": cov_r_matrix.size,  # total elements across all molecules and thresholds
+                    "mat_count": len(mat_r_list),    # number of molecules (for matching metrics)
+                }
 
             # 3. Prepare minimal tensors for reduction (only essential scalars)
             local_stats = torch.tensor([
@@ -772,7 +698,8 @@ class GRPONumericalValidator:
                 local_covmat.get("cov_p_sum", 0.0),
                 local_covmat.get("mat_r_sum", 0.0),
                 local_covmat.get("mat_p_sum", 0.0),
-                local_covmat.get("count", 0),
+                local_covmat.get("cov_count", 0),  # total coverage elements (molecules × thresholds)
+                local_covmat.get("mat_count", 0),  # number of molecules (for matching)
             ], dtype=torch.float32, device=device)
 
             # 4. Reduce to rank 0 with SUM operation (works for counts and means)
@@ -797,7 +724,6 @@ class GRPONumericalValidator:
                 failure_counts[FAIL_PARSING_ERROR],
                 failure_counts[FAIL_SMILES_MISMATCH],
                 failure_counts[FAIL_RMSD_NAN],
-                failure_counts[FAIL_NO_GROUND_TRUTH],
             ], dtype=torch.long, device=device)
             dist.reduce(failure_tensor, dst=0, op=dist.ReduceOp.SUM)
 
@@ -813,8 +739,8 @@ class GRPONumericalValidator:
                 rank_file = self.output_dir / "numerical_validation" / f"failures_rank_{rank}.txt"
                 rank_file.parent.mkdir(parents=True, exist_ok=True)
                 with open(rank_file, "w") as f:
-                    for i, (smiles, gen_text, fail_type) in enumerate(all_failed_generations[:3]):  # Max 3 per rank
-                        f.write(f"{i+1}. {smiles} | {fail_type} | {gen_text[:100]}...\n")
+                    for i, (smiles, gen_text, fail_type) in enumerate(all_failed_generations):  # Save ALL failures
+                        f.write(f"{i+1}. {smiles} | {fail_type} | {gen_text}\n")  # Save FULL text
 
             # 9. Only rank 0 processes final results
             if rank != 0:
@@ -837,15 +763,21 @@ class GRPONumericalValidator:
             else:
                 avg_rmsd_min_mean = avg_rmsd_max_mean = avg_rmsd_avg_mean = float("nan")
 
-            # Covmat aggregation (weighted by molecule count)
-            total_covmat_count = int(local_stats[9].item())
-            if total_covmat_count > 0:
-                cov_r_mean = local_stats[5].item() / total_covmat_count
-                cov_p_mean = local_stats[6].item() / total_covmat_count
-                mat_r_mean = local_stats[7].item() / total_covmat_count
-                mat_p_mean = local_stats[8].item() / total_covmat_count
+            # Covmat aggregation - coverage metrics use total elements, matching uses molecule count
+            total_cov_elements = int(local_stats[9].item())  # total coverage elements (molecules × thresholds)
+            total_mat_molecules = int(local_stats[10].item())  # number of molecules (for matching metrics)
+
+            if total_cov_elements > 0:
+                cov_r_mean = local_stats[5].item() / total_cov_elements
+                cov_p_mean = local_stats[6].item() / total_cov_elements
             else:
-                cov_r_mean = cov_p_mean = mat_r_mean = mat_p_mean = None
+                cov_r_mean = cov_p_mean = None
+
+            if total_mat_molecules > 0:
+                mat_r_mean = local_stats[7].item() / total_mat_molecules
+                mat_p_mean = local_stats[8].item() / total_mat_molecules
+            else:
+                mat_r_mean = mat_p_mean = None
 
             # Reconstruct data structures for _log_validation_metrics
             min_rmsds = [avg_rmsd_min_mean] if total_successes > 0 else []
@@ -858,7 +790,7 @@ class GRPONumericalValidator:
                 FAIL_PARSING_ERROR: int(failure_tensor[2].item()),
                 FAIL_SMILES_MISMATCH: int(failure_tensor[3].item()),
                 FAIL_RMSD_NAN: int(failure_tensor[4].item()),
-                FAIL_NO_GROUND_TRUTH: int(failure_tensor[5].item()),
+
             }
 
             # Collect limited sample failures (only rank 0 has data)
@@ -879,7 +811,7 @@ class GRPONumericalValidator:
                         except Exception:
                             pass
 
-        # Covmat metrics are already computed and aggregated in DDP section above
+        # Covmat metrics are computed above (both single-GPU and DDP cases)
 
         # Use pre-computed global statistics for logging (DDP case)
         metrics = self._log_validation_metrics(
