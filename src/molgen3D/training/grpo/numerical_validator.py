@@ -532,7 +532,7 @@ class GRPONumericalValidator:
                                 device=device,
                                 dtype=torch.long,
                             )
-                            padded_prompt = torch.cat([prompt, pad_tensor], dim=1)
+                            padded_prompt = torch.cat([pad_tensor, prompt], dim=1)
                         else:
                             padded_prompt = prompt
 
