@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, List, Tuple
 import time
+import math
 
 import cloudpickle
 import numpy as np
@@ -188,6 +189,8 @@ class GRPONumericalValidator:
         cov_p_mean: float | None = None,
         mat_r_mean: float | None = None,
         mat_p_mean: float | None = None,
+        cov_r_by_threshold: List[float] | None = None,
+        cov_p_by_threshold: List[float] | None = None,
         # Pre-computed global statistics (for DDP to avoid large data transfers)
         global_rmsd_min_min: float | None = None,
         global_rmsd_min_max: float | None = None,
@@ -199,7 +202,13 @@ class GRPONumericalValidator:
     ) -> Dict[str, float]:
         """Log numerical validation metrics."""
         # Use pre-computed global statistics if provided (for DDP), otherwise compute from arrays
-        if global_successes is not None and global_rmsd_min_min is not None:
+        has_global_stats = global_successes is not None and global_rmsd_min_min is not None
+
+        valid_min = np.array([], dtype=float)
+        valid_max = np.array([], dtype=float)
+        valid_avg = np.array([], dtype=float)
+
+        if has_global_stats:
             # Use pre-computed global statistics from DDP aggregation
             total_failures = sum(failure_counts.values())
             metrics = {
@@ -219,6 +228,7 @@ class GRPONumericalValidator:
                     "numerical_val/rmsd_max_mean": global_rmsd_max_mean,
                     "numerical_val/rmsd_avg_mean": global_rmsd_avg_mean,
                 })
+            has_rmsd_metrics = global_successes > 0
         else:
             # Original logic: compute from arrays
             valid_min = np.array(min_rmsds, dtype=float)
@@ -248,6 +258,7 @@ class GRPONumericalValidator:
                     "numerical_val/rmsd_max_mean": float(np.nanmean(valid_max)),
                     "numerical_val/rmsd_avg_mean": float(np.nanmean(valid_avg)),
                 })
+            has_rmsd_metrics = valid_min.size > 0
 
         # Add covmat-style metrics if available (matching evaluation pipeline)
         if cov_r_mean is not None:
@@ -258,6 +269,20 @@ class GRPONumericalValidator:
             metrics["numerical_val/MAT-R_mean"] = float(mat_r_mean)
         if mat_p_mean is not None:
             metrics["numerical_val/MAT-P_mean"] = float(mat_p_mean)
+
+        # Optional per-threshold coverage logging (useful for parity with evaluation pipeline)
+        if cov_r_by_threshold:
+            for idx, value in enumerate(cov_r_by_threshold):
+                if value is None or not np.isfinite(value):
+                    continue
+                threshold = float(DEFAULT_THRESHOLDS[idx])
+                metrics[f"numerical_val/COV-R_mean@{threshold:g}"] = float(value)
+        if cov_p_by_threshold:
+            for idx, value in enumerate(cov_p_by_threshold):
+                if value is None or not np.isfinite(value):
+                    continue
+                threshold = float(DEFAULT_THRESHOLDS[idx])
+                metrics[f"numerical_val/COV-P_mean@{threshold:g}"] = float(value)
 
         successes = int(metrics.get("numerical_val/successes", 0))
         covmat_suffix = ""
@@ -279,10 +304,6 @@ class GRPONumericalValidator:
 
         suffix = ""
         # Check if we have RMSD metrics (either from DDP global stats or computed arrays)
-        has_rmsd_metrics = (
-            (global_successes is not None and global_rmsd_min_min is not None) or
-            (not (global_successes is not None and global_rmsd_min_min is not None) and valid_min.size > 0)
-        )
         if has_rmsd_metrics:
             suffix = (
                 f" | rmsd min_mean={metrics.get('numerical_val/rmsd_min_mean', float('nan')):.4f}"
@@ -307,7 +328,24 @@ class GRPONumericalValidator:
         try:
             import wandb
             if wandb.run is not None:
-                wandb.log(metrics)
+                wandb_keys = {
+                    "numerical_val/COV-R_mean",
+                    "numerical_val/COV-P_mean",
+                    "numerical_val/MAT-R_mean",
+                    "numerical_val/MAT-P_mean",
+                    "numerical_val/successes",
+                    "numerical_val/failures",
+                }
+                wandb_payload = {
+                    key: metrics[key]
+                    for key in wandb_keys
+                    if key in metrics
+                }
+                for key, value in metrics.items():
+                    if key.startswith("numerical_val/rmsd_"):
+                        wandb_payload[key] = value
+                if wandb_payload:
+                    wandb.log(wandb_payload)
         except ModuleNotFoundError:
             logger.debug("Could not log numerical validation metrics to W&B (not installed).")
 
@@ -390,22 +428,12 @@ class GRPONumericalValidator:
             gen_cfg = sampling_configs[self.config.validation.sampling_config]
             sampling_enabled = bool(getattr(gen_cfg, "do_sample", False))
 
-            # Shard molecules first, then expand prompts per rank for better load balancing
-            if world_size > 1:
-                sharded_smiles_list: List[str] = []
-                for idx, smiles in enumerate(valid_prompts):
-                    if idx % world_size == rank:
-                        sharded_smiles_list.append(smiles)
-                valid_prompts = sharded_smiles_list
-
-            # Now expand prompts on each rank
-            prepared_prompts: List[torch.Tensor] = []
+            # Expand prompts (per-molecule conformer requests)
             prepared_texts: List[str] = []
             prepared_smiles: List[str] = []
 
             for smiles in valid_prompts:
                 prompt_text = f"[SMILES]{smiles}[/SMILES][CONFORMER]"
-                prompt = self._build_prompt_tensor(smiles, device)
 
                 # Number of generations to request for this molecule
                 if sampling_enabled:
@@ -416,13 +444,21 @@ class GRPONumericalValidator:
                     num_generations = 1
 
                 for _ in range(num_generations):
-                    prepared_prompts.append(prompt)
                     prepared_texts.append(prompt_text)
                     prepared_smiles.append(smiles)
 
-            total_prompts_before_sharding = len(prepared_prompts)
+            total_prompts_before_sharding = len(prepared_texts)
 
-            if not prepared_prompts:
+            if world_size > 1 and total_prompts_before_sharding > 0:
+                rank_indices = [
+                    idx for idx in range(total_prompts_before_sharding) if idx % world_size == rank
+                ]
+                prepared_texts = [prepared_texts[idx] for idx in rank_indices]
+                prepared_smiles = [prepared_smiles[idx] for idx in rank_indices]
+
+            rank_prompt_count = len(prepared_texts)
+
+            if rank_prompt_count == 0:
                 # Log for all ranks to ensure all are aware when validation is skipped
                 logger.warning(
                     f"[rank {rank}] No valid prompts for batched generation (after sharding). "
@@ -431,28 +467,25 @@ class GRPONumericalValidator:
                 )
             else:
                 # Process prompts in batches
-                for batch_start in range(0, len(prepared_prompts), validation_batch_size):
-                    batch_end = min(batch_start + validation_batch_size, len(prepared_prompts))
-                    batch_prompts = prepared_prompts[batch_start:batch_end]
+                for batch_start in range(0, rank_prompt_count, validation_batch_size):
+                    batch_end = min(batch_start + validation_batch_size, rank_prompt_count)
                     batch_texts = prepared_texts[batch_start:batch_end]
                     batch_smiles = prepared_smiles[batch_start:batch_end]
 
                     if rank == 0:
                         logger.info(
                             f"[rank {rank}] Processing batch {batch_start // validation_batch_size + 1}: "
-                            f"{len(batch_prompts)} prompts"
+                            f"{batch_end - batch_start} prompts"
                         )
 
-                    if not batch_prompts:
+                    if not batch_texts:
                         continue
                     
                     encodings = self.tokenizer(
                         batch_texts,
-                        add_special_tokens=False,  # Already added in prompt construction
                         padding=True,
-                        truncation=False,
+                        pad_to_multiple_of=8,
                         return_tensors="pt",
-                        padding_side="left",
                     )
 
                     # Move to device and ensure proper types
@@ -486,26 +519,25 @@ class GRPONumericalValidator:
                     if rank == 0:
                         logger.info(f"Generated outputs shape: {generated_outputs.shape}")
 
-                    # Process each generated sequence in the batch
-                    for batch_idx, smiles in enumerate(batch_smiles):
-                        # Extract the generated sequence for this sample
-                        generated_seq = generated_outputs[batch_idx : batch_idx + 1]
+                    sequences = generated_outputs.detach().cpu()
+                    decoded_batch = self.tokenizer.batch_decode(
+                        sequences, skip_special_tokens=True
+                    )
+                    del sequences, generated_outputs
 
-                        # Decode full generated output (including prompt) for extraction
-                        full_decoded = self.tokenizer.decode(
-                            generated_seq[0], skip_special_tokens=False
+                    # Process each generated sequence in the batch
+                    for batch_idx, (smiles, full_decoded, prompt_text) in enumerate(
+                        zip(batch_smiles, decoded_batch, batch_texts)
+                    ):
+                        generated_only_decoded = (
+                            full_decoded[len(prompt_text):]
+                            if full_decoded.startswith(prompt_text)
+                            else full_decoded
                         )
 
                         # Extract SMILES and conformer similar to inference.py
                         canonical_smiles = extract_between(full_decoded, "[SMILES]", "[/SMILES]")
                         conformer_text = extract_between(full_decoded, "[CONFORMER]", "[/CONFORMER]")
-
-                        # For logging failures, also get the generated part only
-                        prompt_len = attention_mask[batch_idx].sum().item()
-                        generated_tokens = generated_seq[0, prompt_len:]
-                        generated_only_decoded = self.tokenizer.decode(
-                            generated_tokens, skip_special_tokens=False
-                        )
 
                         # Check for empty/missing conformer
                         if not conformer_text:
@@ -607,7 +639,7 @@ class GRPONumericalValidator:
                             total_failures = sum(failure_counts.values())
                             logger.info(
                                 f"[rank {rank}] Numerical validation progress: "
-                                f"{global_sample_idx}/{len(prepared_prompts)}, "
+                                f"{global_sample_idx}/{rank_prompt_count}, "
                                 f"successes={len(min_rmsds)}, failures={total_failures}"
                             )
 
@@ -640,15 +672,25 @@ class GRPONumericalValidator:
 
         # Compute final covmat metrics based on world_size
         cov_r_mean = cov_p_mean = mat_r_mean = mat_p_mean = None
+        cov_r_by_threshold = cov_p_by_threshold = None
         if cov_r_list:
             if world_size == 1:
                 # Single-GPU case: compute means directly (matching evaluation pipeline)
                 cov_r_matrix = np.vstack(cov_r_list)  # shape: (num_molecules, num_thresholds)
                 cov_p_matrix = np.vstack(cov_p_list)
-                cov_r_mean = float(np.mean(cov_r_matrix)) if cov_r_matrix.size > 0 else None
-                cov_p_mean = float(np.mean(cov_p_matrix)) if cov_p_matrix.size > 0 else None
+                if cov_r_matrix.size > 0:
+                    cov_r_mean = float(np.mean(cov_r_matrix))
+                    cov_r_by_threshold = np.mean(cov_r_matrix, axis=0).tolist()
+                if cov_p_matrix.size > 0:
+                    cov_p_mean = float(np.mean(cov_p_matrix))
+                    cov_p_by_threshold = np.mean(cov_p_matrix, axis=0).tolist()
                 mat_r_mean = float(np.mean(mat_r_list)) if mat_r_list else None
                 mat_p_mean = float(np.mean(mat_p_list)) if mat_p_list else None
+
+        log_min_rmsds = min_rmsds
+        log_max_rmsds = max_rmsds
+        log_avg_rmsds = avg_rmsds
+        global_logging_kwargs = {}
 
         # MINIMAL DDP COMMUNICATION - Avoid OOM and heavy network traffic
         if world_size > 1:
@@ -667,25 +709,28 @@ class GRPONumericalValidator:
                 valid_avg = valid_avg[~np.isnan(valid_avg)]
 
             # 2. Prepare covmat metrics for DDP aggregation (reuse already computed lists)
-            local_covmat = {}
+            num_thresholds = len(DEFAULT_THRESHOLDS)
+            cov_r_sum_array = np.zeros(num_thresholds, dtype=np.float64)
+            cov_p_sum_array = np.zeros(num_thresholds, dtype=np.float64)
+            mat_r_sum_value = float(np.sum(mat_r_list)) if mat_r_list else 0.0
+            mat_p_sum_value = float(np.sum(mat_p_list)) if mat_p_list else 0.0
+            cov_mol_count = 0
+            mat_count = len(mat_r_list)
             if cov_r_list:  # cov_r_list was already computed above
                 # Stack coverage arrays to compute proper aggregation (matching evaluation code)
                 cov_r_matrix = np.vstack(cov_r_list)  # shape: (num_molecules, num_thresholds)
                 cov_p_matrix = np.vstack(cov_p_list)
 
-                local_covmat = {
-                    # Store sums of all coverage values (for DDP reduction)
-                    "cov_r_sum": float(np.sum(cov_r_matrix)),
-                    "cov_p_sum": float(np.sum(cov_p_matrix)),
-                    "mat_r_sum": float(np.sum(mat_r_list)),
-                    "mat_p_sum": float(np.sum(mat_p_list)),
-                    # Store total number of coverage elements (molecules × thresholds)
-                    "cov_count": cov_r_matrix.size,  # total elements across all molecules and thresholds
-                    "mat_count": len(mat_r_list),    # number of molecules (for matching metrics)
-                }
+                cov_r_sum_array = np.sum(cov_r_matrix, axis=0)
+                cov_p_sum_array = np.sum(cov_p_matrix, axis=0)
+                cov_mol_count = cov_r_matrix.shape[0]
+                mat_count = len(mat_r_list)
+
+            cov_r_tensor = torch.tensor(cov_r_sum_array, dtype=torch.float32, device=device)
+            cov_p_tensor = torch.tensor(cov_p_sum_array, dtype=torch.float32, device=device)
 
             # 3. Prepare minimal tensors for reduction (only essential scalars)
-            local_stats = torch.tensor([
+            base_stats = torch.tensor([
                 # Basic counts
                 len(valid_min),  # successes
                 sum(failure_counts.values()),  # total failures
@@ -693,17 +738,24 @@ class GRPONumericalValidator:
                 float(np.sum(valid_min)) if valid_min.size > 0 else 0.0,
                 float(np.sum(valid_max)) if valid_max.size > 0 else 0.0,
                 float(np.sum(valid_avg)) if valid_avg.size > 0 else 0.0,
-                # Covmat (send sums for proper weighted averaging)
-                local_covmat.get("cov_r_sum", 0.0),
-                local_covmat.get("cov_p_sum", 0.0),
-                local_covmat.get("mat_r_sum", 0.0),
-                local_covmat.get("mat_p_sum", 0.0),
-                local_covmat.get("cov_count", 0),  # total coverage elements (molecules × thresholds)
-                local_covmat.get("mat_count", 0),  # number of molecules (for matching)
+                # Matching metrics
+                mat_r_sum_value,
+                mat_p_sum_value,
+                float(cov_mol_count),  # number of molecules contributing to coverage
+                float(mat_count),      # number of molecules contributing to matching
             ], dtype=torch.float32, device=device)
+
+            local_stats = torch.cat([base_stats, cov_r_tensor, cov_p_tensor])
 
             # 4. Reduce to rank 0 with SUM operation (works for counts and means)
             dist.reduce(local_stats, dst=0, op=dist.ReduceOp.SUM)
+
+            base_len = 9
+            cov_r_offset = base_len
+            cov_p_offset = base_len + num_thresholds
+            base_values = local_stats[:base_len]
+            cov_r_sum_tensor = local_stats[cov_r_offset:cov_r_offset + num_thresholds]
+            cov_p_sum_tensor = local_stats[cov_p_offset:cov_p_offset + num_thresholds]
 
             # 5. Handle global min/max using reduce for better scaling
             # Each rank computes its local min/max of RMSD minimums
@@ -747,35 +799,39 @@ class GRPONumericalValidator:
                 return {}
 
             # Rank 0: extract aggregated results
-            total_successes = int(local_stats[0].item())
-            total_failures = int(local_stats[1].item())
+            total_successes = int(base_values[0].item())
+            total_failures = int(base_values[1].item())
 
             # Extract global min/max from reduced tensors
-            global_min_of_mins = float(global_min_tensor.item()) if global_min_tensor.item() != float("inf") else float("nan")
-            global_max_of_mins = float(global_max_tensor.item()) if global_max_tensor.item() != float("-inf") else float("nan")
+            min_value = global_min_tensor.item()
+            max_value = global_max_tensor.item()
+            global_min_of_mins = float(min_value) if math.isfinite(min_value) else math.nan
+            global_max_of_mins = float(max_value) if math.isfinite(max_value) else math.nan
 
             # Compute weighted averages for RMSD metrics
-            total_successes = int(local_stats[0].item())
             if total_successes > 0:
-                avg_rmsd_min_mean = local_stats[2].item() / total_successes
-                avg_rmsd_max_mean = local_stats[3].item() / total_successes
-                avg_rmsd_avg_mean = local_stats[4].item() / total_successes
+                avg_rmsd_min_mean = base_values[2].item() / total_successes
+                avg_rmsd_max_mean = base_values[3].item() / total_successes
+                avg_rmsd_avg_mean = base_values[4].item() / total_successes
             else:
                 avg_rmsd_min_mean = avg_rmsd_max_mean = avg_rmsd_avg_mean = float("nan")
 
-            # Covmat aggregation - coverage metrics use total elements, matching uses molecule count
-            total_cov_elements = int(local_stats[9].item())  # total coverage elements (molecules × thresholds)
-            total_mat_molecules = int(local_stats[10].item())  # number of molecules (for matching metrics)
+            # Covmat aggregation - compute per-threshold means before flattening
+            total_cov_molecules = int(base_values[7].item())
+            total_mat_molecules = int(base_values[8].item())
 
-            if total_cov_elements > 0:
-                cov_r_mean = local_stats[5].item() / total_cov_elements
-                cov_p_mean = local_stats[6].item() / total_cov_elements
+            if total_cov_molecules > 0:
+                cov_r_by_threshold = (cov_r_sum_tensor / total_cov_molecules).cpu().tolist()
+                cov_p_by_threshold = (cov_p_sum_tensor / total_cov_molecules).cpu().tolist()
+                cov_r_mean = float(np.mean(cov_r_by_threshold))
+                cov_p_mean = float(np.mean(cov_p_by_threshold))
             else:
                 cov_r_mean = cov_p_mean = None
+                cov_r_by_threshold = cov_p_by_threshold = None
 
             if total_mat_molecules > 0:
-                mat_r_mean = local_stats[7].item() / total_mat_molecules
-                mat_p_mean = local_stats[8].item() / total_mat_molecules
+                mat_r_mean = base_values[5].item() / total_mat_molecules
+                mat_p_mean = base_values[6].item() / total_mat_molecules
             else:
                 mat_r_mean = mat_p_mean = None
 
@@ -811,11 +867,30 @@ class GRPONumericalValidator:
                         except Exception:
                             pass
 
+            def _finite_or_none(value: float | None) -> float | None:
+                if value is None:
+                    return None
+                return value if math.isfinite(value) else None
+
+            log_min_rmsds = []  # Already aggregated in global stats
+            log_max_rmsds = []
+            log_avg_rmsds = []
+            global_logging_kwargs = {
+                "global_rmsd_min_min": _finite_or_none(global_min_of_mins),
+                "global_rmsd_min_max": _finite_or_none(global_max_of_mins),
+                "global_rmsd_min_mean": _finite_or_none(avg_rmsd_min_mean),
+                "global_rmsd_min_std": None,
+                "global_rmsd_max_mean": _finite_or_none(avg_rmsd_max_mean),
+                "global_rmsd_avg_mean": _finite_or_none(avg_rmsd_avg_mean),
+                "global_successes": total_successes,
+            }
+
         # Covmat metrics are computed above (both single-GPU and DDP cases)
 
-        # Use pre-computed global statistics for logging (DDP case)
         metrics = self._log_validation_metrics(
-            [], [], [],  # Empty arrays since we use pre-computed stats
+            log_min_rmsds,
+            log_max_rmsds,
+            log_avg_rmsds,
             failure_counts,
             step,
             sample_failures,
@@ -823,13 +898,9 @@ class GRPONumericalValidator:
             cov_p_mean=cov_p_mean,
             mat_r_mean=mat_r_mean,
             mat_p_mean=mat_p_mean,
-            global_rmsd_min_min=global_min_of_mins if global_min_of_mins != float("nan") else None,
-            global_rmsd_min_max=global_max_of_mins if global_max_of_mins != float("nan") else None,
-            global_rmsd_min_mean=avg_rmsd_min_mean if not np.isnan(avg_rmsd_min_mean) else None,
-            global_rmsd_min_std=None,
-            global_rmsd_max_mean=avg_rmsd_max_mean if not np.isnan(avg_rmsd_max_mean) else None,
-            global_rmsd_avg_mean=avg_rmsd_avg_mean if not np.isnan(avg_rmsd_avg_mean) else None,
-            global_successes=total_successes,
+            cov_r_by_threshold=cov_r_by_threshold,
+            cov_p_by_threshold=cov_p_by_threshold,
+            **global_logging_kwargs,
         )
 
         if all_failed_generations and self.config.validation.save_failed_generations:
