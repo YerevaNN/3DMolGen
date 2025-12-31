@@ -37,7 +37,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - explicit error
 LRS: list[float] = [3e-4, 5e-4, 8e-4, 1e-3, 3e-3]
 
 # Global batch sizes to try (TorchTitan interprets this as total across ranks).
-GLOBAL_BATCH_SIZES: list[int] = [36, 48, 60, 72]
+GLOBAL_BATCH_SIZES: list[int] = [24,36, 48, 60, 72]
 
 # Training steps keyed by global batch size.
 TRAIN_STEPS_BY_GB: dict[int, int] = {
@@ -48,6 +48,7 @@ TRAIN_STEPS_BY_GB: dict[int, int] = {
     60: 3100,
     48: 3900,
     36: 5200,
+    24: 7800,
 }
 
 # Warmup steps for the scheduler.
@@ -61,6 +62,9 @@ TRAIN_TOML: Path = Path("src/molgen3D/config/pretrain/qwen3_06b.toml")
 
 # Slurm launcher script (relative to repo root or absolute).
 LAUNCHER: Path = Path("scripts/launch_torchtitan_qwen3_sweep.sh")
+
+# Set to False to start runs from an existing HF pretrain checkpoint.
+START_FROM_SCRATCH: bool = True
 
 # Set to True to print submissions without calling sbatch.
 DRY_RUN: bool = False
@@ -123,7 +127,7 @@ def main() -> None:
 
             # Update training settings (batch size + steps)
             training_cfg = cfg.setdefault("training", {})
-            training_cfg["local_batch_size"] = 3
+            training_cfg["local_batch_size"] = 2
             training_cfg["global_batch_size"] = int(gb)
             if gb in TRAIN_STEPS_BY_GB:
                 training_cfg["steps"] = int(TRAIN_STEPS_BY_GB[gb])
@@ -131,7 +135,7 @@ def main() -> None:
 
             # Force HF pretrain init mode for sweep runs
             molgen_run_cfg = cfg.setdefault("molgen_run", {})
-            molgen_run_cfg["init_mode"] = "hf_pretrain"
+            molgen_run_cfg["init_mode"] = "scratch" if START_FROM_SCRATCH else "hf_pretrain"
             base_model_tag = molgen_run_cfg.get("base_model_tag", "base_paths:qwen3_0.6b_base_model")
             try:
                 resolved_base = resolve_tag(base_model_tag)
@@ -163,7 +167,8 @@ def main() -> None:
             if "initial_load_path" not in checkpoint_cfg or checkpoint_cfg["initial_load_path"] == base_model_tag:
                 checkpoint_cfg["initial_load_path"] = resolved_base_str
 
-            molgen_run_cfg.pop("resume_run_path_tag", None)
+            if START_FROM_SCRATCH:
+                molgen_run_cfg.pop("resume_run_path_tag", None)
 
             # Ensure validation is enabled with frequency 100
             validation_cfg = cfg.setdefault("validation", {})
