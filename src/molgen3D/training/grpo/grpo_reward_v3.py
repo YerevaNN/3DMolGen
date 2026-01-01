@@ -64,6 +64,14 @@ class GroupMetrics:
     comp_qual_sum: float
     comp_smcov_sum: float
     comp_match_sum: float
+    comp_qual_values: np.ndarray
+    comp_smcov_values: np.ndarray
+    comp_match_values: np.ndarray
+    comp_qual_group_std: float
+    comp_smcov_group_std: float
+    comp_match_group_std: float
+    reward_group_std: float
+    smcov_reward_corr: float
     pose_checked: int
     pose_passed: int
     pose_errors: int
@@ -105,11 +113,59 @@ METRIC_KEYS: List[str] = [
     "reward/total_mean",
     "reward/total_std",
     "reward/comp_qual_mean",
+    "reward/comp_qual_std",
     "reward/comp_smcov_mean",
+    "reward/comp_smcov_std",
     "reward/comp_match_mean",
+    "reward/comp_match_std",
+    "reward/qual_group_std_mean",
+    "reward/smcov_group_std_mean",
+    "reward/match_group_std_mean",
+    "reward/group_std_mean",
+    "reward/smcov_rank_corr_mean",
     "reward/comp_smcov_frac",
     "div/pairwise_rmsd_p50",
 ]
+
+
+def _average_rank(values: np.ndarray) -> np.ndarray:
+    n = values.size
+    if n == 0:
+        return np.array([], dtype=np.float64)
+    order = np.argsort(values, kind="mergesort")
+    ranks = np.empty(n, dtype=np.float64)
+    sorted_vals = values[order]
+    i = 0
+    while i < n:
+        j = i + 1
+        while j < n and np.isclose(sorted_vals[j], sorted_vals[i], rtol=1e-9, atol=1e-12):
+            j += 1
+        rank_value = 0.5 * (i + j - 1) + 1.0
+        ranks[order[i:j]] = rank_value
+        i = j
+    return ranks
+
+
+def _spearman_corr(x: np.ndarray, y: np.ndarray) -> float:
+    if x.size != y.size or x.size < 2:
+        return float("nan")
+    x_rank = _average_rank(x.astype(np.float64, copy=False))
+    y_rank = _average_rank(y.astype(np.float64, copy=False))
+    x_rank -= np.mean(x_rank)
+    y_rank -= np.mean(y_rank)
+    denom = np.linalg.norm(x_rank) * np.linalg.norm(y_rank)
+    if denom == 0.0:
+        return float("nan")
+    return float(np.dot(x_rank, y_rank) / denom)
+
+
+def _finite_std(values: np.ndarray) -> float:
+    if values.size == 0:
+        return float("nan")
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return float("nan")
+    return float(np.std(finite))
 
 
 def group_by_prompt(
@@ -193,6 +249,7 @@ def compute_group_reward(
     lambda_qual = float(getattr(grpo_cfg, "lambda_qual", 1.0))
     lambda_smcov = float(getattr(grpo_cfg, "lambda_smcov", 1.0))
     lambda_match = float(getattr(grpo_cfg, "lambda_match", 1.0))
+    smcov_scale = float(getattr(grpo_cfg, "smcov_scale", 50.0))
     r_floor = float(getattr(grpo_cfg, "r_floor", -1.0))
     hard_rmsd_gate = bool(getattr(grpo_cfg, "hard_rmsd_gate", DEFAULT_ENABLE_HARD_RMSD_GATE))
     rmsd_workers = int(getattr(grpo_cfg, "rmsd_workers", 0) or 0)
@@ -247,6 +304,14 @@ def compute_group_reward(
             comp_qual_sum=overrides.get("comp_qual_sum", 0.0),
             comp_smcov_sum=overrides.get("comp_smcov_sum", 0.0),
             comp_match_sum=overrides.get("comp_match_sum", 0.0),
+            comp_qual_values=overrides.get("comp_qual_values", EMPTY_FLOAT32),
+            comp_smcov_values=overrides.get("comp_smcov_values", EMPTY_FLOAT32),
+            comp_match_values=overrides.get("comp_match_values", EMPTY_FLOAT32),
+            comp_qual_group_std=overrides.get("comp_qual_group_std", float("nan")),
+            comp_smcov_group_std=overrides.get("comp_smcov_group_std", float("nan")),
+            comp_match_group_std=overrides.get("comp_match_group_std", float("nan")),
+            reward_group_std=overrides.get("reward_group_std", float("nan")),
+            smcov_reward_corr=overrides.get("smcov_reward_corr", float("nan")),
             pose_checked=overrides.get("pose_checked", 0),
             pose_passed=overrides.get("pose_passed", 0),
             pose_errors=overrides.get("pose_errors", 0),
@@ -324,12 +389,13 @@ def compute_group_reward(
         mask_for_distance = valid_mask.astype(np.int32, copy=False)
 
     with profile_section(profiler, "reward_smcov"):
-        r_smcov, (soft_cov_mean, _soft_cov_pcts, soft_cov_values) = compute_smooth_coverage_reward(
+        raw_r_smcov, (soft_cov_mean, _soft_cov_pcts, soft_cov_values) = compute_smooth_coverage_reward(
             distance_matrix,
             mask_for_distance,
             rho,
             return_details=True,
         )
+    r_smcov = raw_r_smcov * smcov_scale
 
     with profile_section(profiler, "reward_qual"):
         r_qual = compute_quality_reward(distance_matrix, mask_for_distance, sigma)
@@ -413,9 +479,26 @@ def compute_group_reward(
     reward_total_values = (
         rewards[valid_mask].astype(np.float32, copy=False) if valid_rollouts > 0 else EMPTY_FLOAT32
     )
-    comp_qual_sum = float(np.sum((lambda_qual * r_qual)[valid_mask])) if valid_rollouts > 0 else 0.0
-    comp_smcov_sum = float(np.sum((lambda_smcov * r_smcov)[valid_mask])) if valid_rollouts > 0 else 0.0
-    comp_match_sum = float(np.sum((lambda_match * r_match)[valid_mask])) if valid_rollouts > 0 else 0.0
+    comp_qual_values = (
+        (lambda_qual * r_qual)[valid_mask].astype(np.float32, copy=False) if valid_rollouts > 0 else EMPTY_FLOAT32
+    )
+    comp_smcov_values = (
+        (lambda_smcov * r_smcov)[valid_mask].astype(np.float32, copy=False) if valid_rollouts > 0 else EMPTY_FLOAT32
+    )
+    comp_match_values = (
+        (lambda_match * r_match)[valid_mask].astype(np.float32, copy=False) if valid_rollouts > 0 else EMPTY_FLOAT32
+    )
+    comp_qual_sum = float(np.sum(comp_qual_values)) if comp_qual_values.size > 0 else 0.0
+    comp_smcov_sum = float(np.sum(comp_smcov_values)) if comp_smcov_values.size > 0 else 0.0
+    comp_match_sum = float(np.sum(comp_match_values)) if comp_match_values.size > 0 else 0.0
+    comp_qual_group_std = _finite_std(r_qual[valid_mask]) if valid_rollouts > 0 else float("nan")
+    comp_smcov_group_std = _finite_std(r_smcov[valid_mask]) if valid_rollouts > 0 else float("nan")
+    comp_match_group_std = _finite_std(r_match[valid_mask]) if valid_rollouts > 0 else float("nan")
+    reward_group_std = _finite_std(rewards) if rewards.size > 0 else float("nan")
+    corr_mask = valid_mask & np.isfinite(r_smcov) & np.isfinite(rewards)
+    smcov_reward_corr = (
+        _spearman_corr(r_smcov[corr_mask], rewards[corr_mask]) if np.count_nonzero(corr_mask) >= 2 else float("nan")
+    )
 
     eligible_edges = int(np.count_nonzero(eligible_matrix))
     total_edges = K * len(reference_mols)
@@ -455,6 +538,14 @@ def compute_group_reward(
         comp_qual_sum=comp_qual_sum,
         comp_smcov_sum=comp_smcov_sum,
         comp_match_sum=comp_match_sum,
+        comp_qual_values=comp_qual_values,
+        comp_smcov_values=comp_smcov_values,
+        comp_match_values=comp_match_values,
+        comp_qual_group_std=comp_qual_group_std,
+        comp_smcov_group_std=comp_smcov_group_std,
+        comp_match_group_std=comp_match_group_std,
+        reward_group_std=reward_group_std,
+        smcov_reward_corr=smcov_reward_corr,
         pose_checked=pose_checked,
         pose_passed=pose_passed,
         pose_errors=pose_errors,

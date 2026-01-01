@@ -919,6 +919,14 @@ def summarize_batch_metrics(
     all_matched = _concat([m.matched_dists for m in metrics_list])
     all_pairwise = _concat([m.pairwise_dists for m in metrics_list])
     all_rewards = _concat([m.reward_total_values for m in metrics_list])
+    all_comp_qual = _concat([m.comp_qual_values for m in metrics_list])
+    all_comp_smcov = _concat([m.comp_smcov_values for m in metrics_list])
+    all_comp_match = _concat([m.comp_match_values for m in metrics_list])
+    qual_group_stds = [m.comp_qual_group_std for m in metrics_list]
+    smcov_group_stds = [m.comp_smcov_group_std for m in metrics_list]
+    match_group_stds = [m.comp_match_group_std for m in metrics_list]
+    reward_group_std_values = [m.reward_group_std for m in metrics_list]
+    smcov_rank_corr_values = [m.smcov_reward_corr for m in metrics_list]
 
     total_valid_rollouts = sum(m.valid_rollouts for m in metrics_list)
     total_comp_qual = sum(m.comp_qual_sum for m in metrics_list)
@@ -988,8 +996,16 @@ def summarize_batch_metrics(
     comp_smcov_mean = _safe_ratio(total_comp_smcov, total_valid_rollouts)
     comp_match_mean = _safe_ratio(total_comp_match, total_valid_rollouts)
     result["reward/comp_qual_mean"] = comp_qual_mean
+    result["reward/comp_qual_std"] = float(np.std(all_comp_qual)) if all_comp_qual.size > 0 else 0.0
     result["reward/comp_smcov_mean"] = comp_smcov_mean
+    result["reward/comp_smcov_std"] = float(np.std(all_comp_smcov)) if all_comp_smcov.size > 0 else 0.0
     result["reward/comp_match_mean"] = comp_match_mean
+    result["reward/comp_match_std"] = float(np.std(all_comp_match)) if all_comp_match.size > 0 else 0.0
+    result["reward/qual_group_std_mean"] = _safe_mean(qual_group_stds)
+    result["reward/smcov_group_std_mean"] = _safe_mean(smcov_group_stds)
+    result["reward/match_group_std_mean"] = _safe_mean(match_group_stds)
+    result["reward/group_std_mean"] = _safe_mean(reward_group_std_values)
+    result["reward/smcov_rank_corr_mean"] = _safe_mean(smcov_rank_corr_values)
     if np.isfinite(comp_smcov_mean) and np.isfinite(reward_total_mean) and reward_total_mean != 0.0:
         result["reward/comp_smcov_frac"] = comp_smcov_mean / (reward_total_mean + 1e-8)
     else:

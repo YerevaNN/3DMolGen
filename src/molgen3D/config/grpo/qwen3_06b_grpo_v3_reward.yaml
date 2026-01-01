@@ -31,6 +31,7 @@ grpo:
   lambda_match: 0.5
   lambda_qual: 7.0
   lambda_smcov: 0.5
+  smcov_scale: 50
   learning_rate: 8.0e-05
   log_distance_samples_per_group: 64
   max_grad_norm: 1.0
