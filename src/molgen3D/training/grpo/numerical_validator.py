@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict, List, Tuple
+import random
 import time
 import math
 
@@ -98,7 +99,7 @@ class GRPONumericalValidator:
             gt_dict = cloudpickle.load(fh)
 
         all_keys = list(gt_dict.keys())
-        rng = np.random.default_rng()
+        rng = np.random.default_rng(self._get_validation_seed())
         rng.shuffle(all_keys)
 
         prompts: List[str] = []
@@ -115,6 +116,16 @@ class GRPONumericalValidator:
     def _build_prompt_tensor(
         self, smiles: str, device: torch.device
     ) -> torch.Tensor:
+    def _get_validation_seed(self) -> int | None:
+        """Return the seed to use for deterministic numerical validation."""
+        validation_seed = getattr(self.config.validation, "seed", None)
+        if validation_seed is not None:
+            return int(validation_seed)
+        grpo_cfg = getattr(self.config, "grpo", None)
+        if grpo_cfg is not None and hasattr(grpo_cfg, "seed"):
+            return int(grpo_cfg.seed)
+        return None
+
         """Build a prompt tensor for conformer generation."""
         prompt_text = f"[SMILES]{smiles}[/SMILES][CONFORMER]"
         tokens = self.tokenizer.encode(prompt_text, add_special_tokens=False)
@@ -387,6 +398,16 @@ class GRPONumericalValidator:
 
         valid_prompts = self._validation_prompts
 
+        base_seed = self._get_validation_seed()
+        per_rank_seed: int | None = None
+        if base_seed is not None:
+            per_rank_seed = int(base_seed) + int(step) + rank * 100_003
+            random.seed(per_rank_seed)
+            np.random.seed(per_rank_seed % (2**32 - 1))
+            torch.manual_seed(per_rank_seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(per_rank_seed)
+
         if rank == 0:
             logger.info(
                 f"Starting numerical validation: {len(valid_prompts)} prompts, {sum(len(self._ground_truths[smiles]) for smiles in valid_prompts)} ground truths"
@@ -506,15 +527,23 @@ class GRPONumericalValidator:
                         )
 
                     
+                    generate_kwargs = {
+                        "input_ids": input_ids,
+                        "attention_mask": attention_mask,
+                        "do_sample": sampling_configs[self.config.validation.sampling_config].do_sample,
+                        "top_p": sampling_configs[self.config.validation.sampling_config].top_p,
+                        "temperature": sampling_configs[self.config.validation.sampling_config].temperature,
+                        "max_new_tokens": max_new_tokens,
+                        "pad_token_id": self._pad_id,
+                        "eos_token_id": self._conformer_end_id,
+                    }
+                    if per_rank_seed is not None:
+                        batch_generator = torch.Generator(device=device)
+                        batch_generator.manual_seed(per_rank_seed + batch_start)
+                        generate_kwargs["generator"] = batch_generator
+
                     generated_outputs = model.generate(
-                        input_ids=input_ids,
-                        attention_mask=attention_mask,
-                        do_sample=sampling_configs[self.config.validation.sampling_config].do_sample,
-                        top_p=sampling_configs[self.config.validation.sampling_config].top_p,
-                        temperature=sampling_configs[self.config.validation.sampling_config].temperature,
-                        max_new_tokens=max_new_tokens,
-                        pad_token_id=self._pad_id,
-                        eos_token_id=self._conformer_end_id,  # Stop at [/CONFORMER] token
+                        **generate_kwargs
                     )
                     if rank == 0:
                         logger.info(f"Generated outputs shape: {generated_outputs.shape}")

@@ -6,7 +6,7 @@ greedy_config = GenerationConfig(
 
 top_p_low_temperature_config = GenerationConfig(
     do_sample=True,
-    temperature=0.2,
+    temperature=0.8,
     top_p=0.8,
 )
 

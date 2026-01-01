@@ -9,7 +9,7 @@ dataset:
   smiles_mapping_path: /nfs/ap/mnt/sxtn2/chem/GEOM_data/geom_processed/grpo/train_smiles_to_pickle.json
 device:
   device_type: h100
-  num_gpus: 8
+  num_gpus: 4
 generation:
   do_sample: true
   max_completion_length: 1500
@@ -24,18 +24,18 @@ grpo:
   delta: 0.75
   enable_pairwise_rmsd_logging: true
   enable_posebusters: true
-  epsilon_high: 1.2e-3
+  epsilon_high: 0.0012
   epsilon_low: 5e-4
   grad_acc_steps: 2
   importance_sampling_level: sequence
-  lambda_match: 1.0
-  lambda_qual: 6.0
-  lambda_smcov: 1.0
+  lambda_match: 0.5
+  lambda_qual: 7.0
+  lambda_smcov: 0.5
   learning_rate: 8.0e-05
   log_distance_samples_per_group: 64
   max_grad_norm: 1.0
   max_ground_truths: 30
-  max_steps: 2000
+  max_steps: 3000
   num_epochs: 1
   num_generations: 16
   num_iterations: 1
@@ -73,7 +73,7 @@ processing:
   eos_token_id: 151672
 run:
   log_level: INFO
-  name: qwen3_v3_161_cov-dom
+  name: qwen3_v3_05705_smcov-heav
 trainer:
   attn_implementation: flash_attention_2
   log_on_each_node: false
@@ -88,9 +88,9 @@ trainer:
   use_liger_loss: false
 validation:
   enable_numerical_validation: true
-  eval_steps: 100
-  max_conformer_tokens: 2000
+  eval_steps: 200
+  max_conformer_tokens: 1200
   num_val_molecules: 200
-  sampling_config: top_p_sampling1
+  sampling_config: top_p_low_temperature
   save_failed_generations: true
-  validation_batch_size: 64
+  validation_batch_size: 512
