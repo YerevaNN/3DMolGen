@@ -9,6 +9,7 @@ RMSD metrics against ground truth conformers.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Dict, List, Tuple
 import random
@@ -116,6 +117,11 @@ class GRPONumericalValidator:
     def _build_prompt_tensor(
         self, smiles: str, device: torch.device
     ) -> torch.Tensor:
+        """Build a prompt tensor for conformer generation."""
+        prompt_text = f"[SMILES]{smiles}[/SMILES][CONFORMER]"
+        tokens = self.tokenizer.encode(prompt_text, add_special_tokens=False)
+        return torch.tensor(tokens, device=device, dtype=torch.long).unsqueeze(0)
+
     def _get_validation_seed(self) -> int | None:
         """Return the seed to use for deterministic numerical validation."""
         validation_seed = getattr(self.config.validation, "seed", None)
@@ -125,11 +131,6 @@ class GRPONumericalValidator:
         if grpo_cfg is not None and hasattr(grpo_cfg, "seed"):
             return int(grpo_cfg.seed)
         return None
-
-        """Build a prompt tensor for conformer generation."""
-        prompt_text = f"[SMILES]{smiles}[/SMILES][CONFORMER]"
-        tokens = self.tokenizer.encode(prompt_text, add_special_tokens=False)
-        return torch.tensor(tokens, device=device, dtype=torch.long).unsqueeze(0)
 
 
 
@@ -537,14 +538,20 @@ class GRPONumericalValidator:
                         "pad_token_id": self._pad_id,
                         "eos_token_id": self._conformer_end_id,
                     }
+                    seed_context = nullcontext()
                     if per_rank_seed is not None:
-                        batch_generator = torch.Generator(device=device)
-                        batch_generator.manual_seed(per_rank_seed + batch_start)
-                        generate_kwargs["generator"] = batch_generator
+                        seed_value = per_rank_seed + batch_start
+                        fork_devices = [device] if device.type == "cuda" else []
+                        seed_context = torch.random.fork_rng(devices=fork_devices)
+                    else:
+                        seed_value = None
 
-                    generated_outputs = model.generate(
-                        **generate_kwargs
-                    )
+                    with seed_context:
+                        if seed_value is not None:
+                            torch.manual_seed(seed_value)
+                            if device.type == "cuda":
+                                torch.cuda.manual_seed_all(seed_value)
+                        generated_outputs = model.generate(**generate_kwargs)
                     if rank == 0:
                         logger.info(f"Generated outputs shape: {generated_outputs.shape}")
 

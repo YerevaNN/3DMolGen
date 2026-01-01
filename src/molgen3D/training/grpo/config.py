@@ -89,6 +89,7 @@ class GRPOConfig:
     lambda_qual: float = 1.0   # Weight for quality term
     lambda_smcov: float = 1.0  # Weight for smooth coverage term
     lambda_match: float = 1.0  # Weight for matching term
+    smcov_scale: float = 1.0   # Scalar applied to smooth coverage reward before weighting
     r_floor: float = -1.0      # Reward for invalid samples
     hard_rmsd_gate: bool = True  # Drop PoseBusters-valid but RMSD-invalid rollouts
 
