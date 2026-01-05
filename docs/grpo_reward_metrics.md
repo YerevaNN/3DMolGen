@@ -57,11 +57,23 @@ what each metric measures and how to interpret its values during training.
 
 | Key | Meaning | Typical Interpretation |
 | --- | --- | --- |
-| `smcov/soft_cov_mean` | Average soft coverage over the reference set (computed via `sigmoid((δ - d^{(1)}) / ρ)` on the best RMSD). | Higher means references are broadly covered even if no exact match exists. |
-| `smcov/pct_gt_cov_gt_0p1`, `smcov/pct_gt_cov_gt_0p5` | Fraction of references with soft coverage exceeding 0.1 / 0.5 (same sigmoid proxy). | Used to see how many references receive strong signal versus just weak contributions. |
+| `smcov/soft_cov_mean` | Average soft coverage (smooth kernel) over the reference set. | Higher means references are broadly covered even if no exact match exists. |
+| `smcov/pct_gt_cov_gt_0p1`, `smcov/pct_gt_cov_gt_0p5` | Fraction of references with soft coverage exceeding 0.1 / 0.5. | Used to see how many references receive strong signal versus just weak contributions. |
 | `smcov/corr_with_refs_hit` | Pearson correlation between `refs_hit` and `smcov` contribution per group. | Positive correlation means the smooth coverage reward aligns with actual discrete hits. |
 
-> Implementation note: prior to Jan 2026 all `smcov/*` diagnostics were derived from the RBF noisy-OR kernel `1 - ∏_i (1 - exp(-(D_{i,j}/ρ)^2))`. The new sigmoid proxy keeps the same intuition but aligns its temperature with the coverage-difference reward described below.
+### New coverage-difference explainer (current reward path)
+
+The present code keeps the original noisy-OR kernel available while defaulting to a hard-δ difference reward. For each reference $j$ let $d^{(1)}_j = \min_i D_{i,j}$, $i^\star(j) = \arg\min_i D_{i,j}$, $d^{(2)}_j = \min_{i \ne i^\star(j)} D_{i,j}$, and define
+```math
+\text{unique}_j = \mathbf{1}[d^{(1)}_j < \delta \ \wedge\ d^{(2)}_j \ge \delta].
+```
+The smooth-coverage component per rollout becomes
+```math
+r^{\text{smcov}}_i = \frac{1}{M}\sum_{j: i^\star(j)=i} \text{unique}_j
+  + \frac{\text{unique\_quality\_weight}}{M} \sum_{j: i^\star(j)=i} \text{unique}_j \left(1 - \frac{d^{(1)}_j}{\delta}\right)
+  + \text{precision\_weight} \cdot \sigma\!\left(\frac{\delta - \min_j D_{i,j}}{\rho}\right),
+```
+with $\sigma(x)=1/(1+e^{-x})$. The diagnostic `smcov/*` metrics continue to report the soft proxy (now based on that sigmoid), while `covdiff/*` expose the discrete coverage ratios that drive the new reward.
 
 ## G. Reward Decomposition
 
@@ -69,9 +81,7 @@ what each metric measures and how to interpret its values during training.
 | --- | --- | --- |
 | `reward/total_mean`, `reward/total_std` | Final reward mean/std. | **Mean ≥0.4** indicates strong positive signal (given λ’s); std should be **≤ mean** for stable learning. |
 | `reward/comp_qual_mean`, `reward/comp_smcov_mean`, `reward/comp_match_mean` | Component contributions over valid rollouts. | Expect roughly proportional to λs; if one term dwarfs the others by ×10, consider retuning weights. |
-| `reward/comp_smcov_frac` | Smooth coverage fraction (difference-reward + shaping). | **0.3–0.6** is typical with λ_smcov≈5. Values near **1.0** mean the other terms contribute little; near **0** means coverage is ineffective. |
-
-> `reward/comp_smcov_mean` now reflects the hard-δ difference reward (unique coverage per reference) plus the small precision/quality shaping weights. When comparing against legacy logs note that the RBF version tended to be slightly smoother but could be gamed by redundant rollouts.
+| `reward/comp_smcov_frac` | Smooth coverage fraction. | **0.3–0.6** is typical with λ_smcov=8. Values near **1.0** mean the other terms contribute little; near **0** means coverage is ineffective. |
 
 ## H. Diversity
 

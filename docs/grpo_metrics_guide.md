@@ -157,19 +157,22 @@ These metrics show the contribution of each reward term to the final reward sign
 
 ### `reward/component_smcov`
 - **Definition**: Weighted smooth coverage reward: `λ_smcov * mean(r_smcov)`
-- **Formula (current)**: 
-  - `r_smcov = r_diff + r_depth + r_prec` where  
-    `r_diff = (# uniquely covered refs) / M`,  
-    `r_depth = unique_quality_weight/M * Σ unique_refs (1 - d_win/δ)`,  
-    `r_prec = precision_weight * sigmoid((δ - min_j D_{i,j}) / ρ)`.
-- **Range**: 0.0 to λ_smcov (with the shaping weights providing small positive boosts)
-- **Meaning**: Contribution of the hard-δ coverage difference reward (plus mild precision shaping) to the final score
+- **Formula**: Group-aware coverage using smooth kernel `exp(-(D/rho)²)`
+- **Range**: 0.0 to λ_smcov (typically 0.0 to 1.0)
+- **Meaning**: Contribution of smooth marginal coverage term
 - **Interpretation**:
-  - Higher is better - it means more references are uniquely “owned” by different rollouts
-  - The term sharply penalizes redundant hits: once a reference is covered twice, both rollouts lose that credit
-  - Should trend with `covdiff/cover_ratio_mean` and `covdiff/unique_cover_ratio_mean`
-- **What to watch**: Must remain correlated with coverage metrics; if it spikes without matching improvements, the shaping weights may be too large.
-- **Legacy note**: Older experiments used the RBF/noisy-OR kernel `exp(-(D/ρ)^2)` with multiplicative exclusivity. When comparing historical runs, remember that the absolute scale shifted slightly even though λ values stayed the same.
+  - Higher is better - indicates diverse coverage across the group
+  - Rewards rollouts that cover references not yet well-covered by other rollouts
+  - Should increase as model learns to generate diverse conformers
+- **What to watch**: Should correlate with `coverage/soft_mean`. If low, model may be generating similar conformers (mode collapse).
+
+#### New coverage-difference explainer (current default)
+- **Definition**: Same metric, but the underlying `r_smcov` now equals `r_diff + r_depth + r_prec` where  
+  `r_diff = (# uniquely covered refs)/M`,  
+  `r_depth = unique_quality_weight/M * Σ unique_refs (1 - d_win/δ)`,  
+  `r_prec = precision_weight * sigmoid((δ - min_j D_{i,j}) / ρ)`.
+- **Meaning**: Most of the weight comes from the hard-δ difference reward; the sigmoid tail just keeps each rollout near at least one reference.
+- **What to watch**: Should track the newly logged `covdiff/cover_ratio_mean` and `covdiff/unique_cover_ratio_mean`. If those fall while `component_smcov` rises, the shaping weights are too large.
 
 ### `reward/component_match`
 - **Definition**: Weighted matching reward: `λ_match * mean(r_match)`
@@ -191,25 +194,23 @@ These metrics track soft coverage of reference conformations.
 ### `coverage/soft_mean`
 - **Definition**: Average soft coverage per reference conformer
 - **Range**: 0.0 to 1.0
-- **Formula** (current): `soft_cov_j = sigmoid((delta - d_j^(1)) / rho)` where `d_j^(1)=min_i D_{i,j}` and `sigmoid(x)=1/(1+e^{-x})`
+- **Formula**: `1 - ∏(1 - K[i,j])` where `K = exp(-(D/rho)²)` is a smooth kernel
 - **Meaning**: Probability that each reference is "covered" by at least one rollout (smooth version)
 - **Interpretation**:
   - **> 0.7**: Excellent - most references are well-covered
   - **0.5 - 0.7**: Good - reasonable coverage
   - **< 0.5**: Poor - many references are poorly covered
 - **What to watch**: Should increase over training. Lower than `match_efficiency` because it's a smooth (softer) metric.
-- **Legacy note**: Older runs used the noisy-OR kernel `1 - ∏_i (1 - exp(-(D_{i,j}/rho)^2))`. The dashboard still supports interpreting either version; just match the date of your run.
 
 ### `coverage/pct_gt_0.5`
 - **Definition**: Fraction of references with soft coverage > 0.5
 - **Range**: 0.0 to 1.0
-- **Meaning**: How many references receive "good" coverage under the sigmoid proxy (same soft_cov as above)
+- **Meaning**: How many references receive "good" coverage (above 50% threshold)
 - **Interpretation**:
   - **> 0.7**: Excellent - most references are well-covered
   - **0.5 - 0.7**: Good - majority of references are covered
   - **< 0.5**: Poor - less than half of references are well-covered
 - **What to watch**: Should increase over training. More interpretable than `soft_mean` - directly tells you how many refs are "good enough".
-- **Legacy note**: Previously this percentile was computed from the noisy-OR kernel; older logs therefore behave slightly differently near the threshold.
 
 ---
 
