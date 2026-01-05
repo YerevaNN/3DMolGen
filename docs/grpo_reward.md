@@ -76,28 +76,51 @@ r^{\text{qual}}_i = \exp(-d_i/\sigma)
 
 ---
 
-### 3.2 Smooth marginal coverage $r^{\mathrm{smcov}}$: "don't all crowd the same GT"
-This is the **group-aware** term. It rewards rollouts that contribute **new** coverage of the reference set *given what the other rollouts already cover*.
+### 3.2 Smooth marginal coverage $r^{\mathrm{smcov}}$: "be responsible for unique coverage"
+This term is now a **hard-δ coverage difference reward** with a small precision shaping tail. It focuses explicitly on *which rollout is uniquely required* to cover each reference.
 
-Define a soft "hit kernel":
+Let
+- $d^{(1)}_j = \min_i D_{i,j}$ with winning rollout index $i^\star(j)$,
+- $d^{(2)}_j = \min_{i \ne i^\star(j)} D_{i,j}$ (taken as $+\infty$ if only one valid rollout),
+- $\mathbf{1}[\cdot]$ denote the indicator.
+
+Define
 ```math
-K_{i,j} = \exp\!\left( -(D_{i,j}/\rho)^2 \right)
+\text{covered}_j = \mathbf{1}[d^{(1)}_j < \delta], \qquad
+\text{unique}_j = \mathbf{1}[d^{(1)}_j < \delta \ \wedge\  d^{(2)}_j \ge \delta].
 ```
-Soft probability reference $j$ is covered by the **set**:
+Every uniquely covered reference gives all of its credit to the winning rollout:
 ```math
-\text{soft\_cov}_j = 1 - \prod_{i=1}^{K} (1 - K_{i,j})
+r^{\text{diff}}_{i} = \frac{1}{M}\sum_{j:\ i^\star(j)=i} \text{unique}_j
 ```
-Marginal contribution of rollout $i$ for reference $j$:
+To mildly prefer deeper hits (and keep pressure on precision) we add two shaping pieces:
+
+1. **Unique-depth bonus** (weight $\beta = \texttt{unique\_quality\_weight}$):
 ```math
-\Delta_{i,j} = K_{i,j}\prod_{i'\neq i}(1 - K_{i',j})
+r^{\text{depth}}_{i} = \frac{\beta}{M}\sum_{j:\ i^\star(j)=i} \text{unique}_j \left(1 - \frac{d^{(1)}_j}{\delta}\right)
 ```
-Rollout reward:
+2. **Precision sigmoid** (weight $\alpha = \texttt{precision\_weight}$, temperature $\rho$):
 ```math
-r^{\text{smcov}}_i = \frac{1}{M}\sum_{j=1}^{M}\Delta_{i,j}
+r^{\text{prec}}_i = \alpha \cdot \sigma\!\left(\frac{\delta - \min_j D_{i,j}}{\rho}\right), \qquad
+\sigma(x) = \frac{1}{1 + e^{-x}}
 ```
 
-- **Intuition:** if a reference is already covered by other rollouts, the product term becomes small, so you get **little** marginal credit for also covering it. If it is *not* covered, you get **more** credit.
-- **$\rho$** controls the softness radius (larger $\rho$ = more forgiving distances contribute to coverage).
+The final smooth-coverage reward per rollout is
+```math
+r^{\text{smcov}}_i = r^{\text{diff}}_i + r^{\text{depth}}_i + r^{\text{prec}}_i.
+```
+
+- **Intuition:** only the rollout that *actually keeps a GT covered* gets credit. If another rollout also steps inside $\delta$, the winner loses credit immediately (difference reward). The sigmoid tail keeps every rollout nudged toward at least one reference even when unique credit is sparse.
+- **$\rho$** now acts as the *temperature* of both the precision sigmoid and the diagnostic soft coverage (below); smaller $\rho$ makes the transition around $\delta$ sharper.
+
+#### Legacy (pre–Jan 2026) definition
+For historical reference, the earlier implementation used an RBF kernel with a noisy-OR marginal:
+```math
+K_{i,j} = \exp\!\left(-(D_{i,j}/\rho)^2\right), \qquad
+\Delta_{i,j} = K_{i,j}\prod_{i'\neq i}(1 - K_{i',j}), \qquad
+r^{\text{smcov}}_i = \frac{1}{M}\sum_j \Delta_{i,j}.
+```
+All coverage credit was shared continuously among nearby rollouts. The new formulation above is drop-in compatible (same API, same $\lambda_{\text{smcov}}$) but better aligned with the evaluation metric (COV-R) and produces the new `covdiff/*` diagnostics.
 
 ---
 
