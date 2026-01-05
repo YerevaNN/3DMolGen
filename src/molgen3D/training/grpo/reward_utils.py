@@ -713,90 +713,57 @@ def compute_smooth_coverage_reward(
     validity: np.ndarray,
     rho: float,
     return_details: bool = False,
-    # ---- New objective knobs (defaults chosen to match your current config) ----
-    delta: float = 0.75,                 # "covered" if min dist < delta (GEOM-style)
-    precision_weight: float = 0.15,      # small shaping to protect COV-P
-    unique_quality_weight: float = 0.25, # small tie-break: deeper under delta is better
+    delta: float = 0.75,
+    depth_weight: float = 0.25,
 ) -> Tuple[np.ndarray, Tuple[float, List[float], np.ndarray]]:
     """
-    Recall-focused replacement for the old smooth coverage.
+    Recall-primary smooth coverage reward aligned with GEOM-Drugs COV-R.
 
-    `rho` acts as the sigmoid temperature for both the per-GT diagnostics and
-    the precision shaping term below (smaller values make the transition around
-    `delta` sharper).
-
-    Per rollout i (valid only):
-      r_i =
-        ( #GT uniquely covered by i / M )
-        + unique_quality_weight * ( sum_{g uniquely covered by i} (1 - d_best(g)/delta) / M )
-        + precision_weight * sigmoid((delta - min_g d(i,g)) / rho)
-
-    - "Uniquely covered" means: rollout i is the closest to GT g, best_d < delta, and second_best_d >= delta.
-      This is the exact difference-reward for hard δ coverage (directly aligns with COV-R).
-    - precision term is small and keeps rollouts near the GT manifold (helps COV-P).
-    - return_details: soft_cov is a smooth proxy per GT based on best distance (sigmoid around δ).
+    Each ground-truth conformer gives credit to the closest valid rollout if it
+    lies within `delta`. Optional `depth_weight` adds a small shaping term that
+    favors lower RMSD among the winners. Diagnostics remain sigmoid-based to aid
+    plotting, using the same `delta` threshold.
     """
     K, M = D.shape
+    rewards = np.zeros(K, dtype=np.float32)
+    default_details = (float("nan"), [float("nan")] * 3, EMPTY_FLOAT32)
     if M == 0:
-        empty = np.zeros(K, dtype=np.float32)
-        default = (float("nan"), [float("nan")] * 3, EMPTY_FLOAT32)
-        return (empty, default) if return_details else (empty, default)[0]
+        return (rewards, default_details) if return_details else rewards
 
     rho = max(float(rho), 1e-8)
     delta = float(delta)
+    depth_weight = float(depth_weight)
 
     valid_rows = (validity == 1)
-    r = np.zeros(K, dtype=np.float32)
-
     if not np.any(valid_rows):
         soft_cov = np.zeros(M, dtype=np.float32)
         details = (0.0, [0.0, 0.0, 0.0], soft_cov)
-        return (r, details) if return_details else (r, details)[0]
+        return (rewards, details) if return_details else rewards
 
-    # Mask invalid rows and non-finite distances
     Dv = D.astype(np.float32, copy=True)
     Dv[~valid_rows, :] = np.inf
     Dv = np.where(np.isfinite(Dv), Dv, np.inf)
 
-    # ---------- (A) Recall: hard-δ difference reward (unique GT coverage) ----------
-    best_i = np.argmin(Dv, axis=0)                   # [M]
-    best_d = Dv[best_i, np.arange(M)]                # [M]
-
-    Dv2 = Dv.copy()
-    Dv2[best_i, np.arange(M)] = np.inf
-    second_d = np.min(Dv2, axis=0)                   # [M]
-
+    col_idx = np.arange(M)
+    best_i = np.argmin(Dv, axis=0)
+    best_d = Dv[best_i, col_idx]
     covered = best_d < delta
-    uniquely_covered = covered & (second_d >= delta)
 
-    if np.any(uniquely_covered):
-        winners = best_i[uniquely_covered]           # rollout indices that uniquely cover GTs
+    if np.any(covered):
+        winners = best_i[covered]
+        base = np.bincount(winners, minlength=K).astype(np.float32)
+        rewards += base / float(M)
 
-        # 1) main recall credit: +1 per uniquely covered GT
-        cnt = np.bincount(winners, minlength=K).astype(np.float32)
-        r += cnt / float(M)
+        if depth_weight > 0.0:
+            depth = 1.0 - (best_d[covered] / delta)
+            depth = np.clip(depth, 0.0, 1.0).astype(np.float32, copy=False)
+            depth_sum = np.bincount(winners, weights=depth, minlength=K).astype(np.float32)
+            rewards += depth_weight * (depth_sum / float(M))
 
-        # 2) tie-break: deeper under delta is better (prevents "barely under δ" gaming)
-        q = 1.0 - (best_d[uniquely_covered] / delta) # in (0,1]
-        q = np.clip(q, 0.0, 1.0).astype(np.float32, copy=False)
-        q_sum = np.bincount(winners, weights=q, minlength=K).astype(np.float32)
-        r += unique_quality_weight * (q_sum / float(M))
+    rewards[~valid_rows] = 0.0
 
-    # ---------- (B) Precision shaping: keep each rollout close to some GT ----------
-    # min distance per rollout to any GT
-    min_d = np.min(Dv, axis=1)                       # [K]
-    prec = _sigmoid((delta - min_d) / rho)           # ~1 if <<delta, ~0 if >>delta
-    prec = np.where(np.isfinite(prec), prec, 0.0).astype(np.float32, copy=False)
-    prec[~valid_rows] = 0.0
-    r += precision_weight * prec
-
-    r[~valid_rows] = 0.0
-
-    # ---------- Details: per-GT smooth "coveredness" proxy ----------
-    # Based only on the best rollout for each GT.
     soft_cov = _sigmoid((delta - best_d) / rho)
     soft_cov = np.where(np.isfinite(soft_cov), soft_cov, 0.0).astype(np.float32, copy=False)
-
     soft_mean = float(np.mean(soft_cov)) if soft_cov.size > 0 else float("nan")
     soft_pcts = [
         float(np.mean(soft_cov > thresh)) if soft_cov.size > 0 else float("nan")
@@ -804,7 +771,7 @@ def compute_smooth_coverage_reward(
     ]
     details = (soft_mean, soft_pcts, soft_cov)
 
-    return (r, details) if return_details else (r, details)[0]
+    return (rewards, details) if return_details else rewards
 
 # def compute_smooth_coverage_reward(
 #     D: np.ndarray,
@@ -936,12 +903,17 @@ def compute_pairwise_rollout_distances(
     rollout_mols: List[Optional[Chem.Mol]],
     validity_mask: np.ndarray,
     max_samples: int = 0,
+    rng: Optional[np.random.Generator] = None,
 ) -> np.ndarray:
     valid_indices = [idx for idx, flag in enumerate(validity_mask) if flag and rollout_mols[idx] is not None]
     if len(valid_indices) < 2:
         return EMPTY_FLOAT32
-    if max_samples > 1 and len(valid_indices) > max_samples:
-        valid_indices = valid_indices[:max_samples]
+    if max_samples > 0 and len(valid_indices) > max_samples:
+        if rng is None:
+            rng = np.random.default_rng()
+        idx_arr = np.asarray(valid_indices, dtype=np.int64)
+        sample = rng.choice(idx_arr, size=max_samples, replace=False)
+        valid_indices = sample.tolist()
 
     distances: List[float] = []
     for i_pos, i in enumerate(valid_indices):
@@ -956,6 +928,39 @@ def compute_pairwise_rollout_distances(
             if np.isfinite(d_val):
                 distances.append(float(d_val))
     return np.array(distances, dtype=np.float32) if distances else EMPTY_FLOAT32
+
+
+def _run_recall_reward_sanity_checks() -> None:
+    """Quick manual tests for the recall-primary coverage reward."""
+    delta = 0.75
+    rho = 0.5
+
+    # Case 1: both rollouts valid, rollout0 covers two GTs.
+    D = np.array([[0.2, 0.9, 0.3], [0.8, 0.4, 0.9]], dtype=np.float32)
+    validity = np.array([1, 1], dtype=np.int32)
+    rewards, _ = compute_smooth_coverage_reward(
+        D, validity, rho=rho, return_details=True, delta=delta, depth_weight=0.0
+    )
+    assert np.allclose(rewards.sum(), 1.0, atol=1e-6)
+    assert rewards[0] > rewards[1] > 0.0
+
+    # Case 2: rollout0 invalid, rollout1 only covers GT1.
+    validity = np.array([0, 1], dtype=np.int32)
+    rewards, _ = compute_smooth_coverage_reward(
+        D, validity, rho=rho, return_details=True, delta=delta, depth_weight=0.0
+    )
+    assert np.isclose(rewards[1], 1.0 / 3.0, atol=1e-6)
+    assert rewards[0] == 0.0
+
+    # Case 3: non-finite distances should yield zero credit.
+    D_inf = np.array([[np.inf, np.inf], [1.2, np.inf]], dtype=np.float32)
+    validity = np.array([1, 1], dtype=np.int32)
+    rewards, _ = compute_smooth_coverage_reward(
+        D_inf, validity, rho=rho, return_details=True, delta=delta, depth_weight=0.0
+    )
+    assert np.all(rewards == 0.0)
+
+    print("[reward_utils] recall reward sanity checks passed.")
 
 
 def summarize_batch_metrics(
@@ -1008,6 +1013,8 @@ def summarize_batch_metrics(
     collision_rates = [m.nearest_collision_rate for m in metrics_list]
     covdiff_cover_ratio_values = [m.covdiff_cover_ratio for m in metrics_list]
     covdiff_unique_cover_ratio_values = [m.covdiff_unique_cover_ratio for m in metrics_list]
+    covered_ratio_values = [m.covered_ratio for m in metrics_list]
+    unique_covered_ratio_values = [m.unique_covered_ratio for m in metrics_list]
     valid_rollout_values = [float(m.valid_rollouts) for m in metrics_list]
 
     num_matched_values = [float(m.num_matched) for m in metrics_list]
@@ -1029,7 +1036,7 @@ def summarize_batch_metrics(
     smcov_group_stds = [m.comp_smcov_group_std for m in metrics_list]
     match_group_stds = [m.comp_match_group_std for m in metrics_list]
     reward_group_std_values = [m.reward_group_std for m in metrics_list]
-    smcov_rank_corr_values = [m.smcov_reward_corr for m in metrics_list]
+    bestcov_rank_corr_values = [m.bestcov_reward_corr for m in metrics_list]
 
     total_valid_rollouts = sum(m.valid_rollouts for m in metrics_list)
     total_comp_qual = sum(m.comp_qual_sum for m in metrics_list)
@@ -1065,32 +1072,34 @@ def summarize_batch_metrics(
     result["cov/nearest_collision_rate_mean"] = _safe_mean(collision_rates)
     result["covdiff/cover_ratio_mean"] = _safe_mean(covdiff_cover_ratio_values)
     result["covdiff/unique_cover_ratio_mean"] = _safe_mean(covdiff_unique_cover_ratio_values)
+    result["covdiff/covered_ratio_mean"] = _safe_mean(covered_ratio_values)
+    result["covdiff/unique_covered_ratio_mean"] = _safe_mean(unique_covered_ratio_values)
     result["cov/valid_rollouts_mean"] = _safe_mean(valid_rollout_values)
 
     result["match/num_matched_mean"] = _safe_mean(num_matched_values)
     result["match/max_possible_mean"] = _safe_mean(max_possible_values)
     result["match/efficiency_mean"] = _safe_mean(efficiency_values)
     result["match/matched_dist_p50"] = (
-        float(np.percentile(all_matched, 50)) if all_matched.size > 0 else 0.0
+        float(np.percentile(all_matched, 50)) if all_matched.size > 0 else float("nan")
     )
     result["match/matched_dist_p90"] = (
-        float(np.percentile(all_matched, 90)) if all_matched.size > 0 else 0.0
+        float(np.percentile(all_matched, 90)) if all_matched.size > 0 else float("nan")
     )
     result["match/eligible_edge_density"] = _safe_ratio(eligible_edges_total, possible_edges_total)
 
-    result["smcov/soft_cov_mean"] = _safe_mean(soft_cov_means)
-    result["smcov/pct_gt_cov_gt_0p1"] = _safe_mean(pct_cov_gt_0p1_values)
-    result["smcov/pct_gt_cov_gt_0p5"] = _safe_mean(pct_cov_gt_0p5_values)
+    result["bestcov/soft_cov_mean"] = _safe_mean(soft_cov_means)
+    result["bestcov/pct_gt_cov_gt_0p1"] = _safe_mean(pct_cov_gt_0p1_values)
+    result["bestcov/pct_gt_cov_gt_0p5"] = _safe_mean(pct_cov_gt_0p5_values)
 
     refs_arr = np.asarray(refs_hit_values, dtype=np.float64)
     soft_cov_arr = np.asarray(soft_cov_means, dtype=np.float64)
     valid_mask = np.isfinite(refs_arr) & np.isfinite(soft_cov_arr)
     if np.count_nonzero(valid_mask) >= 2:
-        result["smcov/corr_with_refs_hit"] = float(
+        result["bestcov/corr_with_refs_hit"] = float(
             np.corrcoef(refs_arr[valid_mask], soft_cov_arr[valid_mask])[0, 1]
         )
     else:
-        result["smcov/corr_with_refs_hit"] = 0.0
+        result["bestcov/corr_with_refs_hit"] = 0.0
 
     reward_total_mean = float(np.mean(all_rewards)) if all_rewards.size > 0 else 0.0
     reward_total_std = float(np.std(all_rewards)) if all_rewards.size > 0 else 0.0
@@ -1110,14 +1119,18 @@ def summarize_batch_metrics(
     result["reward/smcov_group_std_mean"] = _safe_mean(smcov_group_stds)
     result["reward/match_group_std_mean"] = _safe_mean(match_group_stds)
     result["reward/group_std_mean"] = _safe_mean(reward_group_std_values)
-    result["reward/smcov_rank_corr_mean"] = _safe_mean(smcov_rank_corr_values)
+    result["reward/bestcov_rank_corr_mean"] = _safe_mean(bestcov_rank_corr_values)
     if np.isfinite(comp_smcov_mean) and np.isfinite(reward_total_mean) and reward_total_mean != 0.0:
         result["reward/comp_smcov_frac"] = comp_smcov_mean / (reward_total_mean + 1e-8)
     else:
         result["reward/comp_smcov_frac"] = 0.0
 
     result["div/pairwise_rmsd_p50"] = (
-        float(np.percentile(all_pairwise, 50)) if all_pairwise.size > 0 else 0.0
+        float(np.percentile(all_pairwise, 50)) if all_pairwise.size > 0 else float("nan")
     )
 
     return result
+
+
+if __name__ == "__main__":
+    _run_recall_reward_sanity_checks()
