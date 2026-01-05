@@ -155,6 +155,7 @@ def create_code_snapshot(project_root: str, snapshot_dir: str):
         "data_processing/__init__.py",
         "utils/__init__.py",
         "evaluation/__init__.py",
+        "config/__init__.py",
     ]:
         source_file = source_root / relative_path
         destination_file = destination_root / relative_path
@@ -170,6 +171,7 @@ def create_code_snapshot(project_root: str, snapshot_dir: str):
         ("data_processing", destination_root / "data_processing"),
         ("utils", destination_root / "utils"),
         ("evaluation", destination_root / "evaluation"),
+        ("config", destination_root / "config"),
     ]
 
     ignore_patterns = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")

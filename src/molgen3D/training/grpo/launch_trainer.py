@@ -1,9 +1,9 @@
 import argparse
 import os
-import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
+from dataclasses import asdict
 
 # Ensure the repository's src directory is importable even when running as a script.
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -26,6 +26,7 @@ from molgen3D.training.grpo.config import (
     ProcessingConfig,
     RunConfig,
     TrainerConfig,
+    ValidationConfig,
 )
 from molgen3D.training.grpo.utils import create_code_snapshot
 def ensure_snapshot_has_grpo_code(snapshot_dir: Path) -> None:
@@ -65,34 +66,21 @@ def build_launch_command(args, work_dir: str | None = None, accelerate_config_pa
     return cmd
 
 def load_and_update_configs(args, project_root: Path):
-    """Load and update configuration files with command line overrides."""
-    # Load base config
+    """Load configuration files and apply CLI overrides in-memory."""
     with open(args.config, "r", encoding='utf-8', errors='replace') as f:
         config_data = yaml.safe_load(f)
     
-    # Override device settings from command line - ALWAYS override
     if "device" in config_data:
         config_data["device"]["device_type"] = args.device
         config_data["device"]["num_gpus"] = args.ngpus
-        logger.info(f"Overriding device config: {args.device} with {args.ngpus} GPUs")
+        logger.info(f"Applied CLI device overrides in-memory: {args.device} x{args.ngpus}")
     
-    # Write updated config back to file immediately
-    with open(args.config, "w", encoding='utf-8') as f:
-        yaml.safe_dump(config_data, f)
-    logger.info(f"Updated config file with CLI overrides: {args.device} with {args.ngpus} GPUs")
-
-    accelerate_config_path = None
     if args.strategy != "single":
         accelerate_config_path = project_root / "src" / "molgen3D" / "config" / "grpo" / f"{args.strategy}.conf"
         if not accelerate_config_path.exists():
             raise FileNotFoundError(f"Accelerate config not found for strategy '{args.strategy}': {accelerate_config_path}")
-        with open(accelerate_config_path, "r", encoding='utf-8', errors='replace') as f:
-            accelerate_config = yaml.safe_load(f)
-        accelerate_config["num_processes"] = args.ngpus
-        with open(accelerate_config_path, "w", encoding='utf-8') as f:
-            yaml.safe_dump(accelerate_config, f)
     
-    return config_data, accelerate_config_path
+    return config_data
 
 def create_directories(config_data, args, project_root: Path):
     """Create output and checkpoint directories using updated config data."""
@@ -106,7 +94,8 @@ def create_directories(config_data, args, project_root: Path):
         run=RunConfig(**config_data['run']),
         device=DeviceConfig(**config_data['device']),
         trainer=TrainerConfig(**config_data.get('trainer', {})),
-        dataloader=DataLoaderConfig(**config_data.get('dataloader', {}))
+        dataloader=DataLoaderConfig(**config_data.get('dataloader', {})),
+        validation=ValidationConfig(**config_data.get('validation', {}))
     )
     
     timestamp = datetime.now().strftime("%y%m%d-%H%M")
@@ -131,13 +120,32 @@ def create_directories(config_data, args, project_root: Path):
     return config, output_dir
 
 
-def copy_grpo_config(config_path: Path, snapshot_dir: Path) -> Path:
-    """Copy the selected GRPO config into the snapshot directory."""
+def write_snapshot_config(config: Config, source_config_path: Path, snapshot_dir: Path) -> Path:
+    """Persist the fully materialized Config into the snapshot directory."""
     destination_dir = snapshot_dir / "molgen3D" / "config" / "grpo"
     destination_dir.mkdir(parents=True, exist_ok=True)
-    destination_path = destination_dir / config_path.name
-    shutil.copy2(config_path, destination_path)
+    destination_path = destination_dir / source_config_path.name
+    save_updated_config(config, destination_path)
     return destination_path
+
+def prepare_snapshot_accelerate_config(snapshot_dir: Path, strategy: str, num_processes: int) -> Path | None:
+    """Update the snapshot accelerate config with runtime overrides."""
+    if strategy == "single":
+        return None
+    
+    snapshot_config = snapshot_dir / "molgen3D" / "config" / "grpo" / f"{strategy}.conf"
+    if not snapshot_config.exists():
+        raise FileNotFoundError(f"Snapshot is missing accelerate config for strategy '{strategy}': {snapshot_config}")
+    
+    with open(snapshot_config, "r", encoding="utf-8", errors="replace") as f:
+        accelerate_cfg = yaml.safe_load(f) or {}
+    accelerate_cfg["num_processes"] = num_processes
+    
+    with open(snapshot_config, "w", encoding="utf-8") as f:
+        yaml.safe_dump(accelerate_cfg, f, sort_keys=False)
+    
+    return snapshot_config
+
 
 def setup_job_executor(device_type, num_gpus, run_name):
     """Setup the appropriate job executor based on device type."""
@@ -160,7 +168,7 @@ def setup_job_executor(device_type, num_gpus, run_name):
             timeout_min=24 * 24 * 60,  # 24 hours
             nodes=1,
             mem_gb=80,
-            cpus_per_task=num_gpus * 8,
+            cpus_per_task=num_gpus * 16,
             slurm_additional_parameters={
                 "partition": device_type,
                 "gres": f"gpu:{num_gpus}"
@@ -188,38 +196,17 @@ def setup_job_executor(device_type, num_gpus, run_name):
     
     return executor
 
-def update_config_in_place(config, config_file_path):
-    """Update the YAML config file in place with runtime paths."""
-    # Load the existing YAML file
-    with open(config_file_path, "r", encoding='utf-8', errors='replace') as f:
-        config_data = yaml.safe_load(f)
-    
-    # Update only the runtime paths, preserving the base paths
-    if 'grpo' in config_data:
-        config_data['grpo']['output_dir'] = config.grpo.output_dir
-        config_data['grpo']['checkpoint_dir'] = config.grpo.checkpoint_dir
-    
-    # Write back to the same file
-    with open(config_file_path, "w", encoding='utf-8') as f:
-        yaml.safe_dump(config_data, f, default_flow_style=False, sort_keys=False)
-
 def save_updated_config(config, config_file_path):
     """Save the updated configuration to file."""
+    config_dict = asdict(config)
     with open(config_file_path, "w", encoding='utf-8') as f:
-        yaml.safe_dump({
-            'model': config.model.__dict__,
-            'generation': config.generation.__dict__,
-            'processing': config.processing.__dict__,
-            'grpo': config.grpo.__dict__,
-            'dataset': config.dataset.__dict__,
-            'run': config.run.__dict__,
-            'device': config.device.__dict__,
-            'trainer': config.trainer.__dict__
-        }, f)
+        yaml.safe_dump(config_dict, f, sort_keys=False)
 
 def main():
     setup_launcher_logging()
     project_root = get_project_root()
+    # Ensure snapshot jobs resolve data paths against the real repo root
+    os.environ.setdefault("MOLGEN3D_REPO_ROOT", str(project_root))
     
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Launch GRPO training job")
@@ -236,7 +223,7 @@ def main():
 
     try:
         # Load and update configurations
-        config_data, accelerate_config_path = load_and_update_configs(args, project_root)
+        config_data = load_and_update_configs(args, project_root)
         
         # Create directories and get config object
         config, output_dir = create_directories(config_data, args, project_root)
@@ -246,16 +233,20 @@ def main():
         ensure_snapshot_has_grpo_code(output_dir)
         logger.info(f"Code snapshot created in: {output_dir}")
         
-        # Update the config file that was copied in the snapshot
-        snapshot_config_path = copy_grpo_config(Path(args.config), output_dir)
-        logger.info(f"Updating snapshot config: {snapshot_config_path}")
+        # Persist the fully resolved config solely inside the snapshot
+        snapshot_config_path = write_snapshot_config(config, Path(args.config), output_dir)
+        logger.info(f"Wrote snapshot-only config to: {snapshot_config_path}")
         
-        # Update the copied config file in place with runtime paths
-        update_config_in_place(config, str(snapshot_config_path))
-        logger.info(f"Updated snapshot config in place with runtime paths")
+        # Update accelerate config inside the snapshot (if needed)
+        snapshot_accelerate_config = prepare_snapshot_accelerate_config(output_dir, args.strategy, config.device.num_gpus)
         
         # Build launch command using snapshot config
-        cmd = build_launch_command(args, work_dir=str(output_dir), accelerate_config_path=accelerate_config_path, config_path=str(snapshot_config_path))
+        cmd = build_launch_command(
+            args,
+            work_dir=str(output_dir),
+            accelerate_config_path=snapshot_accelerate_config,
+            config_path=str(snapshot_config_path),
+        )
         logger.info(f"Launch command: {' '.join(cmd)}")
         
         # Setup and submit job
