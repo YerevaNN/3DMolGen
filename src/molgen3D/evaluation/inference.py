@@ -22,7 +22,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 
 # from utils import parse_molecule_with_coordinates
 from molgen3D.data_processing.utils import decode_cartesian_raw
-from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2, strip_smiles
+from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2, strip_smiles, decode_cartesian_binned
 from molgen3D.evaluation.utils import (
     extract_between,
     same_molecular_graph,
@@ -103,7 +103,7 @@ def save_results(results_path, generations, stats):
     with open(os.path.join(results_path, "generation_results.txt"), 'w') as results_file_txt:
         results_file_txt.write(f"{stats=}")
 
-def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id):
+def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id, binned: bool):
     generations = defaultdict(list)
     stats = {"smiles_mismatch":0, "mol_parse_fail" :0, "no_eos":0}
     
@@ -153,7 +153,10 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id)
                 stats["smiles_mismatch"] += 1
             else:
                 try:
-                    mol_obj = decode_cartesian_v2(generated_conformer)
+                    if binned:
+                        mol_obj = decode_cartesian_binned(generated_conformer)
+                    else:
+                        mol_obj = decode_cartesian_v2(generated_conformer)
                     # logger.info(f"smiles match: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
                     generations[geom_smiles].append(mol_obj)
                 except:
@@ -227,7 +230,7 @@ def run_inference(inference_config: dict):
     for start in tqdm(range(0, len(mols_list), batch_size), desc="generating"):
         batch = mols_list[start:start + batch_size]
         for sub_batch in split_batch_on_geom_size(batch, max_geom_len=80):
-            outputs, stats_ = process_batch(model, tokenizer, sub_batch, inference_config["gen_config"], eos_token_id)
+            outputs, stats_ = process_batch(model, tokenizer, sub_batch, gen_config=inference_config["gen_config"], eos_token_id=eos_token_id, binned=inference_config.get("binned", False))
             stats.update(stats_)
             for k, v in outputs.items():
                 generations_all[k].extend(v)
@@ -269,7 +272,7 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
     
     # Base configuration template
     base_inference_config = {
-        "model_path": get_ckpt("m380_conf_v2","2e"),
+        "model_path": get_ckpt("qw600_pre_binned","1e"),
         "tokenizer_path": get_tokenizer_path("qwen3_0.6b_custom"),
         "torch_dtype": "bfloat16",
         "batch_size": 256,
@@ -277,7 +280,7 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         "gen_config": sampling_configs["top_p_sampling1"],
         "device": "cuda",
         "results_path": get_base_path("gen_results_root"),
-        "run_name": "qwen_pre",
+        "run_name": "qwen_pre_binned",
         "limit": limit,
     }
 
@@ -349,6 +352,7 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=str, choices=["local", "a100", "h100"], required=True)
     parser.add_argument("--grid_run_inference", action="store_true")
     parser.add_argument("--test_set", type=str, choices=["clean", "distinct", "corrected"], default=None)
+    parser.add_argument("--binned", action="store_true", default=False)
     parser.add_argument("--xl", action="store_true")
     parser.add_argument("--qm9", action="store_true")
     parser.add_argument("--limit", type=int, default=None)

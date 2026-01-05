@@ -30,7 +30,9 @@ GEOM_DATA_KEYS = {
     "conformers_test",
     "pretokenized_prompts",
     "validation_pickle",
-
+    "binned_conformers_train",
+    "binned_conformers_valid",
+    "binned_conformers_test",
 }
 
 
