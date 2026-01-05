@@ -15,6 +15,7 @@ base_paths:
   wandb_root: "wandb_runs"
   qwen3_0.6b_base_model: "/nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b/Qwen3-0.6B-Base"
   tokenizers_root: "src/molgen3D/training/tokenizers"
+  aimnet2_model_root: "models/aimnet2"
 
 data:
   clean_smi: "clean_smi.pickle"
@@ -29,6 +30,9 @@ data:
   test_mols: "geom_processed/test_smiles_corrected.csv"
   test_mols_xl: "geom_processed/test_smiles_corrected_xl.csv"
   drugs_summary: "rdkit_folder/summary_drugs.json"
+
+  # AIMNet2 models
+  aimnet2_model: "wb97m_cpcms_v2_0.jpt"
 
   # conformers_train: "geom_processed/geom_cartesian_v2/processed_strings/train"
   # conformers_valid: "geom_processed/geom_cartesian_v2/processed_strings/valid"

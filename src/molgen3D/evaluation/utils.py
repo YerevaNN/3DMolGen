@@ -14,6 +14,10 @@ from loguru import logger
 import torch
 from rdkit import Chem
 from rdkit.Chem import rdMolHash
+from typing import List, Optional
+
+from molgen3D.config.paths import get_data_path
+from molgen3D.evaluation.aimnet2_metrics import calculate_energies, MoleculeAIMNet2Metrics
 
 DEFAULT_THRESHOLDS = np.arange(0.05, 3.05, 0.05)
 PEAK_TFLOPS = {
@@ -172,4 +176,67 @@ def log_mfu(model, generated_tokens: int, elapsed_sec: float) -> None:
     logger.info(
         f"Throughput: {tokens_per_sec:.2f} tok/s, FLOPs/token≈{flops_per_token/1e12:.2f} TF, "
         f"achieved≈{achieved_flops/1e12:.2f} TF/s, MFU≈{mfu*100:.2f}%"
+    )
+
+
+def get_aimnet2_model_path() -> str:
+    """Get the path to the AIMNet2 model."""
+    return str(get_data_path("aimnet2_model"))
+
+
+def calculate_molecule_energies(
+    molecules: List[Chem.Mol],
+    device: str = "cpu",
+    batch_size: int = 32,
+    aimnet2_model_path: Optional[str] = None
+) -> dict:
+    """
+    Calculate energies for a list of molecules using AIMNet2.
+
+    Args:
+        molecules: List of RDKit molecule objects
+        device: Device to run calculations on ('cpu' or 'cuda')
+        batch_size: Batch size for computation
+        aimnet2_model_path: Path to AIMNet2 model. If None, uses default path.
+
+    Returns:
+        Dictionary with energy metrics
+    """
+    if aimnet2_model_path is None:
+        aimnet2_model_path = get_aimnet2_model_path()
+
+    return calculate_energies(
+        molecules=molecules,
+        aimnet2_model_path=aimnet2_model_path,
+        device=device,
+        batch_size=batch_size
+    )
+
+
+def create_energy_calculator(
+    device: str = "cpu",
+    batch_size: int = 32,
+    opt_metrics: bool = False,
+    aimnet2_model_path: Optional[str] = None
+) -> MoleculeAIMNet2Metrics:
+    """
+    Create an AIMNet2 energy calculator instance.
+
+    Args:
+        device: Device to run calculations on ('cpu' or 'cuda')
+        batch_size: Batch size for computation
+        opt_metrics: Whether to compute optimization metrics
+        aimnet2_model_path: Path to AIMNet2 model. If None, uses default path.
+
+    Returns:
+        MoleculeAIMNet2Metrics instance
+    """
+    if aimnet2_model_path is None:
+        aimnet2_model_path = get_aimnet2_model_path()
+
+    return MoleculeAIMNet2Metrics(
+        model_path=aimnet2_model_path,
+        batchsize=batch_size,
+        opt_metrics=opt_metrics,
+        device=device
     )

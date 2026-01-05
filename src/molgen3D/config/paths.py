@@ -30,7 +30,7 @@ GEOM_DATA_KEYS = {
     "conformers_test",
     "pretokenized_prompts",
     "validation_pickle",
-
+    "aimnet2_model",
 }
 
 
