@@ -28,6 +28,9 @@ GEOM_DATA_KEYS = {
     "conformers_train",
     "conformers_valid",
     "conformers_test",
+    "pretokenized_prompts",
+    "validation_pickle",
+
 }
 
 
@@ -54,6 +57,8 @@ def _get_ckpt_base_path(root_rel: str, base_paths: dict) -> str:
     """Determine the base path for a checkpoint based on root_rel pattern."""
     if root_rel.startswith("qwen3_06b"):
         return base_paths.get("qwen_yerevann_root", base_paths.get("hf_yerevann_root", "."))
+    if "qwen3" in root_rel:
+        return base_paths.get("qwen3_grpo_root", base_paths.get("grpo_root", "."))
     if "code_snapshot" in root_rel or "grpo_outputs" in root_rel:
         return base_paths.get("grpo_outputs_root", ".")
     if root_rel.startswith("2025-"):

@@ -37,7 +37,8 @@ from molgen3D.training.grpo.utils import (
     get_torch_dtype
 )
 from molgen3D.training.grpo.rewards import reward_function
-from molgen3D.training.grpo.multi_component_reward import MultiComponentRewardCalculator
+from molgen3D.training.grpo.numerical_validator import GRPONumericalValidator
+from molgen3D.training.grpo.numerical_validation_callback import NumericalValidationCallback
 from molgen3D.training.grpo.grpo_reward_v3 import reward_function as reward_function_v3
 
 
@@ -75,6 +76,7 @@ def ensure_completion_length_tracking():
 
 def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     initialize_random_seed(config.grpo.seed)
+    os.environ["TOKENIZERS_PARALLELISM"] = "true" if config.trainer.tokenizers_parallelism else "false"
 
     # Set up output and checkpoint directories if not already configured
     if output_dir is None and config.grpo.output_dir is None:
@@ -135,7 +137,7 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         num_iterations=config.grpo.num_iterations,
         importance_sampling_level=config.grpo.importance_sampling_level,
         steps_per_generation=config.grpo.steps_per_generation,
-        seed=config.grpo.seed,
+        seed=config.grpo.seed
     )
 
     # Convert string dtype to torch dtype
@@ -152,14 +154,15 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
 
     tokenizer = AutoTokenizer.from_pretrained(
         config.model.tokenizer_path,
+        padding_side="left",
     )
 
     # Load dataset from text file and create prompt column
-    with open(config.dataset.dataset_path, 'r') as f:
+    with open(config.dataset.dataset_path, 'r', encoding='utf-8', errors='replace') as f:
         prompts = [
             line.strip()
             for line in f
-            if line.strip() and len(line.strip()) <= 170
+            if line.strip() and len(line.strip()) <= 150
         ]
     dataset = Dataset.from_dict({"prompt": prompts})
     dataset = dataset.shuffle(seed=config.grpo.seed)
@@ -189,15 +192,15 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
                 completion_lengths=completion_lengths,
             )
 
-    elif reward_strategy == "multi_component":
-        logger.info("Using multi-component reward calculator")
-        mc_calculator = MultiComponentRewardCalculator(config=config, stats=stats, tokenizer=tokenizer)
-
-        def reward_func(prompts, completions, **kwargs):
-            return mc_calculator(prompts, completions, **kwargs)
-
     else:
+        if reward_strategy != "legacy":
+            raise ValueError(
+                f"Unsupported reward_strategy '{reward_strategy}'. "
+                "Supported values: 'v3', 'legacy'."
+            )
+
         logger.info("Using legacy reward function")
+
         def reward_func(prompts, completions, **kwargs):
             return reward_function(prompts, completions, stats, tokenizer, config)
 
@@ -209,14 +212,39 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     training_args.dataloader_persistent_workers = config.dataloader.persistent_workers
     training_args.dataloader_prefetch_factor = config.dataloader.prefetch_factor
     training_args.dataloader_drop_last = config.dataloader.drop_last
-    
+
+    numerical_callback = None
+    if config.validation.enable_numerical_validation:
+        numerical_validator = GRPONumericalValidator(
+            config=config,
+            tokenizer=tokenizer,
+            stats=stats,
+            output_dir=actual_output_dir,
+        )
+        logger.info("Numerical validation enabled")
+
+        # Run validation every eval_steps if configured, otherwise every 1000 steps
+        validation_interval = config.validation.eval_steps or 1000
+        numerical_callback = NumericalValidationCallback(
+            validator=numerical_validator,
+            stats=stats,
+            validation_steps=validation_interval,
+            max_seq_len=config.generation.max_completion_length
+            + config.validation.max_conformer_tokens,
+        )
+        logger.info(
+            f"Numerical validation callback created (interval: {validation_interval} steps)"
+        )
+
     trainer = GRPOTrainer(
         model=model,
         processing_class=tokenizer,
         reward_funcs=reward_func,
         args=training_args,
         train_dataset=dataset,
+        callbacks=[numerical_callback] if numerical_callback is not None else None,
     )
+
     
     # Set epsilon parameters on trainer (not available in GRPOConfig)
     epsilon_low = float(config.grpo.epsilon_low)
@@ -226,6 +254,7 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     logger.info(f"Set epsilon_low={epsilon_low}, epsilon_high={epsilon_high} on GRPO trainer")
     
     trainer.train()
+
     stats.update_stats()
 
     model_dir = Path(config.grpo.checkpoint_dir) / "model"

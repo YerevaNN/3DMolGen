@@ -32,12 +32,53 @@ class RunStatistics:
     coverage_opportunities: int = 0
     posebusters_successes: int = 0
     posebusters_failures: int = 0
+
+    # Numerical validation metrics
+    numerical_val_steps: int = 0
+    numerical_val_total_successes: int = 0
+    numerical_val_total_failures: int = 0
+    numerical_val_rmsd_min_values: list = field(default_factory=list)
+    numerical_val_rmsd_max_values: list = field(default_factory=list)
+    numerical_val_rmsd_avg_values: list = field(default_factory=list)
+    numerical_val_failure_counts: Dict[str, int] = field(default_factory=dict)
+    posebusters_successes: int = 0  # Legacy field used by older reward components
+    posebusters_failures: int = 0   # Legacy field used by older reward components
+    posebusters_checked: int = 0
+    posebusters_failed: int = 0
+    posebusters_errors: int = 0
+    posebusters_time_ms: float = 0.0
     
     def add_rmsd(self, rmsd: float) -> None:
         """Track RMSD values for averaging"""
         self.total_rmsd += rmsd
         self.rmsd_counts += 1
         self.rmsd_values.append(rmsd)
+
+    def update_numerical_validation_stats(self, metrics: Dict[str, float]) -> None:
+        """Update numerical validation statistics from validation metrics."""
+        self.numerical_val_steps += 1
+
+        successes = int(metrics.get("numerical_val/successes", 0))
+        failures = int(metrics.get("numerical_val/failures", 0))
+
+        self.numerical_val_total_successes += successes
+        self.numerical_val_total_failures += failures
+
+        # Track RMSD values if available
+        if "numerical_val/rmsd_min_mean" in metrics:
+            self.numerical_val_rmsd_min_values.append(metrics["numerical_val/rmsd_min_mean"])
+        if "numerical_val/rmsd_max_mean" in metrics:
+            self.numerical_val_rmsd_max_values.append(metrics["numerical_val/rmsd_max_mean"])
+        if "numerical_val/rmsd_avg_mean" in metrics:
+            self.numerical_val_rmsd_avg_values.append(metrics["numerical_val/rmsd_avg_mean"])
+
+        # Track failure counts
+        for key, value in metrics.items():
+            if key.startswith("numerical_val/fail_"):
+                fail_type = key.replace("numerical_val/fail_", "")
+                self.numerical_val_failure_counts[fail_type] = (
+                    self.numerical_val_failure_counts.get(fail_type, 0) + int(value)
+                )
     
     def add_success(self, success: bool) -> None:
         """Track success for rolling statistics"""
@@ -80,7 +121,13 @@ class RunStatistics:
     def log_global_stats(self):
         """Log global statistics for the entire run."""
         failure_rates = self.failure_rates
-        posebusters_checks = self.posebusters_successes + self.posebusters_failures
+        posebusters_checks_legacy = self.posebusters_successes + self.posebusters_failures
+        posebusters_checks = self.posebusters_checked or posebusters_checks_legacy
+        posebusters_passes = (
+            self.posebusters_checked - self.posebusters_failed - self.posebusters_errors
+            if self.posebusters_checked
+            else self.posebusters_successes
+        )
 
         def safe_mean(values):
             return float(np.nanmean(values)) if values else 0.0
@@ -118,8 +165,26 @@ class RunStatistics:
             "posebusters_failures": self.posebusters_failures,
             "posebusters_checks": posebusters_checks,
             "posebusters_pass_rate": (
-                self.posebusters_successes / posebusters_checks if posebusters_checks > 0 else 0.0
+                posebusters_passes / posebusters_checks if posebusters_checks > 0 else 0.0
             ),
+
+            # Numerical validation metrics
+            "numerical_val_steps": self.numerical_val_steps,
+            "numerical_val_total_successes": self.numerical_val_total_successes,
+            "numerical_val_total_failures": self.numerical_val_total_failures,
+            "numerical_val_success_rate": (
+                self.numerical_val_total_successes /
+                (self.numerical_val_total_successes + self.numerical_val_total_failures)
+                if (self.numerical_val_total_successes + self.numerical_val_total_failures) > 0 else 0.0
+            ),
+            "numerical_val_rmsd_min_mean": safe_mean(self.numerical_val_rmsd_min_values),
+            "numerical_val_rmsd_max_mean": safe_mean(self.numerical_val_rmsd_max_values),
+            "numerical_val_rmsd_avg_mean": safe_mean(self.numerical_val_rmsd_avg_values),
+            "numerical_val_failure_counts": self.numerical_val_failure_counts,
+            "posebusters_checked": self.posebusters_checked,
+            "posebusters_failed": self.posebusters_failed,
+            "posebusters_errors": self.posebusters_errors,
+            "posebusters_time_ms": self.posebusters_time_ms,
         }
         return stats
 
@@ -133,11 +198,11 @@ class RunStatistics:
         stats_dir.mkdir(parents=True, exist_ok=True)
         own_stats = self.log_global_stats()
         own_stats_file = stats_dir / f"statistics_{pid}.json"
-        with open(own_stats_file, 'w') as f:
+        with open(own_stats_file, 'w', encoding='utf-8') as f:
             json.dump(own_stats, f, indent=4)
         lock_file = stats_dir / "statistics.lock"
         aggregate = {}
-        with open(lock_file, 'w') as lock:
+        with open(lock_file, 'w', encoding='utf-8') as lock:
             acquired = False
             while not acquired:
                 try:
@@ -173,9 +238,20 @@ class RunStatistics:
                 "posebusters_successes": 0,
                 "posebusters_failures": 0,
                 "posebusters_checks": 0,
+                "numerical_val_steps": 0,
+                "numerical_val_total_successes": 0,
+                "numerical_val_total_failures": 0,
+                "numerical_val_rmsd_min_values": [],
+                "numerical_val_rmsd_max_values": [],
+                "numerical_val_rmsd_avg_values": [],
+                "numerical_val_failure_counts": {},
+                "posebusters_checked": 0,
+                "posebusters_failed": 0,
+                "posebusters_errors": 0,
+                "posebusters_time_ms": 0.0,
             }
             for file in stats_files:
-                with open(file, 'r') as f:
+                with open(file, 'r', encoding='utf-8', errors='replace') as f:
                     try:
                         stats = json.load(f)
                     except json.JSONDecodeError:
@@ -212,6 +288,25 @@ class RunStatistics:
                     aggregate["posebusters_successes"] += stats.get("posebusters_successes", 0)
                     aggregate["posebusters_failures"] += stats.get("posebusters_failures", 0)
                     aggregate["posebusters_checks"] += stats.get("posebusters_checks", 0)
+
+                    # Aggregate numerical validation metrics
+                    aggregate["numerical_val_steps"] += stats.get("numerical_val_steps", 0)
+                    aggregate["numerical_val_total_successes"] += stats.get("numerical_val_total_successes", 0)
+                    aggregate["numerical_val_total_failures"] += stats.get("numerical_val_total_failures", 0)
+                    aggregate["numerical_val_rmsd_min_values"].extend(stats.get("numerical_val_rmsd_min_values", []))
+                    aggregate["numerical_val_rmsd_max_values"].extend(stats.get("numerical_val_rmsd_max_values", []))
+                    aggregate["numerical_val_rmsd_avg_values"].extend(stats.get("numerical_val_rmsd_avg_values", []))
+
+                    # Aggregate failure counts
+                    val_failure_counts = stats.get("numerical_val_failure_counts", {})
+                    for fail_type, count in val_failure_counts.items():
+                        aggregate["numerical_val_failure_counts"][fail_type] = (
+                            aggregate["numerical_val_failure_counts"].get(fail_type, 0) + count
+                        )
+                    aggregate["posebusters_checked"] += stats.get("posebusters_checked", 0)
+                    aggregate["posebusters_failed"] += stats.get("posebusters_failed", 0)
+                    aggregate["posebusters_errors"] += stats.get("posebusters_errors", 0)
+                    aggregate["posebusters_time_ms"] += stats.get("posebusters_time_ms", 0.0)
             aggregate["success_rate"] = (
                 aggregate["successful_generations"] / aggregate["processed_prompts"]
                 if aggregate["processed_prompts"] > 0 else 0.0
@@ -241,11 +336,32 @@ class RunStatistics:
                 if aggregate["reward_coverage_opportunities"] > 0 else 0.0
             )
             aggregate["posebusters_pass_rate"] = (
-                aggregate["posebusters_successes"] / aggregate["posebusters_checks"]
-                if aggregate["posebusters_checks"] > 0 else 0.0
+                (
+                    (aggregate["posebusters_checked"] - aggregate["posebusters_failed"] - aggregate["posebusters_errors"])
+                    / aggregate["posebusters_checked"]
+                )
+                if aggregate["posebusters_checked"] > 0
+                else (
+                    aggregate["posebusters_successes"] / aggregate["posebusters_checks"]
+                    if aggregate["posebusters_checks"] > 0
+                    else 0.0
+                )
             )
+
+            # Finalize numerical validation metrics
+            def safe_mean(values):
+                return float(np.nanmean(values)) if values else 0.0
+
+            aggregate["numerical_val_success_rate"] = (
+                aggregate["numerical_val_total_successes"] /
+                (aggregate["numerical_val_total_successes"] + aggregate["numerical_val_total_failures"])
+                if (aggregate["numerical_val_total_successes"] + aggregate["numerical_val_total_failures"]) > 0 else 0.0
+            )
+            aggregate["numerical_val_rmsd_min_mean"] = safe_mean(aggregate["numerical_val_rmsd_min_values"])
+            aggregate["numerical_val_rmsd_max_mean"] = safe_mean(aggregate["numerical_val_rmsd_max_values"])
+            aggregate["numerical_val_rmsd_avg_mean"] = safe_mean(aggregate["numerical_val_rmsd_avg_values"])
             stats_file = stats_dir / "statistics.json"
-            with open(stats_file, 'w') as f:
+            with open(stats_file, 'w', encoding='utf-8') as f:
                 json.dump(aggregate, f, indent=4)
             fcntl.flock(lock, fcntl.LOCK_UN)
         return aggregate

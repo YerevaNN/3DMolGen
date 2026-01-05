@@ -5,7 +5,7 @@ Supports:
 - Batch inference with optional logit processor for constrained generation
 - Multiple test sets (clean, distinct, xl, qm9)
 - Slurm submission (h100, a100) or local execution
-- Performance tracking and logging
+- Performance tracking and logging with MFU metrics
 """
 from __future__ import annotations
 
@@ -24,29 +24,48 @@ import random
 import submitit
 import torch
 from loguru import logger
+from rdkit import RDLogger, rdBase
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer, LogitsProcessorList
 
 from molgen3D.config.paths import get_base_path, get_ckpt, get_data_path, get_tokenizer_path
 from molgen3D.config.sampling_config import gen_num_codes, sampling_configs
 from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2, strip_smiles
-from molgen3D.evaluation.utils import extract_between, same_molecular_graph
+from molgen3D.evaluation.utils import (
+    extract_between,
+    same_molecular_graph,
+    log_cuda_memory,
+    log_cuda_summary,
+    estimate_decoder_flops_per_token,
+    detect_peak_flops,
+    log_mfu,
+)
 from molgen3D.evaluation.qwen_logit_processor import (
     QwenAllowlistLogitsProcessor,
     build_precomputed_template,
     build_templates_for_batch,
 )
 
+torch.set_grad_enabled(False)
+torch.set_float32_matmul_precision("high")
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.benchmark = False
+
+# Suppress RDKit warnings
+RDLogger.DisableLog("rdApp.warning")
+RDLogger.DisableLog("rdApp.error")
+rdBase.DisableLog("rdApp.warning")
+rdBase.DisableLog("rdApp.error")
+
 
 def set_seed(seed: int = 42) -> None:
     """Set random seeds for reproducibility."""
-    random.seed(seed)  # Python Random Moduel
+    random.seed(seed)  # Python Random Module
     torch.manual_seed(seed)  # PyTorch CPU
-
     torch.cuda.manual_seed(seed)  # PyTorch GPU
     torch.cuda.manual_seed_all(seed)  # All GPUs (if using multi-GPU)
     torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False 
+    torch.backends.cudnn.benchmark = False
 
 
 def load_model_tokenizer(
@@ -56,18 +75,41 @@ def load_model_tokenizer(
     attention_imp: str = "flash_attention_2",
     device: str = "auto",
 ):
-    """Load model and tokenizer for inference."""
+    """Load model and tokenizer for inference with optional torch.compile."""
     tokenizer = AutoTokenizer.from_pretrained(
         str(tokenizer_path), padding_side="left", local_files_only=True
     )
+    dtype_obj = getattr(torch, torch_dtype) if isinstance(torch_dtype, str) else torch_dtype
+
     model = AutoModelForCausalLM.from_pretrained(
         str(model_path),
-        torch_dtype=getattr(torch, torch_dtype),
+        torch_dtype=dtype_obj,
         attn_implementation=attention_imp,
         device_map=device,
         trust_remote_code=True,
         local_files_only=True,
     ).eval()
+
+    # MFU tracking attributes
+    model._flops_per_token = estimate_decoder_flops_per_token(model.config)
+    model._peak_device_flops = detect_peak_flops(model.device)
+
+    log_cuda_memory("Post-load")
+
+    # Try torch.compile for optimized inference
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+        model = torch.compile(model, mode="reduce-overhead")
+        logger.info(
+            f"torch.compile succeeded; using optimized graph. Compiled type={type(model)}"
+        )
+        log_cuda_summary("Post-compile")
+    except Exception as compile_err:
+        logger.warning(f"torch.compile failed, continuing with eager mode: {compile_err}")
+    finally:
+        log_cuda_memory("Post-compile")
+
     tokenizer.pad_token = tokenizer.eos_token
     model.generation_config.pad_token_id = tokenizer.pad_token_id
 
@@ -138,8 +180,11 @@ def process_batch(
             raise ValueError(f"Prompt is missing SMILES tags: {p}")
         smiles_list.append(smi)
 
-    tokenized_prompts = tokenizer(prompts, return_tensors="pt", padding=True)
+    tokenized_prompts = tokenizer(
+        prompts, return_tensors="pt", padding=True, pad_to_multiple_of=8
+    )
     tokenized_prompts = {k: v.to(model.device, non_blocking=True) for k, v in tokenized_prompts.items()}
+    tokenized_prompts["attention_mask"] = tokenized_prompts["attention_mask"].contiguous()
 
     # Optionally build logits processor for constrained generation
     logits_processor = None
@@ -163,6 +208,7 @@ def process_batch(
             ]
         )
 
+    start_time = time.perf_counter()
     with torch.inference_mode():
         outputs = model.generate(
             input_ids=tokenized_prompts["input_ids"],
@@ -172,9 +218,24 @@ def process_batch(
             generation_config=gen_config,
             logits_processor=logits_processor,
             use_cache=True,
-            return_dict_in_generate=False,
+            return_dict_in_generate=True,
+            output_attentions=False,
+            output_hidden_states=False,
         )
-    decoded_outputs = tokenizer.batch_decode(outputs)
+        sequences = outputs.sequences.detach().cpu()
+        del outputs
+
+    # MFU tracking
+    elapsed = time.perf_counter() - start_time
+    prompt_lens = tokenized_prompts["attention_mask"].sum(dim=1).cpu()
+    seq_pad_mask = (sequences != tokenizer.pad_token_id).to(torch.int32)
+    seq_lens = seq_pad_mask.sum(dim=1)
+    gen_lens = (seq_lens - prompt_lens).clamp(min=0)
+    total_generated_tokens = int(gen_lens.sum().item())
+    log_mfu(model, total_generated_tokens, elapsed)
+    log_cuda_memory("Post-first-forward")
+
+    decoded_outputs = tokenizer.batch_decode(sequences, skip_special_tokens=True)
     for i, out in enumerate(decoded_outputs):
         canonical_smiles = extract_between(out, "[SMILES]", "[/SMILES]")
         generated_conformer = extract_between(out, "[CONFORMER]", "[/CONFORMER]")
@@ -412,9 +473,9 @@ def launch_inference_from_cli(
     node = device if device in ["a100", "h100"] else "local"
     executor = None
     if device in ["a100", "h100"]:
-        executor = submitit.AutoExecutor(folder="~/slurm_jobs/conf_gen/job_%j")
+        executor = submitit.AutoExecutor(folder="outputs/slurm_jobs/conf_gen/job_%j")
     elif device == "local":
-        executor = submitit.LocalExecutor(folder="~/slurm_jobs/conf_gen/job_%j")
+        executor = submitit.LocalExecutor(folder="outputs/slurm_jobs/conf_gen/job_%j")
     executor.update_parameters(
         name="conf_gen",
         timeout_min=24 * 24 * 60,

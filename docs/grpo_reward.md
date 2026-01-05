@@ -1,254 +1,228 @@
-# GRPO Reward V3 (GEOM-Drugs Aligned)
+# GRPO Reward v3 (GEOM‑Drugs aligned)
 
-This document unifies the original reward specification with the implementation
-guide for the Group Relative Policy Optimization (GRPO) V3 reward used in
-`src/molgen3D/training/grpo/grpo_reward_v3.py`. It explains the mathematical
-design, how it maps to code, default hyperparameters, and operational guidance.
-
-## 1. Overview
-
-- **Goal**: Provide a dense, group-aware reward that aligns with all four
-  GEOM-Drugs metrics (AMR-P, AMR-R, COV-P, COV-R) under small rollout counts.
-- **Key ideas**
-  - Hard validity gate requires SMILES graph equality with the prompt before
-    any reward terms are computed.
-  - Dense quality term rewards every valid rollout for approaching any reference.
-  - Smooth coverage term grants marginal value for covering new references even
-    before reaching the benchmark threshold.
-  - Hard matching term recreates GEOM-Drugs COV-R behavior via bipartite
-    matching under a 0.75 Å threshold.
-- **Why “inclusive”**: Duplicated good samples still earn quality reward, but
-  group-aware terms gradually discount them in favor of diversity.
-
-## 2. Setting and Notation
-
-For each canonical SMILES (one GRPO group):
-
-- Reference conformers: $G=\{g_j\}_{j=1}^M$ (up to 30 cached GEOM conformers).
-- Rollouts: $Y=\{y_i\}_{i=1}^K$ generated conformers.
-- Distances: $D_{ij}=d(y_i,g_j)$ = heavy-atom RMSD (Å) after Kabsch alignment.
-- Hard threshold: $\delta = 0.75$ Å (GEOM-Drugs benchmark).
-- Validity gate: $v_i\in\{0,1\}$ via RDKit parsing + graph equality.
-- Nearest reference per rollout: $d_i = \min_j D_{ij}$.
-
-## 3. Reward Terms
-
-### Term 0 – Hard validity gate
-$$
-r_i =
-\begin{cases}
-r_{\text{floor}}, & v_i = 0\\
-\tilde r_i, & v_i = 1
-\end{cases}
-\qquad r_{\text{floor}}=-1.0
-$$
-Rollouts are only considered valid if they **first** pass a graph-equality
-check: the generated SMILES (after stripping) must encode the same molecular
-graph as the prompt’s canonical SMILES (via `same_molecular_graph`). Any
-mismatch (or parsing failure) immediately receives $r_{\text{floor}}$.
-
-### Term 1 – Dense quality (AMR-P / COV-P aligned)
-$$
-r_i^{\text{qual}} = \exp\!\left(-\frac{d_i}{\sigma}\right), \qquad \sigma = 0.25 \text{ Å}
-$$
-Reward decays smoothly with distance to the nearest reference; dense signal for
-all valid conformers.
-
-### Term 2 – Smooth marginal coverage (COV-R precursor)
-$$
-\begin{aligned}
-k(d) &= \exp\!\left(-\left(\frac{d}{\rho}\right)^2\right), \quad \rho = 0.75 \text{ Å}\\
-u_j &= 1 - \prod_{i=1}^K \big(1 - k(D_{ij})\big)\\
-\Delta_{ij} &= k(D_{ij})\prod_{\ell\ne i} \big(1 - k(D_{\ell j})\big)\\
-r_i^{\text{smcov}} &= \frac{1}{M}\sum_{j=1}^M \Delta_{ij}
-\end{aligned}
-$$
-Interpretation: $\Delta_{ij}$ is the marginal contribution of rollout $i$ to
-covering reference $j$. Early explorers get the highest reward; duplicates are
-naturally discounted.
-
-### Term 3 – Hard unique-coverage bonus (COV-R aligned)
-$$
-\begin{aligned}
-E &= \{(i,j) : v_i = 1 \wedge D_{ij} < \delta\}\\
-M^\star &= \arg\max_{M\subseteq E}\ |M| \quad \text{(break ties by } \sum D_{ij})\\
-c_i &= \mathbf{1}\big[\exists j:(i,j)\in M^\star\big]
-\end{aligned}
-$$
-Optional shaping (enabled in code):
-$$
-r_i^{\text{match}} =
-\begin{cases}
-1 - D_{ij}/\delta, & (i,j)\in M^\star\\
-0, & \text{otherwise}
-\end{cases}
-$$
-This enforces one-to-one coverage under $\delta$, mirroring GEOM-Drugs COV-R.
-
-### Final combination (valid samples)
-$$
-\tilde r_i = \lambda_{\text{qual}} r_i^{\text{qual}}
-            + \lambda_{\text{smcov}} r_i^{\text{smcov}}
-            + \lambda_{\text{match}} r_i^{\text{match}}
-$$
-Default weights: $\lambda_{\text{qual}} = \lambda_{\text{smcov}} =
-\lambda_{\text{match}} = 1.0$.
-
-## 4. Implementation Flow
-
-Located in `src/molgen3D/training/grpo/grpo_reward_v3.py`.
-
-1. **Group samples** by canonical SMILES (GRPO prompts carry SMILES tags).
-2. **Load reference conformers** for the group (cached pickles, max 30).
-3. **Parse rollouts** into RDKit molecules and ensure the parsed SMILES matches
-   the prompt’s graph. Invalid rollouts never reach the RMSD or reward stages.
-4. **Compute RMSD matrix** $D$ (K × M) with Kabsch alignment (heavy atoms).
-5. **Compute term rewards** (`compute_quality_reward`, `compute_smooth_coverage_reward`,
-   `compute_matching_reward`).
-6. **Combine terms** with weights + validity gate.
-7. **Return per-sample rewards** in original order and log batch statistics.
-
-### Validity gate (`compute_validity`)
-- Ensures SMILES/graph equality before any RMSD work.
-- Invalid rollouts are masked from all later computation and receive `r_floor`.
-
-### RMSD matrix (`compute_distance_matrix`)
-- Skips invalid rollouts (sets $D_{ij}=\infty$).
-- Uses heavy-atom ordering consistent with benchmark alignment.
-
-### Dense quality (`compute_quality_reward`)
-```python
-d_i = np.min(D, axis=1)
-r_qual = np.where(validity == 1, np.exp(-d_i / sigma), 0.0)
-```
-
-### Smooth coverage (`compute_smooth_coverage_reward`)
-```python
-K_vals = np.exp(-(D / rho) ** 2)               # k(D_ij)
-log_one_minus = np.log1p(-K_vals)              # log(1 - k)
-log_prod_complement = np.sum(log_one_minus, axis=0) - log_one_minus
-Delta = K_vals * np.exp(log_prod_complement)   # marginal Δ_ij
-r_smcov = np.where(validity == 1, np.mean(Delta, axis=1), 0.0)
-```
-Log-space math keeps products stable for large K.
-
-### Hard matching (`compute_matching_reward`)
-```python
-cost = np.where((D <= delta) & (validity[:, None] == 1), D, np.inf)
-rows, cols = linear_sum_assignment(cost)
-valid = cost[rows, cols] <= delta
-r_match = np.zeros(K)
-r_match[rows[valid]] = 1.0 - cost[rows[valid], cols[valid]] / delta  # shaped
-```
-The Hungarian algorithm first maximizes matches (finite entries) and then
-prefers tighter RMSD pairs via the distance-based tie-break.
-
-### Reward combination (`combine_rewards`)
-```python
-r_final = (
-    lambda_qual * r_qual +
-    lambda_smcov * r_smcov +
-    lambda_match * r_match
-)
-r_final = np.where(validity == 1, r_final, r_floor)
-```
-
-## 5. Hyperparameters
-
-| Parameter | Default | Description | Effect |
-|-----------|---------|-------------|--------|
-| `delta` | 0.75 Å | Matching threshold | ↑ favors recall, ↓ enforces strict matches |
-| `sigma` | 0.25 Å | Quality decay scale | Smaller = sharper push toward refs |
-| `rho` | 0.75 Å | Smooth coverage kernel | Smaller = rewards only very close hits |
-| `lambda_qual` | 1.0 | Weight on quality term | Bias toward AMR-P |
-| `lambda_smcov` | 1.0 | Weight on smooth coverage | Bias toward pre-threshold diversity |
-| `lambda_match` | 1.0 | Weight on hard matching | Bias toward COV-R |
-| `r_floor` | -1.0 | Invalid penalty | Lower discourages invalid generations |
-| `max_ground_truths` | 30 | Reference cap per molecule | Controls compute/memory |
-
-### Tuning guidance
-- If AMR-P drops early (model becomes “diversity-pushy”), lower
-  `lambda_smcov` (e.g. 0.5).
-- If coverage metrics stall, raise `lambda_match` (1.5–2.0).
-- Keep `rho ≈ delta` to maintain alignment with benchmark scale.
-- `sigma ≈ delta / 3` balances dense gradients with accuracy pressure.
-
-## 6. Integration with GRPO
-
-### Grouping (`group_by_prompt`)
-- Prompts include `[SMILES]..[/SMILES]` tags; canonical SMILES are used as
-  group keys.
-- Rewards are computed per group and then re-ordered to match completions.
-
-### Configuration (`Config` / YAML)
-```yaml
-grpo:
-  reward_strategy: "v3"
-  delta: 0.75
-  sigma: 0.25
-  rho: 0.75
-  lambda_qual: 1.0
-  lambda_smcov: 1.0
-  lambda_match: 1.0
-  r_floor: -1.0
-  max_ground_truths: 30
-```
-
-### Statistics and logging (`RunStatistics`)
-- `reward_v3/validity_rate`
-- `reward_v3/mean_d_i`
-- `reward_v3/mean_r_qual`, `mean_r_smcov`, `mean_r_match`
-- `reward_v3/total_matched`, `fraction_under_delta`
-- `reward_v3/avg_M`, `avg_K`
-
-## 7. Computational Considerations
-
-- Validity: $O(K)$ + optional PoseBusters cost.
-- RMSD: $O(K \times M \times N)$ (N = atoms, Kabsch alignment dominates).
-- Smooth coverage: $O(K^2 \times M)$ due to marginal products.
-- Matching: $O(K^3)$ from Hungarian algorithm (small K keeps this manageable).
-- Typical regime: $K=16$, $M=30$, $N≈40$.
-- Use vectorized NumPy + cached reference loading to stay within wall-clock.
-
-## 8. Edge Cases & Robustness
-
-- **Missing references**: If no ground truth found, return `r_floor` for all K
-  and log `failed_ground_truth`.
-- **All invalid rollouts**: Entire group receives `r_floor`; downstream stats
-  show 0 validity and 0 matches.
-- **Numerical stability**: Smooth coverage uses log-space products and clamps
-  kernel values to $[0,1]$ to prevent `nan`.
-- **SMILES parsing errors**: Invalid RDKit molecules are treated as invalid
-  rollouts; errors are logged for debugging.
-- **PoseBusters optionality**: Keep disabled for throughput unless training
-  drifts; enabling raises compute cost but enforces structural sanity.
-
-## 9. Example Usage
-
-```python
-from molgen3D.training.grpo.grpo_reward_v3 import reward_function as reward_v3
-from molgen3D.training.grpo.config import Config
-from molgen3D.training.grpo.stats import RunStatistics
-from transformers import AutoTokenizer
-
-config = Config.from_yaml("configs/qwen3_v3_reward.yaml")
-stats = RunStatistics(output_dir="./outputs")
-tokenizer = AutoTokenizer.from_pretrained(config.model.tokenizer_path)
-
-rewards = reward_v3(
-    prompts=prompts,            # list[str], SMILES-tagged
-    completions=completions,    # list[str], conformer blocks
-    stats=stats,
-    tokenizer=tokenizer,
-    config=config,
-)
-```
-
-The resulting list contains one reward per completion, already aligned with the
-input order. These rewards feed directly into GRPO advantage estimation.
+This document describes the **current** “reward_v3” implementation you pasted (the refactored/profiling version). It is written from the *reward-design* perspective: what each term is trying to incentivize, how validity gating works, and how to interpret/tune the key hyperparameters.
 
 ---
 
-The V3 reward therefore couples dense precision pressure with group-aware
-diversity incentives and a hard GEOM-Drugs-aligned coverage gate, providing a
-single cohesive signal for training 3D molecular generators.
+## 1) What the reward is optimizing
+
+For each prompt (a molecule), the policy generates **K rollouts** (conformers). Let:
+
+- Prompt molecule (ground truth set): canonical SMILES `s`
+- Generated rollouts: $y_1,\dots,y_K$
+- Reference conformers for this molecule: $g_1,\dots,g_M$ (loaded from GEOM‑Drugs, capped by `max_ground_truths`)
+- RMSD distance matrix:
+
+```math
+D_{i,j} = \mathrm{RMSD}(y_i, g_j)
+```
+  (computed only for valid rollouts; invalid rows remain $+\infty$)
+
+The per-rollout total reward is:
+```math
+r_i =
+\begin{cases}
+r_{\text{floor}} & \text{if rollout } i \text{ is invalid}\\
+\lambda_{\text{qual}}\,r^{\text{qual}}_i + \lambda_{\text{smcov}}\,r^{\text{smcov}}_i + \lambda_{\text{match}}\,r^{\text{match}}_i & \text{otherwise}
+\end{cases}
+```
+
+So the model is pushed to:
+1) produce **chemically consistent** conformers for the right graph,  
+2) make each rollout **close** to some reference,  
+3) make the **set** of rollouts cover **many different** references (diversity/coverage under small K).
+
+---
+
+## 2) Validity gating (what counts as “eligible” for reward)
+
+A rollout is treated as valid only if it passes **all** of these:
+
+### 2.1 Conformer tag + RDKit parse
+- The completion must contain `"[CONFORMER]" ... "[/CONFORMER]"`.
+- `decode_cartesian_v2()` must succeed (RDKit molecule created).
+
+### 2.2 Graph match gate (hard)
+- The rollout is decoded to a SMILES string (via `strip_smiles(conformer_text)`).
+- `same_molecular_graph(canonical_smiles, generated_smiles)` must be **True**.
+
+If graph mismatch, the rollout gets `r_floor` (no point rewarding geometry for the wrong molecule).
+
+### 2.3 PoseBusters gate (configurable but hard when enabled)
+- If `grpo.posebusters.mode` is anything other than `"off"`, every **base-valid** rollout is checked with PoseBusters before geometry rewards are computed.
+- Rollouts that fail the selected PoseBusters suite (or cause PoseBusters to error) are marked invalid and receive `r_floor`.  
+- The metrics `pose/checked_rate`, `pose/pass_rate`, and `pose/error_rate` respectively track how many base-valid samples reached PoseBusters, how many of those passed, and what fraction errored.
+
+### 2.4 Finite RMSD gate (hard)
+Even if PoseBusters (or the base gate) passes, the rollout must have a **finite** $\min_j D_{i,j}$. If all RMSDs fail / are `inf`, the rollout is treated as invalid and gets `r_floor`.
+
+> Note on `hard_rmsd_gate`: in the current code, *finite RMSD is always required* for validity; the knob mainly controls logging/stats messaging. If you intended "graph-valid but no RMSD" to still be considered valid (with e.g. $r^{\mathrm{qual}}=0$), that requires a code change.
+
+---
+
+## 3) The three reward components
+
+### 3.1 Quality term $r^{\mathrm{qual}}$: "be close to *some* ground truth"
+For each rollout $i$, define:
+```math
+d_i = \min_j D_{i,j}
+```
+Then:
+```math
+r^{\text{qual}}_i = \exp(-d_i/\sigma)
+```
+- **Effect:** pushes each rollout toward *any* plausible conformer in the reference set.  
+- **$\sigma$** controls how quickly reward decays with RMSD (smaller $\sigma$ = harsher).
+
+---
+
+### 3.2 Smooth marginal coverage $r^{\mathrm{smcov}}$: "don't all crowd the same GT"
+This is the **group-aware** term. It rewards rollouts that contribute **new** coverage of the reference set *given what the other rollouts already cover*.
+
+Define a soft "hit kernel":
+```math
+K_{i,j} = \exp\!\left( -(D_{i,j}/\rho)^2 \right)
+```
+Soft probability reference $j$ is covered by the **set**:
+```math
+\text{soft\_cov}_j = 1 - \prod_{i=1}^{K} (1 - K_{i,j})
+```
+Marginal contribution of rollout $i$ for reference $j$:
+```math
+\Delta_{i,j} = K_{i,j}\prod_{i'\neq i}(1 - K_{i',j})
+```
+Rollout reward:
+```math
+r^{\text{smcov}}_i = \frac{1}{M}\sum_{j=1}^{M}\Delta_{i,j}
+```
+
+- **Intuition:** if a reference is already covered by other rollouts, the product term becomes small, so you get **little** marginal credit for also covering it. If it is *not* covered, you get **more** credit.
+- **$\rho$** controls the softness radius (larger $\rho$ = more forgiving distances contribute to coverage).
+
+---
+
+### 3.3 Hard matching bonus $r^{\mathrm{match}}$: "unique coverage under $\delta$"
+Define eligible edges if:
+```math
+D_{i,j} < \delta
+```
+Then compute a **max-cardinality one-to-one matching** (Hungarian assignment). This uses `scipy.optimize.linear_sum_assignment`. 
+
+Matched rollout shaping:
+```math
+r^{\text{match}}_i = \max\left(0,\ 1-\frac{D_{i,j}}{\delta}\right)
+```
+
+- **Effect:** directly rewards "unique hits" under a hard threshold $\delta$.
+- **$\delta$** should usually be aligned to the evaluation threshold you care about.
+
+---
+
+## 4) What gets logged (and how to interpret it)
+
+Metrics are emitted to W&B (when a `wandb.run` is active) under these keys:
+
+### Validity & gating
+- `gate/graph_match_rate`, `gate/rdkit_parse_rate`, `gate/base_valid_rate`, `gate/final_valid_rate`
+- `pose/checked_rate`, `pose/pass_rate`, `pose/error_rate`
+
+### Geometry quality
+- `rmsd/d_min_mean`, `rmsd/d_min_p50`, `rmsd/d_min_p90`
+- `rmsd/frac_under_delta`, `rmsd/frac_under_2delta`
+
+### Coverage & utilization
+- `cov/refs_hit_mean`, `cov/refs_hit_p50`, `cov/cov_ratio_mean`
+- `cov/unique_nearest_refs_mean`, `cov/nearest_collision_rate_mean`
+- `cov/valid_rollouts_mean`
+
+### Matching diagnostics
+- `match/num_matched_mean`, `match/max_possible_mean`, `match/efficiency_mean`
+- `match/matched_dist_p50`, `match/matched_dist_p90`
+- `match/eligible_edge_density`
+
+### Smooth marginal coverage
+- `smcov/soft_cov_mean`
+- `smcov/pct_gt_cov_gt_0p1`, `smcov/pct_gt_cov_gt_0p5`
+- `smcov/corr_with_refs_hit`
+
+### Reward decomposition
+- `reward/total_mean`, `reward/total_std`
+- `reward/comp_qual_mean`, `reward/comp_smcov_mean`, `reward/comp_match_mean`
+- `reward/comp_smcov_frac`
+
+### Optional diversity proxy
+- `div/pairwise_rmsd_p50`: median pairwise RMSD among PoseBusters+RMSD-valid rollouts (logged only when pairwise logging is enabled)
+
+---
+
+## 5) Hyperparameters: meaning + practical tuning guidance
+
+### 5.1 Reward-shape hyperparameters
+
+**`sigma` (quality sharpness)**  
+- Smaller = only very close conformers get meaningful $r^{\mathrm{qual}}$.  
+- Bigger = broader gradient signal but may tolerate sloppier geometry.  
+- Typical: 0.25–0.45.
+
+**`rho` (coverage softness radius)**  
+- Larger = broader "soft hits", stronger set-level shaping from farther RMSDs.  
+- Too large can make everything look covered (weak uniqueness pressure).  
+- Typical: 0.6–1.0.
+
+**`delta` (hard coverage threshold)**  
+- Too low → almost no eligible edges → `r_match` mostly 0.  
+- Too high → matching becomes easy but less meaningful.  
+- Typical: 0.75–0.85.
+
+**`lambda_*` (component weights)**  
+- `lambda_qual`: "find a plausible conformer"
+- `lambda_smcov`: "spread out across references"
+- `lambda_match`: "hard unique hits under $\delta$"
+
+A stable pattern: keep `lambda_qual` and `lambda_match` ~1, tune `lambda_smcov` (e.g., 2 → 8).
+
+**`r_floor` (invalid penalty)**  
+Typical: -0.5 to -1.0.
+
+**`max_ground_truths`**  
+Controls CPU cost $O(KM)$. Higher = richer target set but slower reward.
+
+---
+
+### 5.2 GRPO training hyperparameters (clip/LR intuition)
+
+In TRL’s GRPO, the key stability controls are the ratio clipping parameters in `GRPOConfig`:
+- `epsilon`: ratio clipping range  
+- `delta`: “target clipping” parameter  
+- `epsilon_high`: alternative upper clipping used in TR‑DPO style clipping
+
+Practical rule:
+- **Higher reward weights / higher variance rewards → lower LR and/or tighter clipping.**
+
+Suggested starting region:
+- `learning_rate`: **1e‑5 to 3e‑5**
+- clip range (your `epsilon_*`): **2e‑4 to 6e‑4**
+- `max_grad_norm`: 0.5–1.0
+- `temperature`: 0.8–1.2
+
+---
+
+## 6) How to verify smcov is helping (not inflating)
+
+When increasing `lambda_smcov` or `rho`, you want **at least two** of these to improve:
+
+- **Hard coverage improves:** `match/efficiency_mean` and `cov/refs_hit_mean` trend up
+- **Quality improves:** `rmsd/d_min_p50` / `rmsd/d_min_mean` trend down
+- **No collapse:** optional `div/pairwise_rmsd_p50` does not fall sharply
+
+If only `reward/comp_smcov_mean` rises while the others don’t move, smcov is likely being exploited as an easy soft term.
+
+---
+
+## 7) Implementation notes
+
+- Matching uses Hungarian assignment via `linear_sum_assignment` and is disabled if SciPy is missing. 
+- Reward is computed per prompt group (set-aware), then mapped back to the flat batch.
+- Optional profiling can log per-section CPU times to W&B.
+
+---
