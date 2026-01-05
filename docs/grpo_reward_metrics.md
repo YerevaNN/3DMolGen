@@ -39,6 +39,8 @@ what each metric measures and how to interpret its values during training.
 | `cov/cov_ratio_mean` | Normalized coverage = `refs_hit / M`. | **≥0.5** means at least half of the conformer set is reached; **<0.3** signals coverage collapse. |
 | `cov/unique_nearest_refs_mean` | Unique nearest reference count. | Should scale with valid rollouts; if it stays **near 1–2** while `valid_rollouts` is large, the sampler is collapsing. |
 | `cov/nearest_collision_rate_mean` | `1 - unique_refs / valid_rollouts`. | **≤0.3** healthy diversity; **0.3–0.6** mild collapse; **>0.6** severe collapse (most rollouts share the same nearest reference). |
+| `covdiff/cover_ratio_mean` | Fraction of GT references that are covered (<δ) by *any* rollout (averaged per prompt). | Track this to ensure the new coverage difference reward still hits a large portion of the reference ensemble. |
+| `covdiff/unique_cover_ratio_mean` | Fraction of GT references that are uniquely covered by exactly one rollout. | This approximates the “difference reward” mass—if it trends to zero the coverage term is no longer informative. |
 | `cov/valid_rollouts_mean` | Average valid rollouts per prompt. | Expect **≈K * final_valid_rate**; sudden drops mean gating is rejecting entire batches. |
 
 ## E. Matching Diagnostics

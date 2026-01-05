@@ -53,6 +53,8 @@ class GroupMetrics:
     cov_ratio: float
     unique_nearest_refs: int
     nearest_collision_rate: float
+    covdiff_cover_ratio: float
+    covdiff_unique_cover_ratio: float
     num_matched: int
     max_possible_matches: int
     match_efficiency: float
@@ -99,6 +101,8 @@ METRIC_KEYS: List[str] = [
     "cov/cov_ratio_mean",
     "cov/unique_nearest_refs_mean",
     "cov/nearest_collision_rate_mean",
+    "covdiff/cover_ratio_mean",
+    "covdiff/unique_cover_ratio_mean",
     "cov/valid_rollouts_mean",
     "match/num_matched_mean",
     "match/max_possible_mean",
@@ -249,7 +253,6 @@ def compute_group_reward(
     lambda_qual = float(getattr(grpo_cfg, "lambda_qual", 1.0))
     lambda_smcov = float(getattr(grpo_cfg, "lambda_smcov", 1.0))
     lambda_match = float(getattr(grpo_cfg, "lambda_match", 1.0))
-    smcov_scale = float(getattr(grpo_cfg, "smcov_scale", 50.0))
     r_floor = float(getattr(grpo_cfg, "r_floor", -1.0))
     hard_rmsd_gate = bool(getattr(grpo_cfg, "hard_rmsd_gate", DEFAULT_ENABLE_HARD_RMSD_GATE))
     rmsd_workers = int(getattr(grpo_cfg, "rmsd_workers", 0) or 0)
@@ -293,6 +296,8 @@ def compute_group_reward(
             cov_ratio=overrides.get("cov_ratio", 0.0),
             unique_nearest_refs=overrides.get("unique_nearest_refs", 0),
             nearest_collision_rate=overrides.get("nearest_collision_rate", 0.0),
+            covdiff_cover_ratio=overrides.get("covdiff_cover_ratio", float("nan")),
+            covdiff_unique_cover_ratio=overrides.get("covdiff_unique_cover_ratio", float("nan")),
             num_matched=overrides.get("num_matched", 0),
             max_possible_matches=overrides.get("max_possible_matches", 0),
             match_efficiency=overrides.get("match_efficiency", 0.0),
@@ -374,6 +379,29 @@ def compute_group_reward(
             ref_cache_key=ref_cache_key,
         )
 
+    num_references = distance_matrix.shape[1]
+    cover_ratio = float("nan")
+    unique_cover_ratio = float("nan")
+    if num_references > 0:
+        valid_rows = valid_mask.astype(bool, copy=False)
+        if np.any(valid_rows):
+            finite_distances = distance_matrix.astype(np.float32, copy=True)
+            finite_distances = np.where(np.isfinite(finite_distances), finite_distances, np.float32(np.inf))
+            finite_distances[~valid_rows, :] = np.float32(np.inf)
+            col_indices = np.arange(num_references, dtype=np.int64)
+            nearest_rollouts = np.argmin(finite_distances, axis=0)
+            best_distances = finite_distances[nearest_rollouts, col_indices]
+            second_distances = finite_distances.copy()
+            second_distances[nearest_rollouts, col_indices] = np.float32(np.inf)
+            second_best = np.min(second_distances, axis=0)
+            covered = best_distances < delta
+            cover_ratio = float(np.mean(covered))
+            uniquely_covered = covered & (second_best >= delta)
+            unique_cover_ratio = float(np.mean(uniquely_covered))
+        else:
+            cover_ratio = 0.0
+            unique_cover_ratio = 0.0
+
     min_distances = np.min(distance_matrix, axis=1)
     finite_mask = np.isfinite(min_distances)
     problematic_mask = mask_for_distance.astype(bool) & (~finite_mask)
@@ -395,7 +423,7 @@ def compute_group_reward(
             rho,
             return_details=True,
         )
-    r_smcov = raw_r_smcov * smcov_scale
+    r_smcov = raw_r_smcov
 
     with profile_section(profiler, "reward_qual"):
         r_qual = compute_quality_reward(distance_matrix, mask_for_distance, sigma)
@@ -527,6 +555,8 @@ def compute_group_reward(
         cov_ratio=cov_ratio,
         unique_nearest_refs=unique_nearest_refs,
         nearest_collision_rate=nearest_collision_rate,
+        covdiff_cover_ratio=cover_ratio,
+        covdiff_unique_cover_ratio=unique_cover_ratio,
         num_matched=num_matched,
         max_possible_matches=max_possible_matches,
         match_efficiency=match_efficiency,

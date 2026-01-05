@@ -704,57 +704,158 @@ def compute_quality_reward(D: np.ndarray, validity: np.ndarray, sigma: float) ->
         r_qual[valid_mask] = np.exp(-d_i[valid_mask] / sigma).astype(np.float32)
     return r_qual
 
+def _sigmoid(x: np.ndarray) -> np.ndarray:
+    x = x.astype(np.float32, copy=False)
+    return 1.0 / (1.0 + np.exp(-x))
 
 def compute_smooth_coverage_reward(
     D: np.ndarray,
     validity: np.ndarray,
     rho: float,
     return_details: bool = False,
+    # ---- New objective knobs (defaults chosen to match your current config) ----
+    delta: float = 0.75,                 # "covered" if min dist < delta (GEOM-style)
+    precision_weight: float = 0.15,      # small shaping to protect COV-P
+    unique_quality_weight: float = 0.25, # small tie-break: deeper under delta is better
 ) -> Tuple[np.ndarray, Tuple[float, List[float], np.ndarray]]:
+    """
+    Recall-focused replacement for the old smooth coverage.
+
+    `rho` acts as the sigmoid temperature for both the per-GT diagnostics and
+    the precision shaping term below (smaller values make the transition around
+    `delta` sharper).
+
+    Per rollout i (valid only):
+      r_i =
+        ( #GT uniquely covered by i / M )
+        + unique_quality_weight * ( sum_{g uniquely covered by i} (1 - d_best(g)/delta) / M )
+        + precision_weight * sigmoid((delta - min_g d(i,g)) / rho)
+
+    - "Uniquely covered" means: rollout i is the closest to GT g, best_d < delta, and second_best_d >= delta.
+      This is the exact difference-reward for hard δ coverage (directly aligns with COV-R).
+    - precision term is small and keeps rollouts near the GT manifold (helps COV-P).
+    - return_details: soft_cov is a smooth proxy per GT based on best distance (sigmoid around δ).
+    """
     K, M = D.shape
     if M == 0:
         empty = np.zeros(K, dtype=np.float32)
         default = (float("nan"), [float("nan")] * 3, EMPTY_FLOAT32)
-        return empty, default if return_details else (empty, default)[0]
+        return (empty, default) if return_details else (empty, default)[0]
 
     rho = max(float(rho), 1e-8)
-    valid_rows = validity == 1
-    K_matrix = np.zeros((K, M), dtype=np.float32)
-    if np.any(valid_rows):
-        D_valid = D[valid_rows].astype(np.float32, copy=False)
-        D_valid = np.where(np.isfinite(D_valid), D_valid, np.inf)
-        exponent = -((D_valid / rho) ** 2)
-        K_valid = np.exp(exponent)
-        K_valid = np.where(np.isfinite(K_valid), K_valid, 0.0)
-        K_matrix[valid_rows, :] = K_valid
+    delta = float(delta)
 
-    one_minus = np.clip(1.0 - K_matrix, 0.0, 1.0)
-    zero_mask = one_minus <= 1e-12
-    one_minus_safe = np.where(zero_mask, 1.0, one_minus)
-    log_one_minus = np.log(one_minus_safe.astype(np.float64))
-    log_prod_safe = np.sum(log_one_minus, axis=0, keepdims=True)
-    zero_counts = zero_mask.sum(axis=0, keepdims=True)
+    valid_rows = (validity == 1)
+    r = np.zeros(K, dtype=np.float32)
 
-    prod_excl = np.exp(log_prod_safe - log_one_minus)
-    has_zero = zero_counts > 0
-    prod_excl = np.where(has_zero, 0.0, prod_excl)
-    only_zero = (zero_counts == 1) & zero_mask
-    if np.any(only_zero):
-        prod_excl = np.where(only_zero, np.exp(log_prod_safe), prod_excl)
+    if not np.any(valid_rows):
+        soft_cov = np.zeros(M, dtype=np.float32)
+        details = (0.0, [0.0, 0.0, 0.0], soft_cov)
+        return (r, details) if return_details else (r, details)[0]
 
-    Delta = K_matrix * prod_excl
-    r_smcov = (Delta.sum(axis=1) / M).astype(np.float32)
-    r_smcov[~valid_rows] = 0.0
+    # Mask invalid rows and non-finite distances
+    Dv = D.astype(np.float32, copy=True)
+    Dv[~valid_rows, :] = np.inf
+    Dv = np.where(np.isfinite(Dv), Dv, np.inf)
 
-    soft_cov = 1.0 - np.prod(one_minus, axis=0)
-    soft_cov = np.clip(soft_cov, 0.0, 1.0)
+    # ---------- (A) Recall: hard-δ difference reward (unique GT coverage) ----------
+    best_i = np.argmin(Dv, axis=0)                   # [M]
+    best_d = Dv[best_i, np.arange(M)]                # [M]
+
+    Dv2 = Dv.copy()
+    Dv2[best_i, np.arange(M)] = np.inf
+    second_d = np.min(Dv2, axis=0)                   # [M]
+
+    covered = best_d < delta
+    uniquely_covered = covered & (second_d >= delta)
+
+    if np.any(uniquely_covered):
+        winners = best_i[uniquely_covered]           # rollout indices that uniquely cover GTs
+
+        # 1) main recall credit: +1 per uniquely covered GT
+        cnt = np.bincount(winners, minlength=K).astype(np.float32)
+        r += cnt / float(M)
+
+        # 2) tie-break: deeper under delta is better (prevents "barely under δ" gaming)
+        q = 1.0 - (best_d[uniquely_covered] / delta) # in (0,1]
+        q = np.clip(q, 0.0, 1.0).astype(np.float32, copy=False)
+        q_sum = np.bincount(winners, weights=q, minlength=K).astype(np.float32)
+        r += unique_quality_weight * (q_sum / float(M))
+
+    # ---------- (B) Precision shaping: keep each rollout close to some GT ----------
+    # min distance per rollout to any GT
+    min_d = np.min(Dv, axis=1)                       # [K]
+    prec = _sigmoid((delta - min_d) / rho)           # ~1 if <<delta, ~0 if >>delta
+    prec = np.where(np.isfinite(prec), prec, 0.0).astype(np.float32, copy=False)
+    prec[~valid_rows] = 0.0
+    r += precision_weight * prec
+
+    r[~valid_rows] = 0.0
+
+    # ---------- Details: per-GT smooth "coveredness" proxy ----------
+    # Based only on the best rollout for each GT.
+    soft_cov = _sigmoid((delta - best_d) / rho)
+    soft_cov = np.where(np.isfinite(soft_cov), soft_cov, 0.0).astype(np.float32, copy=False)
+
     soft_mean = float(np.mean(soft_cov)) if soft_cov.size > 0 else float("nan")
     soft_pcts = [
         float(np.mean(soft_cov > thresh)) if soft_cov.size > 0 else float("nan")
         for thresh in (0.1, 0.3, 0.5)
     ]
-    details = (soft_mean, soft_pcts, soft_cov.astype(np.float32))
-    return r_smcov, details if return_details else (r_smcov, details)[0]
+    details = (soft_mean, soft_pcts, soft_cov)
+
+    return (r, details) if return_details else (r, details)[0]
+
+# def compute_smooth_coverage_reward(
+#     D: np.ndarray,
+#     validity: np.ndarray,
+#     rho: float,
+#     return_details: bool = False,
+# ) -> Tuple[np.ndarray, Tuple[float, List[float], np.ndarray]]:
+#     K, M = D.shape
+#     if M == 0:
+#         empty = np.zeros(K, dtype=np.float32)
+#         default = (float("nan"), [float("nan")] * 3, EMPTY_FLOAT32)
+#         return empty, default if return_details else (empty, default)[0]
+
+#     rho = max(float(rho), 1e-8)
+#     valid_rows = validity == 1
+#     K_matrix = np.zeros((K, M), dtype=np.float32)
+#     if np.any(valid_rows):
+#         D_valid = D[valid_rows].astype(np.float32, copy=False)
+#         D_valid = np.where(np.isfinite(D_valid), D_valid, np.inf)
+#         exponent = -((D_valid / rho) ** 2)
+#         K_valid = np.exp(exponent)
+#         K_valid = np.where(np.isfinite(K_valid), K_valid, 0.0)
+#         K_matrix[valid_rows, :] = K_valid
+
+#     one_minus = np.clip(1.0 - K_matrix, 0.0, 1.0)
+#     zero_mask = one_minus <= 1e-12
+#     one_minus_safe = np.where(zero_mask, 1.0, one_minus)
+#     log_one_minus = np.log(one_minus_safe.astype(np.float64))
+#     log_prod_safe = np.sum(log_one_minus, axis=0, keepdims=True)
+#     zero_counts = zero_mask.sum(axis=0, keepdims=True)
+
+#     prod_excl = np.exp(log_prod_safe - log_one_minus)
+#     has_zero = zero_counts > 0
+#     prod_excl = np.where(has_zero, 0.0, prod_excl)
+#     only_zero = (zero_counts == 1) & zero_mask
+#     if np.any(only_zero):
+#         prod_excl = np.where(only_zero, np.exp(log_prod_safe), prod_excl)
+
+#     Delta = K_matrix * prod_excl
+#     r_smcov = (Delta.sum(axis=1) / M).astype(np.float32)
+#     r_smcov[~valid_rows] = 0.0
+
+#     soft_cov = 1.0 - np.prod(one_minus, axis=0)
+#     soft_cov = np.clip(soft_cov, 0.0, 1.0)
+#     soft_mean = float(np.mean(soft_cov)) if soft_cov.size > 0 else float("nan")
+#     soft_pcts = [
+#         float(np.mean(soft_cov > thresh)) if soft_cov.size > 0 else float("nan")
+#         for thresh in (0.1, 0.3, 0.5)
+#     ]
+#     details = (soft_mean, soft_pcts, soft_cov.astype(np.float32))
+#     return r_smcov, details if return_details else (r_smcov, details)[0]
 
 
 def compute_matching_reward(
@@ -905,6 +1006,8 @@ def summarize_batch_metrics(
     cov_ratio_values = [m.cov_ratio for m in metrics_list]
     unique_refs_values = [float(m.unique_nearest_refs) for m in metrics_list]
     collision_rates = [m.nearest_collision_rate for m in metrics_list]
+    covdiff_cover_ratio_values = [m.covdiff_cover_ratio for m in metrics_list]
+    covdiff_unique_cover_ratio_values = [m.covdiff_unique_cover_ratio for m in metrics_list]
     valid_rollout_values = [float(m.valid_rollouts) for m in metrics_list]
 
     num_matched_values = [float(m.num_matched) for m in metrics_list]
@@ -960,6 +1063,8 @@ def summarize_batch_metrics(
     result["cov/cov_ratio_mean"] = _safe_mean(cov_ratio_values)
     result["cov/unique_nearest_refs_mean"] = _safe_mean(unique_refs_values)
     result["cov/nearest_collision_rate_mean"] = _safe_mean(collision_rates)
+    result["covdiff/cover_ratio_mean"] = _safe_mean(covdiff_cover_ratio_values)
+    result["covdiff/unique_cover_ratio_mean"] = _safe_mean(covdiff_unique_cover_ratio_values)
     result["cov/valid_rollouts_mean"] = _safe_mean(valid_rollout_values)
 
     result["match/num_matched_mean"] = _safe_mean(num_matched_values)
