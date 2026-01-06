@@ -22,7 +22,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 
 # from utils import parse_molecule_with_coordinates
 from molgen3D.data_processing.utils import decode_cartesian_raw
-from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2, strip_smiles, decode_cartesian_binned
+from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2, strip_smiles, decode_cartesian_binned, get_bins_for_coords
 from molgen3D.evaluation.utils import (
     extract_between,
     same_molecular_graph,
@@ -104,6 +104,11 @@ def save_results(results_path, generations, stats):
         results_file_txt.write(f"{stats=}")
 
 def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id, binned: bool):
+    # Create bins for binned decoding (must match encoding bins)
+    bins = None
+    if binned:
+        ranges = [(-21.0, 21.0), (-21.0, 21.0), (-21.0, 21.0)]
+        bins = get_bins_for_coords(ranges)
     generations = defaultdict(list)
     stats = {"smiles_mismatch":0, "mol_parse_fail" :0, "no_eos":0}
     
@@ -154,7 +159,7 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id,
             else:
                 try:
                     if binned:
-                        mol_obj = decode_cartesian_binned(generated_conformer)
+                        mol_obj = decode_cartesian_binned(generated_conformer, bins)
                     else:
                         mol_obj = decode_cartesian_v2(generated_conformer)
                     # logger.info(f"smiles match: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
