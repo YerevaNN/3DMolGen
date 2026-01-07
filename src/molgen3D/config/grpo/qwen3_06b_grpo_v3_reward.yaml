@@ -26,13 +26,14 @@ grpo:
   enable_posebusters: true
   epsilon_high: 0.0012
   epsilon_low: 5e-4
-  grad_acc_steps: 2
+  grad_acc_steps: 4
   importance_sampling_level: sequence
   lambda_match: 0.0
   lambda_qual: 0.0
   lambda_smcov: 5.0
-  learning_rate: 8.0e-05
-  log_distance_samples_per_group: 64
+  scale_rewards: none  # Disable std-scaling in GRPO advantages
+  learning_rate: 6.0e-05
+  log_distance_samples_per_group: 32
   max_grad_norm: 1.0
   max_ground_truths: 30
   max_steps: 2000
@@ -40,7 +41,7 @@ grpo:
   num_generations: 16
   num_iterations: 1
   output_base_dir: ./grpo_outputs
-  pairwise_rmsd_log_every: 50
+  pairwise_rmsd_log_every: 200
   per_device_batch_size: 16
   posebusters:
     chunk_size: 16
@@ -50,13 +51,15 @@ grpo:
   r_floor: -1.0
   reward_strategy: v3
   rho: 0.07  # Soft coverage temperature for sigmoid diagnostics/precision
+  smcov_precision_weight: 0.08  # Precision shaping lever inside smooth coverage term
+  smcov_unique_quality_weight: 0.2  # Depth/unique-quality shaping weight
   rmsd_const: 0.75
   scheduler: cosine
   seed: 1
   sigma: 0.3
   steps_per_generation: 8
   temperature: 1.0
-  warmup_ratio: 0.05
+  warmup_ratio: 0.03
   weight_decay: 0.0
 model:
   checkpoint_path: /nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b/251210-1955-d79f-qwen3_06b_pre_4e_144effb/step-80000-hf/
@@ -73,7 +76,7 @@ processing:
   eos_token_id: 151672
 run:
   log_level: INFO
-  name: qwen3_v3_125_rec-div_scale50_rho0.3
+  name: qwen3_v3_125_rec-first
 trainer:
   attn_implementation: flash_attention_2
   log_on_each_node: false

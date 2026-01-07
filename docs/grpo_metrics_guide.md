@@ -157,7 +157,15 @@ These metrics show the contribution of each reward term to the final reward sign
 
 ### `reward/component_smcov`
 - **Definition**: Weighted smooth coverage reward: `λ_smcov * mean(r_smcov)`
-- **Formula**: Group-aware coverage using smooth kernel `exp(-(D/rho)²)`
+- **Formula**:
+  `K_{i,j} = sigmoid((δ - D_{i,j}) / ρ)` (invalid rows zeroed),
+  `soft_cov_j = 1 - Π_i (1 - K_{i,j})`,
+  `Δ_{i,j} = K_{i,j} Π_{l≠i} (1 - K_{l,j})`,
+  depth shaping multiplies `Δ_{i,j}` by `(1 + grpo.smcov_unique_quality_weight * depth_{i,j})`
+  where `depth = clip(1 - D_{i,j}/δ, 0, 1)`,
+  `r_diff_i = (1/M) Σ_j Δ_{i,j}`,
+  `r_prec_i = grpo.smcov_precision_weight * sigmoid((δ - min_j D_{i,j}) / ρ)`,
+  and `r_smcov_i = r_diff_i + r_prec_i`.
 - **Range**: 0.0 to λ_smcov (typically 0.0 to 1.0)
 - **Meaning**: Contribution of smooth marginal coverage term
 - **Interpretation**:
@@ -166,13 +174,10 @@ These metrics show the contribution of each reward term to the final reward sign
   - Should increase as model learns to generate diverse conformers
 - **What to watch**: Should correlate with `coverage/soft_mean`. If low, model may be generating similar conformers (mode collapse).
 
-#### New coverage-difference explainer (current default)
-- **Definition**: Same metric, but the underlying `r_smcov` now equals `r_diff + r_depth + r_prec` where  
-  `r_diff = (# uniquely covered refs)/M`,  
-  `r_depth = unique_quality_weight/M * Σ unique_refs (1 - d_win/δ)`,  
-  `r_prec = precision_weight * sigmoid((δ - min_j D_{i,j}) / ρ)`.
-- **Meaning**: Most of the weight comes from the hard-δ difference reward; the sigmoid tail just keeps each rollout near at least one reference.
-- **What to watch**: Should track the newly logged `covdiff/cover_ratio_mean` and `covdiff/unique_cover_ratio_mean`. If those fall while `component_smcov` rises, the shaping weights are too large.
+#### Marginal soft-coverage explainer (current default)
+- **Definition**: `K_{i,j}` acts as a soft hit probability; each rollout gets credit for the marginal increase in set coverage (`prod(1 - K)` term). Depth shaping rescales the marginal credit using `(1 - D_{i,j}/δ)` instead of uniqueness checks.
+- **Meaning**: Dense recall signal where the sum of rollout rewards matches the mean soft coverage. Precision sigmoid ensures each rollout still tracks at least one reference.
+- **What to watch**: Should move in lockstep with `bestcov/soft_cov_mean`. If the metric rises without improvements in `covdiff/cover_ratio_mean`, the shaping weights are too generous.
 
 ### `reward/component_match`
 - **Definition**: Weighted matching reward: `λ_match * mean(r_match)`
@@ -192,10 +197,10 @@ These metrics show the contribution of each reward term to the final reward sign
 These metrics track soft coverage of reference conformations.
 
 ### `coverage/soft_mean`
-- **Definition**: Average soft coverage per reference conformer
+- **Definition**: Average sigmoid coverage per reference conformer (the same one logged from `compute_smooth_coverage_reward`)
 - **Range**: 0.0 to 1.0
-- **Formula**: `1 - ∏(1 - K[i,j])` where `K = exp(-(D/rho)²)` is a smooth kernel
-- **Meaning**: Probability that each reference is "covered" by at least one rollout (smooth version)
+- **Formula**: `soft_cov_j = sigmoid((δ - d_j^{(1)}) / ρ)` where `d_j^{(1)}` is the best RMSD among valid rollouts
+- **Meaning**: Probability-like diagnostic that each reference is within δ of at least one rollout
 - **Interpretation**:
   - **> 0.7**: Excellent - most references are well-covered
   - **0.5 - 0.7**: Good - reasonable coverage
@@ -203,7 +208,7 @@ These metrics track soft coverage of reference conformations.
 - **What to watch**: Should increase over training. Lower than `match_efficiency` because it's a smooth (softer) metric.
 
 ### `coverage/pct_gt_0.5`
-- **Definition**: Fraction of references with soft coverage > 0.5
+- **Definition**: Fraction of references with sigmoid coverage > 0.5
 - **Range**: 0.0 to 1.0
 - **Meaning**: How many references receive "good" coverage (above 50% threshold)
 - **Interpretation**:

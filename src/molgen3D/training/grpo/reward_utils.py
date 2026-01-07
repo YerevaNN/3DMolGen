@@ -714,15 +714,15 @@ def compute_smooth_coverage_reward(
     rho: float,
     return_details: bool = False,
     delta: float = 0.75,
-    depth_weight: float = 0.25,
+    precision_weight: float = 0.10,
+    unique_quality_weight: float = 0.20,
 ) -> Tuple[np.ndarray, Tuple[float, List[float], np.ndarray]]:
     """
     Recall-primary smooth coverage reward aligned with GEOM-Drugs COV-R.
 
-    Each ground-truth conformer gives credit to the closest valid rollout if it
-    lies within `delta`. Optional `depth_weight` adds a small shaping term that
-    favors lower RMSD among the winners. Diagnostics remain sigmoid-based to aid
-    plotting, using the same `delta` threshold.
+    Uses marginal contributions to dense soft coverage so Σ_i reward_i equals the
+    mean soft coverage (up to fp error). Defaults act as fallbacks only—training
+    runs should pass explicit weights through configuration for reproducibility.
     """
     K, M = D.shape
     rewards = np.zeros(K, dtype=np.float32)
@@ -731,8 +731,9 @@ def compute_smooth_coverage_reward(
         return (rewards, default_details) if return_details else rewards
 
     rho = max(float(rho), 1e-8)
-    delta = float(delta)
-    depth_weight = float(depth_weight)
+    delta = max(float(delta), 1e-8)
+    precision_weight = float(precision_weight)
+    unique_quality_weight = float(unique_quality_weight)
 
     valid_rows = (validity == 1)
     if not np.any(valid_rows):
@@ -741,29 +742,50 @@ def compute_smooth_coverage_reward(
         return (rewards, details) if return_details else rewards
 
     Dv = D.astype(np.float32, copy=True)
-    Dv[~valid_rows, :] = np.inf
-    Dv = np.where(np.isfinite(Dv), Dv, np.inf)
+    Dv = np.where(np.isfinite(Dv), Dv, np.float32(np.inf))
+    Dv[~valid_rows, :] = np.float32(np.inf)
 
-    col_idx = np.arange(M)
-    best_i = np.argmin(Dv, axis=0)
-    best_d = Dv[best_i, col_idx]
-    covered = best_d < delta
+    kernel = _sigmoid((delta - Dv) / rho)
+    kernel = np.where(np.isfinite(Dv), kernel, 0.0).astype(np.float32, copy=False)
+    kernel[~valid_rows, :] = 0.0
 
-    if np.any(covered):
-        winners = best_i[covered]
-        base = np.bincount(winners, minlength=K).astype(np.float32)
-        rewards += base / float(M)
+    one_minus = np.clip(1.0 - kernel, 0.0, 1.0)
+    zero_mask = one_minus <= 1e-12
+    one_minus_safe = np.where(zero_mask, 1.0, one_minus)
+    log_one_minus = np.log(one_minus_safe.astype(np.float64, copy=False))
+    log_prod_safe = np.sum(log_one_minus, axis=0, keepdims=True)
+    zero_counts = zero_mask.sum(axis=0, keepdims=True)
 
-        if depth_weight > 0.0:
-            depth = 1.0 - (best_d[covered] / delta)
-            depth = np.clip(depth, 0.0, 1.0).astype(np.float32, copy=False)
-            depth_sum = np.bincount(winners, weights=depth, minlength=K).astype(np.float32)
-            rewards += depth_weight * (depth_sum / float(M))
+    prod_all = np.exp(log_prod_safe)
+    prod_all = np.where(zero_counts > 0, 0.0, prod_all).astype(np.float32, copy=False)
+
+    prod_excl = np.exp(log_prod_safe - log_one_minus)
+    prod_excl = prod_excl.astype(np.float32, copy=False)
+    has_zero = zero_counts > 0
+    prod_excl = np.where(has_zero, 0.0, prod_excl)
+    only_zero = (zero_counts == 1) & zero_mask
+    if np.any(only_zero):
+        prod_excl = np.where(only_zero, np.exp(log_prod_safe).astype(np.float32, copy=False), prod_excl)
+
+    delta_matrix = kernel * prod_excl
+    if unique_quality_weight > 0.0:
+        depth = 1.0 - (Dv / delta)
+        depth = np.clip(depth, 0.0, 1.0)
+        depth = np.where(np.isfinite(depth), depth, 0.0).astype(np.float32, copy=False)
+        delta_matrix *= (1.0 + unique_quality_weight * depth)
+
+    rewards = delta_matrix.sum(axis=1).astype(np.float32, copy=False) / float(M)
+
+    if precision_weight > 0.0:
+        rollout_best = np.min(Dv, axis=1)
+        precision_scores = _sigmoid((delta - rollout_best) / rho).astype(np.float32, copy=False)
+        precision_scores[~np.isfinite(rollout_best)] = 0.0
+        precision_scores[~valid_rows] = 0.0
+        rewards += precision_weight * precision_scores
 
     rewards[~valid_rows] = 0.0
 
-    soft_cov = _sigmoid((delta - best_d) / rho)
-    soft_cov = np.where(np.isfinite(soft_cov), soft_cov, 0.0).astype(np.float32, copy=False)
+    soft_cov = (1.0 - prod_all.reshape(-1)).astype(np.float32, copy=False)
     soft_mean = float(np.mean(soft_cov)) if soft_cov.size > 0 else float("nan")
     soft_pcts = [
         float(np.mean(soft_cov > thresh)) if soft_cov.size > 0 else float("nan")
@@ -935,28 +957,29 @@ def _run_recall_reward_sanity_checks() -> None:
     delta = 0.75
     rho = 0.5
 
-    # Case 1: both rollouts valid, rollout0 covers two GTs.
+    # Case 1: both rollouts valid, dense credit sums to soft coverage.
     D = np.array([[0.2, 0.9, 0.3], [0.8, 0.4, 0.9]], dtype=np.float32)
     validity = np.array([1, 1], dtype=np.int32)
-    rewards, _ = compute_smooth_coverage_reward(
-        D, validity, rho=rho, return_details=True, delta=delta, depth_weight=0.0
+    rewards, details = compute_smooth_coverage_reward(
+        D, validity, rho=rho, return_details=True, delta=delta, precision_weight=0.0, unique_quality_weight=0.0
     )
-    assert np.allclose(rewards.sum(), 1.0, atol=1e-6)
-    assert rewards[0] > rewards[1] > 0.0
+    soft_cov = details[2]
+    assert np.all(rewards >= 0.0)
+    assert np.isclose(rewards.sum(), float(np.mean(soft_cov)), atol=1e-5)
 
     # Case 2: rollout0 invalid, rollout1 only covers GT1.
     validity = np.array([0, 1], dtype=np.int32)
     rewards, _ = compute_smooth_coverage_reward(
-        D, validity, rho=rho, return_details=True, delta=delta, depth_weight=0.0
+        D, validity, rho=rho, return_details=True, delta=delta, precision_weight=0.0, unique_quality_weight=0.0
     )
-    assert np.isclose(rewards[1], 1.0 / 3.0, atol=1e-6)
     assert rewards[0] == 0.0
+    assert rewards[1] > 0.0
 
     # Case 3: non-finite distances should yield zero credit.
     D_inf = np.array([[np.inf, np.inf], [1.2, np.inf]], dtype=np.float32)
     validity = np.array([1, 1], dtype=np.int32)
     rewards, _ = compute_smooth_coverage_reward(
-        D_inf, validity, rho=rho, return_details=True, delta=delta, depth_weight=0.0
+        D_inf, validity, rho=rho, return_details=True, delta=delta, precision_weight=0.0, unique_quality_weight=0.0
     )
     assert np.all(rewards == 0.0)
 

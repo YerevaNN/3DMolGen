@@ -260,10 +260,18 @@ def compute_group_reward(
     lambda_smcov = float(getattr(grpo_cfg, "lambda_smcov", 1.0))
     lambda_match = float(getattr(grpo_cfg, "lambda_match", 1.0))
     r_floor = float(getattr(grpo_cfg, "r_floor", -1.0))
-    smcov_depth_weight = float(getattr(grpo_cfg, "smcov_depth_weight", 0.25))
+    smcov_precision_weight = float(getattr(grpo_cfg, "smcov_precision_weight", 0.10))
+    smcov_unique_quality_weight = float(getattr(grpo_cfg, "smcov_unique_quality_weight", 0.20))
     hard_rmsd_gate = bool(getattr(grpo_cfg, "hard_rmsd_gate", DEFAULT_ENABLE_HARD_RMSD_GATE))
     rmsd_workers = int(getattr(grpo_cfg, "rmsd_workers", 0) or 0)
     empty_rewards = np.full(K, r_floor, dtype=np.float32)
+    r_qual = np.zeros(K, dtype=np.float32)
+    r_smcov = np.zeros(K, dtype=np.float32)
+    r_match = np.zeros(K, dtype=np.float32)
+    matched_pairs: List[Tuple[int, int]] = []
+    num_matched = 0
+    soft_cov_mean = float("nan")
+    soft_cov_values = EMPTY_FLOAT32
 
     rollout_mols, graph_mask, parsed_mask = parse_rollout_group(
         canonical_smiles,
@@ -428,34 +436,41 @@ def compute_group_reward(
             "quality/coverage rewards will be zero for them."
         )
         logger.warning(message if hard_rmsd_gate else message.replace("will be zero", "applying reward floor"))
-        valid_mask &= finite_mask
-        mask_for_distance = valid_mask.astype(np.int32, copy=False)
+        if hard_rmsd_gate:
+            valid_mask &= finite_mask
+            mask_for_distance = valid_mask.astype(np.int32, copy=False)
+        else:
+            mask_for_distance = (valid_mask & finite_mask).astype(np.int32, copy=False)
 
-    with profile_section(profiler, "reward_smcov"):
-        r_smcov, (soft_cov_mean, _soft_cov_pcts, soft_cov_values) = compute_smooth_coverage_reward(
-            distance_matrix,
-            mask_for_distance,
-            rho,
-            return_details=True,
-            delta=delta,
-            depth_weight=smcov_depth_weight,
-        )
+    if lambda_smcov != 0.0:
+        with profile_section(profiler, "reward_smcov"):
+            r_smcov, (soft_cov_mean, _soft_cov_pcts, soft_cov_values) = compute_smooth_coverage_reward(
+                distance_matrix,
+                mask_for_distance,
+                rho,
+                return_details=True,
+                delta=delta,
+                precision_weight=smcov_precision_weight,
+                unique_quality_weight=smcov_unique_quality_weight,
+            )
 
-    with profile_section(profiler, "reward_qual"):
-        r_qual = compute_quality_reward(distance_matrix, mask_for_distance, sigma)
+    if lambda_qual != 0.0:
+        with profile_section(profiler, "reward_qual"):
+            r_qual = compute_quality_reward(distance_matrix, mask_for_distance, sigma)
 
     eligible_matrix = valid_mask[:, None] & (distance_matrix < delta)
     refs_hit = int(np.count_nonzero(eligible_matrix.any(axis=0)))
     num_valid = int(np.count_nonzero(valid_mask))
     max_possible_matches = min(num_valid, refs_hit)
 
-    with profile_section(profiler, "reward_match"):
-        r_match, num_matched, _num_eligible_edges, matched_pairs = compute_matching_reward(
-            distance_matrix,
-            mask_for_distance,
-            delta,
-            eligible_matrix=eligible_matrix,
-        )
+    if lambda_match != 0.0:
+        with profile_section(profiler, "reward_match"):
+            r_match, num_matched, _num_eligible_edges, matched_pairs = compute_matching_reward(
+                distance_matrix,
+                mask_for_distance,
+                delta,
+                eligible_matrix=eligible_matrix,
+            )
 
     rewards = combine_rewards(
         r_qual,

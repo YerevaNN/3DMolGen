@@ -139,6 +139,14 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         steps_per_generation=config.grpo.steps_per_generation,
         seed=config.grpo.seed
     )
+    scale_rewards = getattr(config.grpo, "scale_rewards", None)
+    if isinstance(scale_rewards, str):
+        scale_rewards_value = scale_rewards.lower()
+    else:
+        scale_rewards_value = scale_rewards
+    if scale_rewards_value is not None:
+        setattr(training_args, "scale_rewards", scale_rewards_value)
+        logger.info("Set TRL scale_rewards=%s", scale_rewards_value)
 
     # Convert string dtype to torch dtype
     torch_dtype = get_torch_dtype(config.trainer.torch_dtype)
