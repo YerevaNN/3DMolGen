@@ -149,9 +149,12 @@ models:
       "1e": "step-13000"
 
   qw600_pre_binned:
-    root: "qwen3_06b/251230-0102-cf19-qwen3_06b_pre_4e_72effb"
+    root: "qwen3_06b/260105-1245-46b0-qwen3_06b_pre_4e_96effb_4kseq_binned"
     steps:
       "1e": "step-7300-hf"
+      "2e": "step-14600-hf"
+      "3e": "step-21900-hf"
+      "4e": "step-29200-hf"
 
   # ---------- GRPO / FINETUNED MODELS (same structure) ----------
 
