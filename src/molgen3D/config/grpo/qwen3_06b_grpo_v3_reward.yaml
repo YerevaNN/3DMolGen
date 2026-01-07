@@ -28,15 +28,14 @@ grpo:
   epsilon_low: 5e-4
   grad_acc_steps: 2
   importance_sampling_level: sequence
-  lambda_match: 0.5
-  lambda_qual: 7.0
-  lambda_smcov: 0.5
-  smcov_scale: 50
+  lambda_match: 0.0
+  lambda_qual: 0.0
+  lambda_smcov: 5.0
   learning_rate: 8.0e-05
   log_distance_samples_per_group: 64
   max_grad_norm: 1.0
   max_ground_truths: 30
-  max_steps: 3000
+  max_steps: 2000
   num_epochs: 1
   num_generations: 16
   num_iterations: 1
@@ -50,7 +49,7 @@ grpo:
     mode: geometry
   r_floor: -1.0
   reward_strategy: v3
-  rho: 0.5
+  rho: 0.07  # Soft coverage temperature for sigmoid diagnostics/precision
   rmsd_const: 0.75
   scheduler: cosine
   seed: 1
@@ -74,7 +73,7 @@ processing:
   eos_token_id: 151672
 run:
   log_level: INFO
-  name: qwen3_v3_05705_smcov-heav
+  name: qwen3_v3_125_rec-div_scale50_rho0.3
 trainer:
   attn_implementation: flash_attention_2
   log_on_each_node: false

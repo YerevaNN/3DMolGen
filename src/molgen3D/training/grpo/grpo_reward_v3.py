@@ -53,6 +53,12 @@ class GroupMetrics:
     cov_ratio: float
     unique_nearest_refs: int
     nearest_collision_rate: float
+    covdiff_cover_ratio: float
+    covdiff_unique_cover_ratio: float
+    covered_count: int
+    unique_covered_count: int
+    covered_ratio: float
+    unique_covered_ratio: float
     num_matched: int
     max_possible_matches: int
     match_efficiency: float
@@ -71,7 +77,7 @@ class GroupMetrics:
     comp_smcov_group_std: float
     comp_match_group_std: float
     reward_group_std: float
-    smcov_reward_corr: float
+    bestcov_reward_corr: float
     pose_checked: int
     pose_passed: int
     pose_errors: int
@@ -99,6 +105,10 @@ METRIC_KEYS: List[str] = [
     "cov/cov_ratio_mean",
     "cov/unique_nearest_refs_mean",
     "cov/nearest_collision_rate_mean",
+    "covdiff/cover_ratio_mean",
+    "covdiff/unique_cover_ratio_mean",
+    "covdiff/covered_ratio_mean",
+    "covdiff/unique_covered_ratio_mean",
     "cov/valid_rollouts_mean",
     "match/num_matched_mean",
     "match/max_possible_mean",
@@ -106,10 +116,10 @@ METRIC_KEYS: List[str] = [
     "match/matched_dist_p50",
     "match/matched_dist_p90",
     "match/eligible_edge_density",
-    "smcov/soft_cov_mean",
-    "smcov/pct_gt_cov_gt_0p1",
-    "smcov/pct_gt_cov_gt_0p5",
-    "smcov/corr_with_refs_hit",
+    "bestcov/soft_cov_mean",
+    "bestcov/pct_gt_cov_gt_0p1",
+    "bestcov/pct_gt_cov_gt_0p5",
+    "bestcov/corr_with_refs_hit",
     "reward/total_mean",
     "reward/total_std",
     "reward/comp_qual_mean",
@@ -122,7 +132,7 @@ METRIC_KEYS: List[str] = [
     "reward/smcov_group_std_mean",
     "reward/match_group_std_mean",
     "reward/group_std_mean",
-    "reward/smcov_rank_corr_mean",
+    "reward/bestcov_rank_corr_mean",
     "reward/comp_smcov_frac",
     "div/pairwise_rmsd_p50",
 ]
@@ -249,8 +259,8 @@ def compute_group_reward(
     lambda_qual = float(getattr(grpo_cfg, "lambda_qual", 1.0))
     lambda_smcov = float(getattr(grpo_cfg, "lambda_smcov", 1.0))
     lambda_match = float(getattr(grpo_cfg, "lambda_match", 1.0))
-    smcov_scale = float(getattr(grpo_cfg, "smcov_scale", 50.0))
     r_floor = float(getattr(grpo_cfg, "r_floor", -1.0))
+    smcov_depth_weight = float(getattr(grpo_cfg, "smcov_depth_weight", 0.25))
     hard_rmsd_gate = bool(getattr(grpo_cfg, "hard_rmsd_gate", DEFAULT_ENABLE_HARD_RMSD_GATE))
     rmsd_workers = int(getattr(grpo_cfg, "rmsd_workers", 0) or 0)
     empty_rewards = np.full(K, r_floor, dtype=np.float32)
@@ -293,6 +303,12 @@ def compute_group_reward(
             cov_ratio=overrides.get("cov_ratio", 0.0),
             unique_nearest_refs=overrides.get("unique_nearest_refs", 0),
             nearest_collision_rate=overrides.get("nearest_collision_rate", 0.0),
+            covdiff_cover_ratio=overrides.get("covdiff_cover_ratio", float("nan")),
+            covdiff_unique_cover_ratio=overrides.get("covdiff_unique_cover_ratio", float("nan")),
+            covered_count=overrides.get("covered_count", 0),
+            unique_covered_count=overrides.get("unique_covered_count", 0),
+            covered_ratio=overrides.get("covered_ratio", 0.0),
+            unique_covered_ratio=overrides.get("unique_covered_ratio", 0.0),
             num_matched=overrides.get("num_matched", 0),
             max_possible_matches=overrides.get("max_possible_matches", 0),
             match_efficiency=overrides.get("match_efficiency", 0.0),
@@ -311,7 +327,7 @@ def compute_group_reward(
             comp_smcov_group_std=overrides.get("comp_smcov_group_std", float("nan")),
             comp_match_group_std=overrides.get("comp_match_group_std", float("nan")),
             reward_group_std=overrides.get("reward_group_std", float("nan")),
-            smcov_reward_corr=overrides.get("smcov_reward_corr", float("nan")),
+            bestcov_reward_corr=overrides.get("bestcov_reward_corr", float("nan")),
             pose_checked=overrides.get("pose_checked", 0),
             pose_passed=overrides.get("pose_passed", 0),
             pose_errors=overrides.get("pose_errors", 0),
@@ -374,6 +390,33 @@ def compute_group_reward(
             ref_cache_key=ref_cache_key,
         )
 
+    num_references = distance_matrix.shape[1]
+    cover_ratio = float("nan")
+    unique_cover_ratio = float("nan")
+    covered_count = 0
+    unique_covered_count = 0
+    if num_references > 0:
+        valid_rows = valid_mask.astype(bool, copy=False)
+        if np.any(valid_rows):
+            finite_distances = distance_matrix.astype(np.float32, copy=True)
+            finite_distances = np.where(np.isfinite(finite_distances), finite_distances, np.float32(np.inf))
+            finite_distances[~valid_rows, :] = np.float32(np.inf)
+            col_indices = np.arange(num_references, dtype=np.int64)
+            nearest_rollouts = np.argmin(finite_distances, axis=0)
+            best_distances = finite_distances[nearest_rollouts, col_indices]
+            second_distances = finite_distances.copy()
+            second_distances[nearest_rollouts, col_indices] = np.float32(np.inf)
+            second_best = np.min(second_distances, axis=0)
+            covered = best_distances < delta
+            covered_count = int(np.count_nonzero(covered))
+            cover_ratio = float(np.mean(covered))
+            uniquely_covered = covered & (second_best >= delta)
+            unique_covered_count = int(np.count_nonzero(uniquely_covered))
+            unique_cover_ratio = float(np.mean(uniquely_covered))
+        else:
+            cover_ratio = 0.0
+            unique_cover_ratio = 0.0
+
     min_distances = np.min(distance_matrix, axis=1)
     finite_mask = np.isfinite(min_distances)
     problematic_mask = mask_for_distance.astype(bool) & (~finite_mask)
@@ -389,13 +432,14 @@ def compute_group_reward(
         mask_for_distance = valid_mask.astype(np.int32, copy=False)
 
     with profile_section(profiler, "reward_smcov"):
-        raw_r_smcov, (soft_cov_mean, _soft_cov_pcts, soft_cov_values) = compute_smooth_coverage_reward(
+        r_smcov, (soft_cov_mean, _soft_cov_pcts, soft_cov_values) = compute_smooth_coverage_reward(
             distance_matrix,
             mask_for_distance,
             rho,
             return_details=True,
+            delta=delta,
+            depth_weight=smcov_depth_weight,
         )
-    r_smcov = raw_r_smcov * smcov_scale
 
     with profile_section(profiler, "reward_qual"):
         r_qual = compute_quality_reward(distance_matrix, mask_for_distance, sigma)
@@ -439,6 +483,7 @@ def compute_group_reward(
             rollout_mols,
             valid_mask,
             max_samples=max_pairs,
+            rng=rng,
         )
     else:
         pairwise_dists = EMPTY_FLOAT32
@@ -494,9 +539,9 @@ def compute_group_reward(
     comp_qual_group_std = _finite_std(r_qual[valid_mask]) if valid_rollouts > 0 else float("nan")
     comp_smcov_group_std = _finite_std(r_smcov[valid_mask]) if valid_rollouts > 0 else float("nan")
     comp_match_group_std = _finite_std(r_match[valid_mask]) if valid_rollouts > 0 else float("nan")
-    reward_group_std = _finite_std(rewards) if rewards.size > 0 else float("nan")
+    reward_group_std = _finite_std(rewards[valid_mask]) if valid_rollouts > 0 else float("nan")
     corr_mask = valid_mask & np.isfinite(r_smcov) & np.isfinite(rewards)
-    smcov_reward_corr = (
+    bestcov_reward_corr = (
         _spearman_corr(r_smcov[corr_mask], rewards[corr_mask]) if np.count_nonzero(corr_mask) >= 2 else float("nan")
     )
 
@@ -527,6 +572,12 @@ def compute_group_reward(
         cov_ratio=cov_ratio,
         unique_nearest_refs=unique_nearest_refs,
         nearest_collision_rate=nearest_collision_rate,
+        covdiff_cover_ratio=cover_ratio,
+        covdiff_unique_cover_ratio=unique_cover_ratio,
+        covered_count=covered_count,
+        unique_covered_count=unique_covered_count,
+        covered_ratio=cover_ratio,
+        unique_covered_ratio=unique_cover_ratio,
         num_matched=num_matched,
         max_possible_matches=max_possible_matches,
         match_efficiency=match_efficiency,
@@ -545,7 +596,7 @@ def compute_group_reward(
         comp_smcov_group_std=comp_smcov_group_std,
         comp_match_group_std=comp_match_group_std,
         reward_group_std=reward_group_std,
-        smcov_reward_corr=smcov_reward_corr,
+        bestcov_reward_corr=bestcov_reward_corr,
         pose_checked=pose_checked,
         pose_passed=pose_passed,
         pose_errors=pose_errors,

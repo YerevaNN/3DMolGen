@@ -166,6 +166,14 @@ These metrics show the contribution of each reward term to the final reward sign
   - Should increase as model learns to generate diverse conformers
 - **What to watch**: Should correlate with `coverage/soft_mean`. If low, model may be generating similar conformers (mode collapse).
 
+#### New coverage-difference explainer (current default)
+- **Definition**: Same metric, but the underlying `r_smcov` now equals `r_diff + r_depth + r_prec` where  
+  `r_diff = (# uniquely covered refs)/M`,  
+  `r_depth = unique_quality_weight/M * Σ unique_refs (1 - d_win/δ)`,  
+  `r_prec = precision_weight * sigmoid((δ - min_j D_{i,j}) / ρ)`.
+- **Meaning**: Most of the weight comes from the hard-δ difference reward; the sigmoid tail just keeps each rollout near at least one reference.
+- **What to watch**: Should track the newly logged `covdiff/cover_ratio_mean` and `covdiff/unique_cover_ratio_mean`. If those fall while `component_smcov` rises, the shaping weights are too large.
+
 ### `reward/component_match`
 - **Definition**: Weighted matching reward: `λ_match * mean(r_match)`
 - **Formula**: `λ_match * (1 - D[i,j]/delta)` for matched pairs, 0 otherwise

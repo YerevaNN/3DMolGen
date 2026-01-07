@@ -39,6 +39,8 @@ what each metric measures and how to interpret its values during training.
 | `cov/cov_ratio_mean` | Normalized coverage = `refs_hit / M`. | **≥0.5** means at least half of the conformer set is reached; **<0.3** signals coverage collapse. |
 | `cov/unique_nearest_refs_mean` | Unique nearest reference count. | Should scale with valid rollouts; if it stays **near 1–2** while `valid_rollouts` is large, the sampler is collapsing. |
 | `cov/nearest_collision_rate_mean` | `1 - unique_refs / valid_rollouts`. | **≤0.3** healthy diversity; **0.3–0.6** mild collapse; **>0.6** severe collapse (most rollouts share the same nearest reference). |
+| `covdiff/cover_ratio_mean` | Fraction of GT references that are covered (<δ) by *any* rollout (averaged per prompt). | Track this to ensure the new coverage difference reward still hits a large portion of the reference ensemble. |
+| `covdiff/unique_cover_ratio_mean` | Fraction of GT references that are uniquely covered by exactly one rollout. | This approximates the “difference reward” mass—if it trends to zero the coverage term is no longer informative. |
 | `cov/valid_rollouts_mean` | Average valid rollouts per prompt. | Expect **≈K * final_valid_rate**; sudden drops mean gating is rejecting entire batches. |
 
 ## E. Matching Diagnostics
@@ -58,6 +60,20 @@ what each metric measures and how to interpret its values during training.
 | `smcov/soft_cov_mean` | Average soft coverage (smooth kernel) over the reference set. | Higher means references are broadly covered even if no exact match exists. |
 | `smcov/pct_gt_cov_gt_0p1`, `smcov/pct_gt_cov_gt_0p5` | Fraction of references with soft coverage exceeding 0.1 / 0.5. | Used to see how many references receive strong signal versus just weak contributions. |
 | `smcov/corr_with_refs_hit` | Pearson correlation between `refs_hit` and `smcov` contribution per group. | Positive correlation means the smooth coverage reward aligns with actual discrete hits. |
+
+### New coverage-difference explainer (current reward path)
+
+The present code keeps the original noisy-OR kernel available while defaulting to a hard-δ difference reward. For each reference $j$ let $d^{(1)}_j = \min_i D_{i,j}$, $i^\star(j) = \arg\min_i D_{i,j}$, $d^{(2)}_j = \min_{i \ne i^\star(j)} D_{i,j}$, and define
+```math
+\text{unique}_j = \mathbf{1}[d^{(1)}_j < \delta \ \wedge\ d^{(2)}_j \ge \delta].
+```
+The smooth-coverage component per rollout becomes
+```math
+r^{\text{smcov}}_i = \frac{1}{M}\sum_{j: i^\star(j)=i} \text{unique}_j
+  + \frac{\text{unique\_quality\_weight}}{M} \sum_{j: i^\star(j)=i} \text{unique}_j \left(1 - \frac{d^{(1)}_j}{\delta}\right)
+  + \text{precision\_weight} \cdot \sigma\!\left(\frac{\delta - \min_j D_{i,j}}{\rho}\right),
+```
+with $\sigma(x)=1/(1+e^{-x})$. The diagnostic `smcov/*` metrics continue to report the soft proxy (now based on that sigmoid), while `covdiff/*` expose the discrete coverage ratios that drive the new reward.
 
 ## G. Reward Decomposition
 

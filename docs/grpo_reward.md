@@ -99,6 +99,47 @@ r^{\text{smcov}}_i = \frac{1}{M}\sum_{j=1}^{M}\Delta_{i,j}
 - **Intuition:** if a reference is already covered by other rollouts, the product term becomes small, so you get **little** marginal credit for also covering it. If it is *not* covered, you get **more** credit.
 - **$\rho$** controls the softness radius (larger $\rho$ = more forgiving distances contribute to coverage).
 
+#### New hard-δ coverage difference variant (current implementation)
+The code that is now enabled keeps the old definition intact for backward compatibility while adding a **recall-aligned difference reward** that exactly mirrors the COV-R objective.
+
+Let
+```math
+d^{(1)}_j = \min_i D_{i,j}, \qquad i^\star(j) = \arg\min_i D_{i,j},
+```
+with ties broken arbitrarily, and
+```math
+d^{(2)}_j = \min_{i \ne i^\star(j)} D_{i,j}
+```
+(taken as $+\infty$ if a single rollout remains valid). Define the indicators
+```math
+\text{covered}_j = \mathbf{1}[d^{(1)}_j < \delta], \qquad
+\text{unique}_j = \mathbf{1}[d^{(1)}_j < \delta \ \wedge\ d^{(2)}_j \ge \delta].
+```
+
+Each uniquely covered reference grants all of its credit to its winning rollout:
+```math
+r^{\text{diff}}_i = \frac{1}{M}\sum_{j : i^\star(j)=i} \text{unique}_j.
+```
+
+Two small shaping terms keep the signal smooth:
+
+1. **Depth bonus** (weight `unique_quality_weight`):
+```math
+r^{\text{depth}}_i = \frac{\text{unique\_quality\_weight}}{M} \sum_{j : i^\star(j)=i} \text{unique}_j \left(1 - \frac{d^{(1)}_j}{\delta}\right).
+```
+
+2. **Precision sigmoid** (weight `precision_weight`, temperature $\rho$):
+```math
+r^{\text{prec}}_i = \text{precision\_weight} \cdot \sigma\!\left(\frac{\delta - \min_j D_{i,j}}{\rho}\right), \qquad
+\sigma(x) = \frac{1}{1 + e^{-x}}.
+```
+
+The final smooth-coverage reward equals
+```math
+r^{\text{smcov}}_i = r^{\text{diff}}_i + r^{\text{depth}}_i + r^{\text{prec}}_i.
+```
+Uniquely covering a reference is now the dominant source of credit; the sigmoid tail simply keeps each rollout nudged toward *some* reference even when difference credit is scarce. Note that $\rho$ now doubles as the temperature for this sigmoid and for the diagnostic `smcov/soft_cov_mean`.
+
 ---
 
 ### 3.3 Hard matching bonus $r^{\mathrm{match}}$: "unique coverage under $\delta$"
