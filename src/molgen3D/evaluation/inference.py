@@ -10,8 +10,6 @@ Supports:
 from __future__ import annotations
 
 import os
-# Reduce CUDA memory fragmentation for large batch inference
-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import argparse
 import time
@@ -56,6 +54,9 @@ RDLogger.DisableLog("rdApp.warning")
 RDLogger.DisableLog("rdApp.error")
 rdBase.DisableLog("rdApp.warning")
 rdBase.DisableLog("rdApp.error")
+
+# Reduce CUDA memory fragmentation for large batch inference
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 
 def set_seed(seed: int = 42) -> None:
