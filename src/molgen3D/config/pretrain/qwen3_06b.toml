@@ -5,10 +5,10 @@ print_config = true
 custom_config_module = "molgen3D.training.pretraining.config.custom_job_config"
 
 [molgen_run]
-init_mode = "hf_pretrain" # scratch | hf_pretrain | resume
+init_mode = "resume" # scratch | hf_pretrain | resume
 tokenizer_tag = "tokenizers:qwen3_0.6b_custom"
-base_model_tag = "base_paths:qwen3_0.6b_base_model"
-# resume_run_path_tag = "ckpts:qwen3_0.6b_previous_run"
+# base_model_tag = "base_paths:qwen3_0.6b_base_model"
+resume_run_path_tag = "ckpts:qwen3_06b/251230-1352-da5b-qwen3_06b_pre_5e_48effb_4kseq/step-90000"
 
 [model]
 name = "molgen_qwen3"
@@ -37,7 +37,7 @@ local_batch_size = 4
 seq_len = 4096
 freq = 500
 steps = 200
-numerical_validation = true
+numerical_validation = false
 num_val_molecules = 10
 numerical_validation_freq = 10000
 
