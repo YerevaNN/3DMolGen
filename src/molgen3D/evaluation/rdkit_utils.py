@@ -1,5 +1,8 @@
 """RDKit utility functions - imported locally to avoid pickling issues."""
 
+from typing import Dict, List, Tuple
+
+import numpy as np
 from rdkit import Chem
 from rdkit.Chem.rdmolops import RemoveHs
 
@@ -60,4 +63,35 @@ def _best_rmsd(probe, ref, use_alignmol: bool):
     except Exception:
         import numpy as np
         return np.nan
+
+
+def compute_key_matrix(
+    key: str, true_confs: List, gen_mols: List, use_alignmol: bool
+) -> Tuple[str, Dict[str, object], bool]:
+    """Compute RMSD matrix for a single molecule key (sequential version).
+
+    This function is in rdkit_utils (not run_eval) to enable pickling
+    when used with ProcessPoolExecutor inside submitit jobs.
+
+    Args:
+        key: SMILES key identifying the molecule
+        true_confs: List of ground truth conformers
+        gen_mols: List of generated conformers
+        use_alignmol: Whether to use AlignMol instead of GetBestRMS
+
+    Returns:
+        Tuple of (key, results_dict, all_nan_flag)
+    """
+    n_true = len(true_confs)
+    n_gen = len(gen_mols)
+    mat = np.full((n_true, n_gen), np.nan, dtype=float)
+    for i_true, ref_mol in enumerate(true_confs):
+        row = np.array(
+            [_best_rmsd(gen_mol, ref_mol, use_alignmol) for gen_mol in gen_mols],
+            dtype=float,
+        )
+        if row.shape == (n_gen,):
+            mat[i_true] = row
+    all_nan = bool(np.isnan(mat).all())
+    return key, {"n_true": n_true, "n_model": n_gen, "rmsd": mat}, all_nan
 

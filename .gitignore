@@ -1,15 +1,20 @@
+# Virtual environment
 venv
+
+# Cursor/IDE Files
 .cursorignore
 .cursorrules   
-.cursor/ 
+.cursor/
+
 # Editor files
 *~
 *.swp
 .vscode/
 .idea/
 .aim/
+.flake8
 
-# Compiled files
+# Compiled files (python caches, etc)
 *.pyc
 *.pyo
 *.pyd
@@ -20,11 +25,18 @@ outputs/
 notebooks/
 wandb/
 wandb_runs/
+
 # tests/
 *.egg-info/
 build/
 dist/
+
 # Log files
 *.log
 *.csv
 *.ipynb
+
+# AI agents/tools
+.claude/*
+AGENTS.md
+CLAUDE.md
