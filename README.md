@@ -27,52 +27,164 @@ The project supports:
 
 ## Installation
 
-### Option 1: Development Installation (Recommended)
+### Quick Start (One Command)
 
-1. Clone the repository:
 ```bash
 git clone <repository-url>
 cd 3DMolGen
+./setup.sh
 ```
 
-2. Create and activate a conda environment:
+This installs everything you need. See details below.
 
-   **Using environment.yml (Recommended):**
-   ```bash
-   conda env create -f environment.yml
-   conda activate 3dmolgen
-   ```
+---
 
-   **Manual setup (Alternative):**
-   ```bash
-   # Create a new conda environment with Python 3.10
-   conda create -n 3dmolgen python=3.10 -y
-   conda activate 3dmolgen
-   
-   # Install PyTorch with CUDA support (adjust CUDA version as needed)
-   pip install torch -U --index-url https://download.pytorch.org/whl/cu126
-   
-   # Install TorchTitan
-   pip install -U torchtitan
-   
-   # Install core dependencies
-   pip install transformers wandb loguru rdkit
-   
-   # Install additional dependencies from environment.yml if needed
-   ```
+### Understanding the Stack
 
-3. Install the package in development mode:
+We provide **two setup options**:
+
+| Script | Stack | Best for |
+|--------|-------|----------|
+| `setup-uv.sh` | Pure uv (no conda) | New clusters, ephemeral envs, portability |
+| `setup.sh` | Conda + uv hybrid | Existing machines with conda |
+
+**What is uv?** [uv](https://docs.astral.sh/uv/) is a Rust-based Python package manager from Astral (the Ruff team). It's 10-100x faster than pip and can manage Python versions directly—no conda needed.
+
+### Version Matrix
+
+| Component | Version | Source |
+|-----------|---------|--------|
+| Python | 3.10.x | Conda |
+| PyTorch | 2.9.1+cu128 | [pytorch.org/whl/cu128](https://download.pytorch.org/whl/cu128) |
+| Flash Attention | 2.8.3+cu128torch2.9 | [Prebuilt wheel](https://github.com/mjun0812/flash-attention-prebuild-wheels) |
+| CUDA | 12.8 | System drivers |
+| transformers | ≥4.50.0 | PyPI |
+| trl | ≥0.15.0 | PyPI |
+| torchtitan | ≥0.2.0 | PyPI |
+
+---
+
+### Option 1: Pure uv (Recommended for new clusters)
+
+The `setup-uv.sh` script creates an environment without conda:
+
 ```bash
-pip install -e .
+./setup-uv.sh                              # Defaults (auto-detects /scratch or /tmp)
+./setup-uv.sh --dev                        # Include dev tools
+./setup-uv.sh --dir ~/envs/molgen          # Custom location
+./setup-uv.sh --fa-wheel /path/to/wheel    # Custom Flash Attention wheel
+./setup-uv.sh --skip-fa                    # Skip Flash Attention (CPU-only)
+./setup-uv.sh --verify                     # Verify existing installation
 ```
 
-### Option 2: Minimal Installation
+**What it does:**
+1. Installs uv (~30MB to ~/.local/bin)
+2. Creates venv with Python 3.10 (uv downloads if needed)
+3. Installs PyTorch 2.9.1+cu128
+4. Installs Flash Attention from local wheel or GitHub
+5. Installs rdkit from PyPI
+6. Installs molgen3D and dependencies
+7. Runs verification
+
+### Option 2: Conda + uv Hybrid (existing machines)
+
+The `setup.sh` script uses conda for Python/rdkit, uv for packages:
 
 ```bash
-pip install molgen3D
+./setup.sh              # Full installation
+./setup.sh --dev        # Include dev tools (pytest, black, etc.)
+./setup.sh --verify     # Just verify existing installation
 ```
 
-**Note**: The minimal installation may not include all dependencies. For full functionality, use the development installation.
+### Option 3: Manual Installation
+
+Step-by-step if you want more control:
+
+```bash
+# 1. Create conda environment with Python 3.10 and rdkit
+conda create -n 3dmolgen python=3.10 rdkit -c conda-forge -y
+conda activate 3dmolgen
+
+# 2. Install uv (fast pip replacement)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+
+# 3. Install PyTorch with CUDA 12.8 (using uv for speed)
+uv pip install torch==2.9.1 --index-url https://download.pytorch.org/whl/cu128
+
+# 4. Install Flash Attention (prebuilt wheel)
+# Option A: From local copy (YerevaNN cluster)
+uv pip install /nfs/ap/mnt/sxtn2/chem/wheels/flash_attn-2.8.3+cu128torch2.9-cp310-cp310-linux_x86_64.whl
+
+# Option B: From GitHub
+uv pip install https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.0/flash_attn-2.8.3+cu128torch2.9-cp310-cp310-linux_x86_64.whl
+
+# 5. Install remaining dependencies and molgen3D
+uv pip install -e ".[dev]"
+```
+
+### Verifying Installation
+
+```bash
+python verify_env.py
+```
+
+Expected output:
+```
+==================================================================
+3DMolGen Environment Verification
+==================================================================
+  [PASS] PyTorch              v2.9.1+cu128             (CUDA 12.8, 8x NVIDIA H100)
+  [PASS] Flash Attention      v2.8.3+cu128torch2.9     (flash_attn_func available)
+  [PASS] transformers         v4.57.0
+  [PASS] trl                  v0.15.0
+  [PASS] torchtitan           v0.2.0
+  ...
+==================================================================
+All checks passed! Environment is ready.
+==================================================================
+```
+
+### Flash Attention Notes
+
+Flash Attention 2 requires prebuilt wheels (compilation takes 2+ hours without ninja). Our wheel is for:
+- Python 3.10
+- PyTorch 2.9
+- CUDA 12.8
+
+**Local copy available at:** `/nfs/ap/mnt/sxtn2/chem/wheels/flash_attn-2.8.3+cu128torch2.9-cp310-cp310-linux_x86_64.whl`
+
+**For other configurations:** Download from [mjun0812/flash-attention-prebuild-wheels](https://github.com/mjun0812/flash-attention-prebuild-wheels). See [`docs/python_cuda_packaging_guide.md`](docs/python_cuda_packaging_guide.md) for the wheel compatibility matrix.
+
+### Slurm Job Template
+
+For ephemeral environments on the new DGX cluster:
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=3dmolgen
+#SBATCH --partition=h100
+#SBATCH --gres=gpu:8
+#SBATCH --nodes=1
+
+# Fast setup with uv (warm installs <30s)
+cd /path/to/3DMolGen
+./setup-uv.sh --dev --install-project  # include molgen3D package for training
+
+# Activate and run
+source /scratch/$USER/3dmolgen/.venv/bin/activate
+torchrun --nproc_per_node=8 \
+  -m molgen3D.training.pretraining.torchtitan_runner \
+  --train-toml src/molgen3D/config/pretrain/qwen3_06b.toml
+```
+
+For existing machines with conda:
+
+```bash
+./setup.sh --dev --install-project
+conda activate 3dmolgen
+# ... run training
+```
 
 ## Project Structure
 
