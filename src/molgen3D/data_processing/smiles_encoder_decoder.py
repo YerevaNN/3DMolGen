@@ -574,7 +574,7 @@ def encode_cartesian_binned(mol, bin_size=0.05, ranges=None):
 
     # Build bins per axis: use fixed global range [-9, 9] unless explicitly provided.
     if ranges is None:
-        ranges = [(-21.0, 21.0), (-21.0, 21.0), (-21.0, 21.0)]
+        ranges = [(-13.0, 13.0), (-13.0, 13.0), (-13.0, 13.0)]
     if len(ranges) != 3:
         raise ValueError("ranges must be a sequence of three (start, end) tuples.")
     bins = get_bins_for_coords(ranges, bin_size=bin_size)

@@ -37,6 +37,16 @@ def read_mol(
     filtered_mols: List[Chem.Mol] = []
 
     for mol in mols:
+        # Filter conformers with coordinates outside [-13, 13]
+        try:
+            pos = mol.GetConformer().GetPositions()
+            if np.any(pos < -13.0) or np.any(pos > 13.0):
+                local_failures["coord_out_of_range"] += 1
+                continue
+        except Exception:
+            local_failures["coord_check_failed"] += 1
+            continue
+
         try:
             noniso = Chem.MolToSmiles(Chem.RemoveHs(mol, sanitize=False), canonical=True, isomericSmiles=False)
             nonisomeric_smiles.add(noniso)
@@ -360,6 +370,7 @@ if __name__ == "__main__":
         default=30,
         help="Maximum number of conformers per molecule.",
     )
+    parser.add_argument(
 
     args = parser.parse_args()
 

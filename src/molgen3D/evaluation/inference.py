@@ -56,7 +56,7 @@ def load_model_tokenizer(
     model_path,
     tokenizer_path,
     torch_dtype="bfloat16",
-    attention_imp="flash_attention_2",
+    attention_imp="sdpa",
     device="auto",
 ):
     tokenizer = AutoTokenizer.from_pretrained(
@@ -108,7 +108,7 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id,
     bins = None
     if binned:
         ranges = [(-21.0, 21.0), (-21.0, 21.0), (-21.0, 21.0)]
-        bins = get_bins_for_coords(ranges)
+        bins = get_bins_for_coords(ranges, bin_size=0.042)
     generations = defaultdict(list)
     stats = {"smiles_mismatch":0, "mol_parse_fail" :0, "no_eos":0}
     
@@ -160,8 +160,10 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id,
                 try:
                     if binned:
                         mol_obj = decode_cartesian_binned(generated_conformer, bins)
+                        logger.info(f"binned:")
                     else:
                         mol_obj = decode_cartesian_v2(generated_conformer)
+                        logger.info(f"unbinned:")
                     # logger.info(f"smiles match: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
                     generations[geom_smiles].append(mol_obj)
                 except:
@@ -232,10 +234,15 @@ def run_inference(inference_config: dict):
     batch_size = int(inference_config["batch_size"])
     generations_all = defaultdict(list)
 
+    binned = inference_config.get("binned", False)
+    if not binned and "binned" in str(inference_config["model_path"]):
+        logger.info("Auto-detecting binned=True based on model path")
+        binned = True
+
     for start in tqdm(range(0, len(mols_list), batch_size), desc="generating"):
         batch = mols_list[start:start + batch_size]
         for sub_batch in split_batch_on_geom_size(batch, max_geom_len=80):
-            outputs, stats_ = process_batch(model, tokenizer, sub_batch, gen_config=inference_config["gen_config"], eos_token_id=eos_token_id, binned=inference_config.get("binned", False))
+            outputs, stats_ = process_batch(model, tokenizer, sub_batch, gen_config=inference_config["gen_config"], eos_token_id=eos_token_id, binned=binned)
             stats.update(stats_)
             for k, v in outputs.items():
                 generations_all[k].extend(v)
@@ -245,7 +252,7 @@ def run_inference(inference_config: dict):
     return generations_all, stats
 
 
-def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:str = None, xl:bool = False, qm9:bool = False, limit: int = None) -> None:
+def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:str = None, xl:bool = False, qm9:bool = False, limit: int = None, binned: bool = False) -> None:
     # Determine which test sets to run
     test_sets_to_run = []
     if test_set:
@@ -280,20 +287,21 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         "model_path": get_ckpt("qw600_pre_binned","1e"),
         "tokenizer_path": get_tokenizer_path("qwen3_0.6b_custom"),
         "torch_dtype": "bfloat16",
-        "batch_size": 256,
+        "batch_size": 128,
         "num_gens": gen_num_codes["2k_per_conf"],
         "gen_config": sampling_configs["top_p_sampling1"],
         "device": "cuda",
         "results_path": get_base_path("gen_results_root"),
         "run_name": "qwen_pre_binned",
         "limit": limit,
+        "binned": binned,
     }
 
     if grid_run_inference:
         param_grid = {
             # "model_path": [("m380_conf_v2", "4e")],
             # "model_path": [("m600_qwen_pre", "4e"), ("m600_qwen_scr", "4e")],
-            "model_path": [("qwen3_grpo_251226_1635", "4000")],
+            "model_path": [("qw600_pre_binned", "3e"), ("qw600_pre_binned", "1e"), ("qw600_pre_binned", "2e")],
             # , ("qwen3_grpo_251224_1839", "2000"), ("qwen3_grpo_251228_1438", "4000"), ("qwen3_grpo_251228_1438", "2000")],
             # "model_path": [("m380_conf_v2", "1e")],
         }
@@ -362,6 +370,6 @@ if __name__ == "__main__":
     parser.add_argument("--qm9", action="store_true")
     parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args() 
-    launch_inference_from_cli(device=args.device, grid_run_inference=args.grid_run_inference, test_set=args.test_set, xl=args.xl, qm9=args.qm9, limit=args.limit)
+    launch_inference_from_cli(device=args.device, grid_run_inference=args.grid_run_inference, test_set=args.test_set, xl=args.xl, qm9=args.qm9, limit=args.limit, binned=args.binned)
 
     
