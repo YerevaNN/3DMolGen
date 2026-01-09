@@ -1,0 +1,73 @@
+[project]
+name = "molgen3D"
+version = "0.1.0"
+description = "3D molecular conformer generation using language models"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+dependencies = [
+    "numpy>=1.17.0",
+    "torch>=2.0.0",
+    "transformers>=4.30.0",
+    "tokenizers>=0.13.0",
+    "safetensors>=0.3.0",
+    "pyyaml>=6.0",
+    "tqdm>=4.60.0",
+    "loguru>=0.7.0",
+    "tyro>=0.5.0",
+    "tomli>=2.0.0",
+    "datasets>=2.0.0",
+    "fsspec>=2023.0.0",
+    "filelock>=3.0.0",
+    "packaging>=20.0",
+    "typing-extensions>=4.0.0",
+]
+
+[project.optional-dependencies]
+pretrain = [
+    "torchtitan>=0.1.0",
+    "torchdata>=0.8.0",
+    "accelerate>=1.0.0",
+    "flash-attn>=2.0.0; platform_system != 'Windows'",
+]
+grpo = [
+    "trl>=0.7.0",
+    "accelerate>=1.0.0",
+]
+eval = [
+    "posebusters>=0.4.0",
+    "scikit-learn>=1.0.0",
+    "scipy>=1.7.0",
+]
+tracking = [
+    "wandb>=0.15.0",
+    "tensorboard>=2.10.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = { find = { where = ["src"], namespaces = false } }
+[tool.setuptools.package-data]
+"molgen3D.config" = ["paths.yaml"]
+
+[tool.black]
+line-length = 100
+target-version = ['py310', 'py311']
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"

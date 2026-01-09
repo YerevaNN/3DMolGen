@@ -56,7 +56,7 @@ If graph mismatch, the rollout gets `r_floor` (no point rewarding geometry for t
 ### 2.4 Finite RMSD gate (hard)
 Even if PoseBusters (or the base gate) passes, the rollout must have a **finite** $\min_j D_{i,j}$. If all RMSDs fail / are `inf`, the rollout is treated as invalid and gets `r_floor`.
 
-> Note on `hard_rmsd_gate`: in the current code, *finite RMSD is always required* for validity; the knob mainly controls logging/stats messaging. If you intended "graph-valid but no RMSD" to still be considered valid (with e.g. $r^{\mathrm{qual}}=0$), that requires a code change.
+> Note on `hard_rmsd_gate`: when `true` (default) the invalid rows are removed from `valid_mask`, so they drop out of `gate/final_valid_rate` **and** take the reward floor. When set to `false`, they still count toward validity metrics but `mask_for_distance` zeroes their rewards, so they effectively receive `r_floor` while you can keep visibility into how often RMSD failed.
 
 ---
 
@@ -99,6 +99,26 @@ r^{\text{smcov}}_i = \frac{1}{M}\sum_{j=1}^{M}\Delta_{i,j}
 - **Intuition:** if a reference is already covered by other rollouts, the product term becomes small, so you get **little** marginal credit for also covering it. If it is *not* covered, you get **more** credit.
 - **$\rho$** controls the softness radius (larger $\rho$ = more forgiving distances contribute to coverage).
 
+#### Marginal soft-coverage variant (current implementation)
+The active code now uses the exact marginal contribution for the sigmoid kernel, so **all** valid rollouts can contribute. Define
+```math
+K_{i,j} = \sigma\!\left(\frac{\delta - D_{i,j}}{\rho}\right), \qquad \sigma(x) = \frac{1}{1 + e^{-x}},
+```
+with invalid rows zeroed out. Soft coverage of reference $j$ becomes
+```math
+\text{soft\_cov}_j = 1 - \prod_{i=1}^{K} (1 - K_{i,j}),
+```
+and each rollout receives its marginal contribution
+```math
+\Delta_{i,j} = K_{i,j} \prod_{l \ne i} (1 - K_{l,j}), \qquad
+r^{\text{diff}}_i = \frac{1}{M} \sum_{j=1}^{M} \Delta_{i,j}.
+```
+
+- **Depth shaping** (config key `grpo.smcov_unique_quality_weight`): `Δ_{i,j}` is multiplied by `(1 + unique_quality_weight * depth_{i,j})` where `depth = clip(1 - D_{i,j}/δ, 0, 1)`.
+- **Precision sigmoid** (config key `grpo.smcov_precision_weight`): adds `precision_weight * σ((δ - \min_j D_{i,j}) / ρ)` per rollout.
+
+This construction preserves group recall: `Σ_i r_i^{smcov} = mean_j soft_cov_j` (up to fp error). The reward remains dense even when several rollouts hover near the same reference, while still encouraging wider coverage via the multiplicative `prod(1 - K)` term.
+
 ---
 
 ### 3.3 Hard matching bonus $r^{\mathrm{match}}$: "unique coverage under $\delta$"
@@ -133,6 +153,8 @@ Metrics are emitted to W&B (when a `wandb.run` is active) under these keys:
 ### Coverage & utilization
 - `cov/refs_hit_mean`, `cov/refs_hit_p50`, `cov/cov_ratio_mean`
 - `cov/unique_nearest_refs_mean`, `cov/nearest_collision_rate_mean`
+- `covdiff/cover_ratio_mean`, `covdiff/unique_cover_ratio_mean`
+- `covdiff/covered_ratio_mean`, `covdiff/unique_covered_ratio_mean` (currently mirrors the pair above because both pull from the same underlying ratios)
 - `cov/valid_rollouts_mean`
 
 ### Matching diagnostics
@@ -141,13 +163,16 @@ Metrics are emitted to W&B (when a `wandb.run` is active) under these keys:
 - `match/eligible_edge_density`
 
 ### Smooth marginal coverage
-- `smcov/soft_cov_mean`
-- `smcov/pct_gt_cov_gt_0p1`, `smcov/pct_gt_cov_gt_0p5`
-- `smcov/corr_with_refs_hit`
+- `bestcov/soft_cov_mean`
+- `bestcov/pct_gt_cov_gt_0p1`, `bestcov/pct_gt_cov_gt_0p5`
+- `bestcov/corr_with_refs_hit`
 
 ### Reward decomposition
 - `reward/total_mean`, `reward/total_std`
 - `reward/comp_qual_mean`, `reward/comp_smcov_mean`, `reward/comp_match_mean`
+- `reward/comp_qual_std`, `reward/comp_smcov_std`, `reward/comp_match_std`
+- `reward/qual_group_std_mean`, `reward/smcov_group_std_mean`, `reward/match_group_std_mean`, `reward/group_std_mean`
+- `reward/bestcov_rank_corr_mean`
 - `reward/comp_smcov_frac`
 
 ### Optional diversity proxy
@@ -204,6 +229,14 @@ Suggested starting region:
 - clip range (your `epsilon_*`): **2e‑4 to 6e‑4**
 - `max_grad_norm`: 0.5–1.0
 - `temperature`: 0.8–1.2
+
+### 5.3 Advantage normalization (TRL `scale_rewards`)
+
+TRL’s GRPO always mean-centers rewards per prompt group, and optionally divides
+by the group std. To avoid the difficulty bias introduced by std scaling, set
+`grpo.scale_rewards: false` (or `"none"` if you prefer strings) in the YAML.
+This propagates to `TRLGRPOConfig.scale_rewards`, keeping advantages
+mean-centered only.
 
 ---
 
