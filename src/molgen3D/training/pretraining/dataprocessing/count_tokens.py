@@ -266,6 +266,7 @@ def _print_one_time_sample(
         lines.append(f"  tokenizer: {target_alias}")
         lines.append(f"  file: {first_file}")
         lines.append(f"  decoded: {decoded}")
+        lines.append(f"encoded: {token_ids}")
         lines.append("  index  id      token -> chars")
         for i, (tid, tok, chars) in enumerate(zip(non_pad_ids, token_strs, token_chars)):
             lines.append(f"  {i:04d}  {tid:>6}  {repr(tok):>20} -> {repr(chars)}")
@@ -669,7 +670,7 @@ def main() -> None:
     parser.add_argument("--seq-len", type=int, default=2048)
     parser.add_argument("--sample-lines", type=int, default=1000)
     parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--tokenizers", nargs="+", default=["qwen3_0.6b_origin", "qwen3_0.6b_custom"])
+    parser.add_argument("--tokenizers", nargs="+", default=["qwen3_0.6b_origin", "qwen3_0.6b_custom", "qwen3_0.6b_binned"])
     parser.add_argument("--skip-validation", action="store_true")
     parser.add_argument("--shuffle", action="store_true", help="Sample random lines via dataloader shuffle")
     parser.add_argument("--seed", type=int, default=0)
@@ -678,8 +679,8 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    train_path = str(get_data_path("conformers_train"))
-    valid_path = str(get_data_path("conformers_valid"))
+    train_path = str(get_data_path("filtered_conformers_train"))
+    valid_path = str(get_data_path("filtered_conformers_valid"))
 
     tokenizer_map: Dict[str, Tuple[str, AutoTokenizer]] = {}
     for alias in args.tokenizers:

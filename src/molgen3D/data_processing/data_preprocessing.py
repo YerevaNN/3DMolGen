@@ -17,7 +17,7 @@ from molgen3D.data_processing.utils import (
     filter_mols,
     save_processed_pickle,
 )
-from molgen3D.data_processing.smiles_encoder_decoder import encode_cartesian_v2
+from molgen3D.data_processing.smiles_encoder_decoder import encode_cartesian_v2, encode_cartesian_binned
 from molgen3D.utils.utils import load_pkl
 
 random.seed(42)
@@ -56,7 +56,7 @@ def read_mol(
             pass
 
         try:
-            embedded_smile, iso_smile = embedding_func(mol, precision)
+            embedded_smile, iso_smile = embedding_func(mol)
         except Exception as exc:
             log.error("Error encoding conformer | path={} | failure={}", mol_path, exc)
             local_failures["encoding_error"] += 1
@@ -131,6 +131,7 @@ def preprocess(
     embedding_registry = {
         "cartesian_v2": encode_cartesian_v2,
         "cartesian": encode_cartesian_v2,
+        "cartesian_binned": encode_cartesian_binned,
     }
     if embedding_type not in embedding_registry:
         raise ValueError(f"Unsupported embedding_type '{embedding_type}'. Options: {sorted(embedding_registry)}")
@@ -321,7 +322,7 @@ if __name__ == "__main__":
         "--embedding_type",
         "-et",
         type=str,
-        choices=["cartesian", "cartesian_v2"],
+        choices=["cartesian", "cartesian_v2", "cartesian_binned"],
         default="cartesian_v2",
         help="Embedding type to use for enrichment.",
     )
@@ -370,7 +371,6 @@ if __name__ == "__main__":
         default=30,
         help="Maximum number of conformers per molecule.",
     )
-    parser.add_argument(
 
     args = parser.parse_args()
 
@@ -395,3 +395,4 @@ if __name__ == "__main__":
         dataset_type=args.dataset_type,
         splits=args.splits,
     )
+    

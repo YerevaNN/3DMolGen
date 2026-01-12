@@ -51,11 +51,15 @@ data:
   binned_conformers_valid: "3DMolGen_data/binned_all/processed_strings/valid"
   binned_conformers_test: "3DMolGen_data/binned_all/processed_strings/test"
 
+  filtered_conformers_train: "3DMolGen_data/binned_filtered/processed_strings/train"
+  filtered_conformers_valid: "3DMolGen_data/binned_filtered/processed_strings/valid"
+  filtered_conformers_test: "3DMolGen_data/binned_filtered/processed_strings/test"
+
 tokenizers:
   llama3_chem_v1: "src/molgen3D/training/tokenizers/Llama-3.2-chem-1B-v1"
   qwen3_0.6b_custom: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_custom"
   qwen3_0.6b_origin: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_original"
-  
+  qwen3_0.6b_binned: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_binned"
 
 models:
   # ---------- BASE MODELS ----------
@@ -166,6 +170,14 @@ models:
       "2e": "step-14600-hf"
       "3e": "step-21900-hf"
       "4e": "step-29200-hf"
+  
+  qw600_pre_binned_filtered:
+    root: "qwen3_06b/260110-0215-04c0-qwen3_06b_pre_5e_48effb_4kseq"
+    steps:
+      "1e": "step-4200-hf"
+      "2e": "step-8400-hf"
+      "3e": "step-12600-hf"
+      "4e": "step-16800-hf"
 
   # ---------- GRPO / FINETUNED MODELS (same structure) ----------
 

@@ -211,2020 +211,2293 @@
       "special": false
     },
     "151669": {
-      "content": "000",
+      "content": "[SMILES]",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151670": {
-      "content": "001",
+      "content": "[CONFORMER]",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151671": {
-      "content": "002",
+      "content": "[/SMILES]",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151672": {
-      "content": "003",
+      "content": "[/CONFORMER]",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151673": {
-      "content": "004",
+      "content": "000",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151674": {
-      "content": "005",
+      "content": "001",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151675": {
-      "content": "006",
+      "content": "002",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151676": {
-      "content": "007",
+      "content": "003",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151677": {
-      "content": "008",
+      "content": "004",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151678": {
-      "content": "009",
+      "content": "005",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151679": {
-      "content": "010",
+      "content": "006",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151680": {
-      "content": "011",
+      "content": "007",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151681": {
-      "content": "012",
+      "content": "008",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151682": {
-      "content": "013",
+      "content": "009",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151683": {
-      "content": "014",
+      "content": "010",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151684": {
-      "content": "015",
+      "content": "011",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151685": {
-      "content": "016",
+      "content": "012",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151686": {
-      "content": "017",
+      "content": "013",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151687": {
-      "content": "018",
+      "content": "014",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151688": {
-      "content": "019",
+      "content": "015",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151689": {
-      "content": "020",
+      "content": "016",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151690": {
-      "content": "021",
+      "content": "017",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151691": {
-      "content": "022",
+      "content": "018",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151692": {
-      "content": "023",
+      "content": "019",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151693": {
-      "content": "024",
+      "content": "020",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151694": {
-      "content": "025",
+      "content": "021",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151695": {
-      "content": "026",
+      "content": "022",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151696": {
-      "content": "027",
+      "content": "023",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151697": {
-      "content": "028",
+      "content": "024",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151698": {
-      "content": "029",
+      "content": "025",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151699": {
-      "content": "030",
+      "content": "026",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151700": {
-      "content": "031",
+      "content": "027",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151701": {
-      "content": "032",
+      "content": "028",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151702": {
-      "content": "033",
+      "content": "029",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151703": {
-      "content": "034",
+      "content": "030",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151704": {
-      "content": "035",
+      "content": "031",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151705": {
-      "content": "036",
+      "content": "032",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151706": {
-      "content": "037",
+      "content": "033",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151707": {
-      "content": "038",
+      "content": "034",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151708": {
-      "content": "039",
+      "content": "035",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151709": {
-      "content": "040",
+      "content": "036",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151710": {
-      "content": "041",
+      "content": "037",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151711": {
-      "content": "042",
+      "content": "038",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151712": {
-      "content": "043",
+      "content": "039",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151713": {
-      "content": "044",
+      "content": "040",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151714": {
-      "content": "045",
+      "content": "041",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151715": {
-      "content": "046",
+      "content": "042",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151716": {
-      "content": "047",
+      "content": "043",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151717": {
-      "content": "048",
+      "content": "044",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151718": {
-      "content": "049",
+      "content": "045",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151719": {
-      "content": "050",
+      "content": "046",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151720": {
-      "content": "051",
+      "content": "047",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151721": {
-      "content": "052",
+      "content": "048",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151722": {
-      "content": "053",
+      "content": "049",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151723": {
-      "content": "054",
+      "content": "050",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151724": {
-      "content": "055",
+      "content": "051",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151725": {
-      "content": "056",
+      "content": "052",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151726": {
-      "content": "057",
+      "content": "053",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151727": {
-      "content": "058",
+      "content": "054",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151728": {
-      "content": "059",
+      "content": "055",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151729": {
-      "content": "060",
+      "content": "056",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151730": {
-      "content": "061",
+      "content": "057",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151731": {
-      "content": "062",
+      "content": "058",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151732": {
-      "content": "063",
+      "content": "059",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151733": {
-      "content": "064",
+      "content": "060",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151734": {
-      "content": "065",
+      "content": "061",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151735": {
-      "content": "066",
+      "content": "062",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151736": {
-      "content": "067",
+      "content": "063",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151737": {
-      "content": "068",
+      "content": "064",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151738": {
-      "content": "069",
+      "content": "065",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151739": {
-      "content": "070",
+      "content": "066",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151740": {
-      "content": "071",
+      "content": "067",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151741": {
-      "content": "072",
+      "content": "068",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151742": {
-      "content": "073",
+      "content": "069",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151743": {
-      "content": "074",
+      "content": "070",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151744": {
-      "content": "075",
+      "content": "071",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151745": {
-      "content": "076",
+      "content": "072",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151746": {
-      "content": "077",
+      "content": "073",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151747": {
-      "content": "078",
+      "content": "074",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151748": {
-      "content": "079",
+      "content": "075",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151749": {
-      "content": "080",
+      "content": "076",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151750": {
-      "content": "081",
+      "content": "077",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151751": {
-      "content": "082",
+      "content": "078",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151752": {
-      "content": "083",
+      "content": "079",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151753": {
-      "content": "084",
+      "content": "080",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151754": {
-      "content": "085",
+      "content": "081",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151755": {
-      "content": "086",
+      "content": "082",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151756": {
-      "content": "087",
+      "content": "083",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151757": {
-      "content": "088",
+      "content": "084",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151758": {
-      "content": "089",
+      "content": "085",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151759": {
-      "content": "090",
+      "content": "086",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151760": {
-      "content": "091",
+      "content": "087",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151761": {
-      "content": "092",
+      "content": "088",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151762": {
-      "content": "093",
+      "content": "089",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151763": {
-      "content": "094",
+      "content": "090",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151764": {
-      "content": "095",
+      "content": "091",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151765": {
-      "content": "096",
+      "content": "092",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151766": {
-      "content": "097",
+      "content": "093",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151767": {
-      "content": "098",
+      "content": "094",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151768": {
-      "content": "099",
+      "content": "095",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151769": {
-      "content": "100",
+      "content": "096",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151770": {
-      "content": "101",
+      "content": "097",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151771": {
-      "content": "102",
+      "content": "098",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151772": {
-      "content": "103",
+      "content": "099",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151773": {
-      "content": "104",
+      "content": "100",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151774": {
-      "content": "105",
+      "content": "101",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151775": {
-      "content": "106",
+      "content": "102",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151776": {
-      "content": "107",
+      "content": "103",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151777": {
-      "content": "108",
+      "content": "104",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151778": {
-      "content": "109",
+      "content": "105",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151779": {
-      "content": "110",
+      "content": "106",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151780": {
-      "content": "111",
+      "content": "107",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151781": {
-      "content": "112",
+      "content": "108",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151782": {
-      "content": "113",
+      "content": "109",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151783": {
-      "content": "114",
+      "content": "110",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151784": {
-      "content": "115",
+      "content": "111",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151785": {
-      "content": "116",
+      "content": "112",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151786": {
-      "content": "117",
+      "content": "113",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151787": {
-      "content": "118",
+      "content": "114",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151788": {
-      "content": "119",
+      "content": "115",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151789": {
-      "content": "120",
+      "content": "116",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151790": {
-      "content": "121",
+      "content": "117",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151791": {
-      "content": "122",
+      "content": "118",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151792": {
-      "content": "123",
+      "content": "119",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151793": {
-      "content": "124",
+      "content": "120",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151794": {
-      "content": "125",
+      "content": "121",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151795": {
-      "content": "126",
+      "content": "122",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151796": {
-      "content": "127",
+      "content": "123",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151797": {
-      "content": "128",
+      "content": "124",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151798": {
-      "content": "129",
+      "content": "125",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151799": {
-      "content": "130",
+      "content": "126",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151800": {
-      "content": "131",
+      "content": "127",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151801": {
-      "content": "132",
+      "content": "128",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151802": {
-      "content": "133",
+      "content": "129",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151803": {
-      "content": "134",
+      "content": "130",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151804": {
-      "content": "135",
+      "content": "131",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151805": {
-      "content": "136",
+      "content": "132",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151806": {
-      "content": "137",
+      "content": "133",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151807": {
-      "content": "138",
+      "content": "134",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151808": {
-      "content": "139",
+      "content": "135",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151809": {
-      "content": "140",
+      "content": "136",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151810": {
-      "content": "141",
+      "content": "137",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151811": {
-      "content": "142",
+      "content": "138",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151812": {
-      "content": "143",
+      "content": "139",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151813": {
-      "content": "144",
+      "content": "140",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151814": {
-      "content": "145",
+      "content": "141",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151815": {
-      "content": "146",
+      "content": "142",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151816": {
-      "content": "147",
+      "content": "143",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151817": {
-      "content": "148",
+      "content": "144",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151818": {
-      "content": "149",
+      "content": "145",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151819": {
-      "content": "150",
+      "content": "146",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151820": {
-      "content": "151",
+      "content": "147",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151821": {
-      "content": "152",
+      "content": "148",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151822": {
-      "content": "153",
+      "content": "149",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151823": {
-      "content": "154",
+      "content": "150",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151824": {
-      "content": "155",
+      "content": "151",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151825": {
-      "content": "156",
+      "content": "152",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151826": {
-      "content": "157",
+      "content": "153",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151827": {
-      "content": "158",
+      "content": "154",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151828": {
-      "content": "159",
+      "content": "155",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151829": {
-      "content": "160",
+      "content": "156",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151830": {
-      "content": "161",
+      "content": "157",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151831": {
-      "content": "162",
+      "content": "158",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151832": {
-      "content": "163",
+      "content": "159",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151833": {
-      "content": "164",
+      "content": "160",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151834": {
-      "content": "165",
+      "content": "161",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151835": {
-      "content": "166",
+      "content": "162",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151836": {
-      "content": "167",
+      "content": "163",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151837": {
-      "content": "168",
+      "content": "164",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151838": {
-      "content": "169",
+      "content": "165",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151839": {
-      "content": "170",
+      "content": "166",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151840": {
-      "content": "171",
+      "content": "167",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151841": {
-      "content": "172",
+      "content": "168",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151842": {
-      "content": "173",
+      "content": "169",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151843": {
-      "content": "174",
+      "content": "170",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151844": {
-      "content": "175",
+      "content": "171",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151845": {
-      "content": "176",
+      "content": "172",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151846": {
-      "content": "177",
+      "content": "173",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151847": {
-      "content": "178",
+      "content": "174",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151848": {
-      "content": "179",
+      "content": "175",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151849": {
-      "content": "180",
+      "content": "176",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151850": {
-      "content": "181",
+      "content": "177",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151851": {
-      "content": "182",
+      "content": "178",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151852": {
-      "content": "183",
+      "content": "179",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151853": {
-      "content": "184",
+      "content": "180",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151854": {
-      "content": "185",
+      "content": "181",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151855": {
-      "content": "186",
+      "content": "182",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151856": {
-      "content": "187",
+      "content": "183",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151857": {
-      "content": "188",
+      "content": "184",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151858": {
-      "content": "189",
+      "content": "185",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151859": {
-      "content": "190",
+      "content": "186",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151860": {
-      "content": "191",
+      "content": "187",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151861": {
-      "content": "192",
+      "content": "188",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151862": {
-      "content": "193",
+      "content": "189",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151863": {
-      "content": "194",
+      "content": "190",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151864": {
-      "content": "195",
+      "content": "191",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151865": {
-      "content": "196",
+      "content": "192",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151866": {
-      "content": "197",
+      "content": "193",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151867": {
-      "content": "198",
+      "content": "194",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151868": {
-      "content": "199",
+      "content": "195",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151869": {
-      "content": "200",
+      "content": "196",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151870": {
-      "content": "201",
+      "content": "197",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151871": {
-      "content": "202",
+      "content": "198",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151872": {
-      "content": "203",
+      "content": "199",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151873": {
-      "content": "204",
+      "content": "200",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151874": {
-      "content": "205",
+      "content": "201",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151875": {
-      "content": "206",
+      "content": "202",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151876": {
-      "content": "207",
+      "content": "203",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151877": {
-      "content": "208",
+      "content": "204",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151878": {
-      "content": "209",
+      "content": "205",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151879": {
-      "content": "210",
+      "content": "206",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151880": {
-      "content": "211",
+      "content": "207",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151881": {
-      "content": "212",
+      "content": "208",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151882": {
-      "content": "213",
+      "content": "209",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151883": {
-      "content": "214",
+      "content": "210",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151884": {
-      "content": "215",
+      "content": "211",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151885": {
-      "content": "216",
+      "content": "212",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151886": {
-      "content": "217",
+      "content": "213",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151887": {
-      "content": "218",
+      "content": "214",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151888": {
-      "content": "219",
+      "content": "215",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151889": {
-      "content": "220",
+      "content": "216",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151890": {
-      "content": "221",
+      "content": "217",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151891": {
-      "content": "222",
+      "content": "218",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151892": {
-      "content": "223",
+      "content": "219",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151893": {
-      "content": "224",
+      "content": "220",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151894": {
-      "content": "225",
+      "content": "221",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151895": {
-      "content": "226",
+      "content": "222",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151896": {
-      "content": "227",
+      "content": "223",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151897": {
-      "content": "228",
+      "content": "224",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151898": {
-      "content": "229",
+      "content": "225",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151899": {
-      "content": "230",
+      "content": "226",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151900": {
-      "content": "231",
+      "content": "227",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151901": {
-      "content": "232",
+      "content": "228",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151902": {
-      "content": "233",
+      "content": "229",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151903": {
-      "content": "234",
+      "content": "230",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151904": {
-      "content": "235",
+      "content": "231",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151905": {
-      "content": "236",
+      "content": "232",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151906": {
-      "content": "237",
+      "content": "233",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151907": {
-      "content": "238",
+      "content": "234",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151908": {
-      "content": "239",
+      "content": "235",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151909": {
-      "content": "240",
+      "content": "236",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151910": {
-      "content": "241",
+      "content": "237",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151911": {
-      "content": "242",
+      "content": "238",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151912": {
-      "content": "243",
+      "content": "239",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151913": {
-      "content": "244",
+      "content": "240",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151914": {
-      "content": "245",
+      "content": "241",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151915": {
-      "content": "246",
+      "content": "242",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151916": {
-      "content": "247",
+      "content": "243",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151917": {
-      "content": "248",
+      "content": "244",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
     },
     "151918": {
-      "content": "249",
+      "content": "245",
       "lstrip": false,
-      "normalized": true,
+      "normalized": false,
       "rstrip": false,
       "single_word": false,
-      "special": false
+      "special": true
+    },
+    "151919": {
+      "content": "246",
+      "lstrip": false,
+      "normalized": false,
+      "rstrip": false,
+      "single_word": false,
+      "special": true
+    },
+    "151920": {
+      "content": "247",
+      "lstrip": false,
+      "normalized": false,
+      "rstrip": false,
+      "single_word": false,
+      "special": true
+    },
+    "151921": {
+      "content": "248",
+      "lstrip": false,
+      "normalized": false,
+      "rstrip": false,
+      "single_word": false,
+      "special": true
+    },
+    "151922": {
+      "content": "249",
+      "lstrip": false,
+      "normalized": false,
+      "rstrip": false,
+      "single_word": false,
+      "special": true
     }
   },
   "additional_special_tokens": [
-    "<|im_start|>",
-    "<|im_end|>",
-    "<|object_ref_start|>",
-    "<|object_ref_end|>",
-    "<|box_start|>",
-    "<|box_end|>",
-    "<|quad_start|>",
-    "<|quad_end|>",
-    "<|vision_start|>",
-    "<|vision_end|>",
-    "<|vision_pad|>",
-    "<|image_pad|>",
-    "<|video_pad|>"
+    "[SMILES]",
+    "[CONFORMER]",
+    "[/SMILES]",
+    "[/CONFORMER]",
+    "000",
+    "001",
+    "002",
+    "003",
+    "004",
+    "005",
+    "006",
+    "007",
+    "008",
+    "009",
+    "010",
+    "011",
+    "012",
+    "013",
+    "014",
+    "015",
+    "016",
+    "017",
+    "018",
+    "019",
+    "020",
+    "021",
+    "022",
+    "023",
+    "024",
+    "025",
+    "026",
+    "027",
+    "028",
+    "029",
+    "030",
+    "031",
+    "032",
+    "033",
+    "034",
+    "035",
+    "036",
+    "037",
+    "038",
+    "039",
+    "040",
+    "041",
+    "042",
+    "043",
+    "044",
+    "045",
+    "046",
+    "047",
+    "048",
+    "049",
+    "050",
+    "051",
+    "052",
+    "053",
+    "054",
+    "055",
+    "056",
+    "057",
+    "058",
+    "059",
+    "060",
+    "061",
+    "062",
+    "063",
+    "064",
+    "065",
+    "066",
+    "067",
+    "068",
+    "069",
+    "070",
+    "071",
+    "072",
+    "073",
+    "074",
+    "075",
+    "076",
+    "077",
+    "078",
+    "079",
+    "080",
+    "081",
+    "082",
+    "083",
+    "084",
+    "085",
+    "086",
+    "087",
+    "088",
+    "089",
+    "090",
+    "091",
+    "092",
+    "093",
+    "094",
+    "095",
+    "096",
+    "097",
+    "098",
+    "099",
+    "100",
+    "101",
+    "102",
+    "103",
+    "104",
+    "105",
+    "106",
+    "107",
+    "108",
+    "109",
+    "110",
+    "111",
+    "112",
+    "113",
+    "114",
+    "115",
+    "116",
+    "117",
+    "118",
+    "119",
+    "120",
+    "121",
+    "122",
+    "123",
+    "124",
+    "125",
+    "126",
+    "127",
+    "128",
+    "129",
+    "130",
+    "131",
+    "132",
+    "133",
+    "134",
+    "135",
+    "136",
+    "137",
+    "138",
+    "139",
+    "140",
+    "141",
+    "142",
+    "143",
+    "144",
+    "145",
+    "146",
+    "147",
+    "148",
+    "149",
+    "150",
+    "151",
+    "152",
+    "153",
+    "154",
+    "155",
+    "156",
+    "157",
+    "158",
+    "159",
+    "160",
+    "161",
+    "162",
+    "163",
+    "164",
+    "165",
+    "166",
+    "167",
+    "168",
+    "169",
+    "170",
+    "171",
+    "172",
+    "173",
+    "174",
+    "175",
+    "176",
+    "177",
+    "178",
+    "179",
+    "180",
+    "181",
+    "182",
+    "183",
+    "184",
+    "185",
+    "186",
+    "187",
+    "188",
+    "189",
+    "190",
+    "191",
+    "192",
+    "193",
+    "194",
+    "195",
+    "196",
+    "197",
+    "198",
+    "199",
+    "200",
+    "201",
+    "202",
+    "203",
+    "204",
+    "205",
+    "206",
+    "207",
+    "208",
+    "209",
+    "210",
+    "211",
+    "212",
+    "213",
+    "214",
+    "215",
+    "216",
+    "217",
+    "218",
+    "219",
+    "220",
+    "221",
+    "222",
+    "223",
+    "224",
+    "225",
+    "226",
+    "227",
+    "228",
+    "229",
+    "230",
+    "231",
+    "232",
+    "233",
+    "234",
+    "235",
+    "236",
+    "237",
+    "238",
+    "239",
+    "240",
+    "241",
+    "242",
+    "243",
+    "244",
+    "245",
+    "246",
+    "247",
+    "248",
+    "249"
   ],
   "bos_token": null,
   "clean_up_tokenization_spaces": false,

@@ -145,8 +145,11 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id,
     total_generated_tokens = int(gen_lens.sum().item())
     log_mfu(model, total_generated_tokens, elapsed)
     log_cuda_memory("Post-first-forward")
-    decoded_outputs = tokenizer.batch_decode(sequences, skip_special_tokens=True)
+    decoded_outputs = tokenizer.batch_decode(sequences, skip_special_tokens=False)
     for i, out in enumerate(decoded_outputs):
+        # Clean up padding and potential start tokens if they interfere with extract_between
+        out = out.replace(tokenizer.pad_token, "").replace("<|im_start|>", "").replace("<|im_end|>", "")
+        
         canonical_smiles = extract_between(out, "[SMILES]", "[/SMILES]")
         generated_conformer = extract_between(out, "[CONFORMER]", "[/CONFORMER]")
         geom_smiles = geom_smiles_list[i]
@@ -160,10 +163,8 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id,
                 try:
                     if binned:
                         mol_obj = decode_cartesian_binned(generated_conformer, bins)
-                        logger.info(f"binned:")
                     else:
                         mol_obj = decode_cartesian_v2(generated_conformer)
-                        logger.info(f"unbinned:")
                     # logger.info(f"smiles match: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
                     generations[geom_smiles].append(mol_obj)
                 except:
@@ -198,8 +199,13 @@ def run_inference(inference_config: dict):
                                             torch_dtype=inference_config["torch_dtype"])
     logger.info(f"model loaded: {model.dtype=}, {model.device=}")
     
-    # eos_token_id = tokenizer.encode("[/CONFORMER]", add_special_tokens=False)
-    eos_token_id = tokenizer.encode("<|endoftext|>", add_special_tokens=False)
+    # Use [/CONFORMER] as the primary stop token, falling back to <|endoftext|>
+    eos_token_id = tokenizer.convert_tokens_to_ids("[/CONFORMER]")
+    if eos_token_id is None:
+        eos_token_id = tokenizer.eos_token_id
+    
+    logger.info(f"Using eos_token_id: {eos_token_id} for generation")
+    
     with open(inference_config["test_data_path"],'rb') as test_data_file:
         test_data = cloudpickle.load(test_data_file)
 
@@ -284,10 +290,10 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
     
     # Base configuration template
     base_inference_config = {
-        "model_path": get_ckpt("qw600_pre_binned","1e"),
-        "tokenizer_path": get_tokenizer_path("qwen3_0.6b_custom"),
+        "model_path": get_ckpt("qw600_pre_binned_filtered", "1e"),
+        "tokenizer_path": get_tokenizer_path("qwen3_0.6b_binned"),
         "torch_dtype": "bfloat16",
-        "batch_size": 128,
+        "batch_size": 256,
         "num_gens": gen_num_codes["2k_per_conf"],
         "gen_config": sampling_configs["top_p_sampling1"],
         "device": "cuda",
@@ -301,7 +307,7 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         param_grid = {
             # "model_path": [("m380_conf_v2", "4e")],
             # "model_path": [("m600_qwen_pre", "4e"), ("m600_qwen_scr", "4e")],
-            "model_path": [("qw600_pre_binned", "3e"), ("qw600_pre_binned", "1e"), ("qw600_pre_binned", "2e")],
+            "model_path": [("qw600_pre_binned_filtered", "1e"), ("qw600_pre_binned_filtered", "2e"), ("qw600_pre_binned_filtered", "3e"), ("qw600_pre_binned_filtered", "4e")],
             # , ("qwen3_grpo_251224_1839", "2000"), ("qwen3_grpo_251228_1438", "4000"), ("qwen3_grpo_251228_1438", "2000")],
             # "model_path": [("m380_conf_v2", "1e")],
         }

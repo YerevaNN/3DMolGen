@@ -537,7 +537,7 @@ def bins_to_coords(bin_indices, bins, use_bin_center=False):
 
 
 
-def encode_cartesian_binned(mol, bin_size=0.05, ranges=None):
+def encode_cartesian_binned(mol, bin_size=0.104, ranges=None):
     """
     Serialize a 3D RDKit Mol into an enriched text representation where
     the Cartesian coordinates are replaced by bin indices.
@@ -622,7 +622,7 @@ def encode_cartesian_binned(mol, bin_size=0.05, ranges=None):
         )
 
     enriched_string = "".join(out_parts)
-    return enriched_string, smiles, bins, ranges
+    return enriched_string, smiles
 
 
 def decode_cartesian_binned(enriched_string, bins, use_bin_center=True):

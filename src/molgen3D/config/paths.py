@@ -33,6 +33,9 @@ GEOM_DATA_KEYS = {
     "binned_conformers_train",
     "binned_conformers_valid",
     "binned_conformers_test",
+    "filtered_conformers_train",
+    "filtered_conformers_valid",
+    "filtered_conformers_test",
 }
 
 
@@ -57,7 +60,7 @@ def _get_config_section(section: str) -> dict:
 
 def _get_ckpt_base_path(root_rel: str, base_paths: dict) -> str:
     """Determine the base path for a checkpoint based on root_rel pattern."""
-    if root_rel.startswith("qwen3_06b") or root_rel.startswith("Qwen3-0.6B"):
+    if root_rel.startswith("qwen3_06b") or root_rel.startswith("Qwen3-0.6B") or root_rel.startswith("qw600"):
         return base_paths.get("qwen_yerevann_root", base_paths.get("hf_yerevann_root", "."))
     if "qwen3" in root_rel:
         return base_paths.get("qwen3_grpo_root", base_paths.get("grpo_root", "."))
