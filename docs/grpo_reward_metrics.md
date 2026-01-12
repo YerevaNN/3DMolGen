@@ -41,6 +41,8 @@ what each metric measures and how to interpret its values during training.
 | `cov/nearest_collision_rate_mean` | `1 - unique_refs / valid_rollouts`. | **≤0.3** healthy diversity; **0.3–0.6** mild collapse; **>0.6** severe collapse (most rollouts share the same nearest reference). |
 | `covdiff/cover_ratio_mean` | Fraction of GT references that are covered (<δ) by *any* rollout (averaged per prompt). | Track this to ensure the new coverage difference reward still hits a large portion of the reference ensemble. |
 | `covdiff/unique_cover_ratio_mean` | Fraction of GT references that are uniquely covered by exactly one rollout. | This approximates the “difference reward” mass—if it trends to zero the coverage term is no longer informative. |
+| `covdiff/covered_ratio_mean` | Currently identical to `covdiff/cover_ratio_mean` (both read the same ratio) but kept for downstream compatibility. | Expect future experiments to differentiate them; for now treat it as a duplicate sanity check. |
+| `covdiff/unique_covered_ratio_mean` | Mirrors `covdiff/unique_cover_ratio_mean` today because both use the same unique-coverage ratio. | Monitor either one; divergence would indicate the intermediate tensors changed. |
 | `cov/valid_rollouts_mean` | Average valid rollouts per prompt. | Expect **≈K * final_valid_rate**; sudden drops mean gating is rejecting entire batches. |
 
 ## E. Matching Diagnostics
@@ -57,23 +59,20 @@ what each metric measures and how to interpret its values during training.
 
 | Key | Meaning | Typical Interpretation |
 | --- | --- | --- |
-| `smcov/soft_cov_mean` | Average soft coverage (smooth kernel) over the reference set. | Higher means references are broadly covered even if no exact match exists. |
-| `smcov/pct_gt_cov_gt_0p1`, `smcov/pct_gt_cov_gt_0p5` | Fraction of references with soft coverage exceeding 0.1 / 0.5. | Used to see how many references receive strong signal versus just weak contributions. |
-| `smcov/corr_with_refs_hit` | Pearson correlation between `refs_hit` and `smcov` contribution per group. | Positive correlation means the smooth coverage reward aligns with actual discrete hits. |
+| `bestcov/soft_cov_mean` | Average sigmoid coverage (smooth kernel) over the reference set. The kernel is $K_{i,j} = \sigma((\delta - D_{i,j})/\rho)$. | Higher means references are broadly covered even if no exact match exists. |
+| `bestcov/pct_gt_cov_gt_0p1`, `bestcov/pct_gt_cov_gt_0p5` | Fraction of references with soft coverage exceeding 0.1 / 0.5. | Used to see how many references receive strong signal versus weak contributions. |
+| `bestcov/corr_with_refs_hit` | Pearson correlation between `cov/refs_hit_mean` and the smooth coverage proxy per group. | Positive correlation means the smooth coverage reward aligns with actual discrete hits; near-zero implies the sigmoid kernel is being exploited. |
 
-### New coverage-difference explainer (current reward path)
+### Coverage-difference explainer
 
-The present code keeps the original noisy-OR kernel available while defaulting to a hard-δ difference reward. For each reference $j$ let $d^{(1)}_j = \min_i D_{i,j}$, $i^\star(j) = \arg\min_i D_{i,j}$, $d^{(2)}_j = \min_{i \ne i^\star(j)} D_{i,j}$, and define
+For each reference $j$ let $d^{(1)}_j = \min_i D_{i,j}$, $i^\star(j) = \arg\min_i D_{i,j}$, $d^{(2)}_j = \min_{i \ne i^\star(j)} D_{i,j}$, and define
 ```math
 \text{unique}_j = \mathbf{1}[d^{(1)}_j < \delta \ \wedge\ d^{(2)}_j \ge \delta].
 ```
-The smooth-coverage component per rollout becomes
-```math
-r^{\text{smcov}}_i = \frac{1}{M}\sum_{j: i^\star(j)=i} \text{unique}_j
-  + \frac{\text{unique\_quality\_weight}}{M} \sum_{j: i^\star(j)=i} \text{unique}_j \left(1 - \frac{d^{(1)}_j}{\delta}\right)
-  + \text{precision\_weight} \cdot \sigma\!\left(\frac{\delta - \min_j D_{i,j}}{\rho}\right),
-```
-with $\sigma(x)=1/(1+e^{-x})$. The diagnostic `smcov/*` metrics continue to report the soft proxy (now based on that sigmoid), while `covdiff/*` expose the discrete coverage ratios that drive the new reward.
+Then:
+- `covdiff/cover_ratio_mean` (and its duplicate `covdiff/covered_ratio_mean`) averages $\mathbf{1}[d^{(1)}_j < \delta]$ over references.
+- `covdiff/unique_cover_ratio_mean` (and `covdiff/unique_covered_ratio_mean`) average $\text{unique}_j$.
+- The smcov reward itself still relies on the sigmoid kernel described above; `covdiff/*` exposes the discrete coverage statistics derived from nearest/second-nearest RMSDs.
 
 ## G. Reward Decomposition
 
@@ -81,6 +80,10 @@ with $\sigma(x)=1/(1+e^{-x})$. The diagnostic `smcov/*` metrics continue to repo
 | --- | --- | --- |
 | `reward/total_mean`, `reward/total_std` | Final reward mean/std. | **Mean ≥0.4** indicates strong positive signal (given λ’s); std should be **≤ mean** for stable learning. |
 | `reward/comp_qual_mean`, `reward/comp_smcov_mean`, `reward/comp_match_mean` | Component contributions over valid rollouts. | Expect roughly proportional to λs; if one term dwarfs the others by ×10, consider retuning weights. |
+| `reward/comp_qual_std`, `reward/comp_smcov_std`, `reward/comp_match_std` | Component standard deviations over valid rollouts. | Identify which reward piece injects the most variance into the policy gradient. |
+| `reward/qual_group_std_mean`, `reward/smcov_group_std_mean`, `reward/match_group_std_mean` | Average within-group std for each component after gating. | Large values mean rewards fluctuate widely across the K rollouts even within the same prompt. |
+| `reward/group_std_mean` | Mean std of the total reward per prompt group. | Mirrors TRL’s `scale_rewards` behavior; high numbers suggest mixing prompts of wildly different difficulty. |
+| `reward/bestcov_rank_corr_mean` | Mean Spearman correlation between smcov contributions and total rewards within each group. | Should be positive—otherwise the smooth coverage term is out of sync with the final reward ordering. |
 | `reward/comp_smcov_frac` | Smooth coverage fraction. | **0.3–0.6** is typical with λ_smcov=8. Values near **1.0** mean the other terms contribute little; near **0** means coverage is ineffective. |
 
 ## H. Diversity

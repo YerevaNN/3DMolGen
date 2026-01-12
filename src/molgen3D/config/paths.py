@@ -229,11 +229,38 @@ def get_wandb_path(folder: str | Path) -> Path:
     return get_root_path("wandb_root", folder)
 
 
+def get_ckpt_tag_path(key: str) -> Path:
+    """
+    Resolve a checkpoint alias defined under the `ckpts` section of paths.yaml.
+
+    The key format is `<alias>` or `<alias>/<subpath>`, where `alias` maps to an
+    absolute (or repo-relative) directory. Any trailing subpath is appended to
+    that base.
+    """
+    ckpt_cfg = _get_config_section("ckpts")
+    if not ckpt_cfg:
+        raise KeyError("No 'ckpts' section defined in paths.yaml.")
+
+    normalized = key.strip()
+    if not normalized:
+        raise KeyError("Empty ckpts key cannot be resolved.")
+
+    alias, sep, remainder = normalized.partition("/")
+    alias = alias.strip()
+    base = ckpt_cfg.get(alias)
+    if base is None:
+        raise KeyError(
+            f"Unknown ckpts alias '{alias}', available: {sorted(ckpt_cfg.keys())}"
+        )
+    base_path = _to_absolute_path(base)
+    return base_path / remainder if sep else base_path
+
+
 def resolve_tag(tag: str) -> Path:
     """
     Resolve a structured tag like "base_paths:ckpts_root" into an absolute path.
     
-    Supported sections: base_paths, data, tokenizers.
+    Supported sections: base_paths, data, tokenizers, ckpts.
     If no colon is present, treats the tag as a direct path.
     
     Args:
@@ -257,6 +284,7 @@ def resolve_tag(tag: str) -> Path:
         "base_paths": get_base_path,
         "data": get_data_path,
         "tokenizers": get_tokenizer_path,
+        "ckpts": get_ckpt_tag_path,
     }
 
     handler = section_handlers.get(section)

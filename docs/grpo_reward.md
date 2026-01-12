@@ -56,7 +56,7 @@ If graph mismatch, the rollout gets `r_floor` (no point rewarding geometry for t
 ### 2.4 Finite RMSD gate (hard)
 Even if PoseBusters (or the base gate) passes, the rollout must have a **finite** $\min_j D_{i,j}$. If all RMSDs fail / are `inf`, the rollout is treated as invalid and gets `r_floor`.
 
-> Note on `hard_rmsd_gate`: in the current code, *finite RMSD is always required* for validity; the knob mainly controls logging/stats messaging. If you intended "graph-valid but no RMSD" to still be considered valid (with e.g. $r^{\mathrm{qual}}=0$), that requires a code change.
+> Note on `hard_rmsd_gate`: when `true` (default) the invalid rows are removed from `valid_mask`, so they drop out of `gate/final_valid_rate` **and** take the reward floor. When set to `false`, they still count toward validity metrics but `mask_for_distance` zeroes their rewards, so they effectively receive `r_floor` while you can keep visibility into how often RMSD failed.
 
 ---
 
@@ -153,6 +153,8 @@ Metrics are emitted to W&B (when a `wandb.run` is active) under these keys:
 ### Coverage & utilization
 - `cov/refs_hit_mean`, `cov/refs_hit_p50`, `cov/cov_ratio_mean`
 - `cov/unique_nearest_refs_mean`, `cov/nearest_collision_rate_mean`
+- `covdiff/cover_ratio_mean`, `covdiff/unique_cover_ratio_mean`
+- `covdiff/covered_ratio_mean`, `covdiff/unique_covered_ratio_mean` (currently mirrors the pair above because both pull from the same underlying ratios)
 - `cov/valid_rollouts_mean`
 
 ### Matching diagnostics
@@ -161,13 +163,16 @@ Metrics are emitted to W&B (when a `wandb.run` is active) under these keys:
 - `match/eligible_edge_density`
 
 ### Smooth marginal coverage
-- `smcov/soft_cov_mean`
-- `smcov/pct_gt_cov_gt_0p1`, `smcov/pct_gt_cov_gt_0p5`
-- `smcov/corr_with_refs_hit`
+- `bestcov/soft_cov_mean`
+- `bestcov/pct_gt_cov_gt_0p1`, `bestcov/pct_gt_cov_gt_0p5`
+- `bestcov/corr_with_refs_hit`
 
 ### Reward decomposition
 - `reward/total_mean`, `reward/total_std`
 - `reward/comp_qual_mean`, `reward/comp_smcov_mean`, `reward/comp_match_mean`
+- `reward/comp_qual_std`, `reward/comp_smcov_std`, `reward/comp_match_std`
+- `reward/qual_group_std_mean`, `reward/smcov_group_std_mean`, `reward/match_group_std_mean`, `reward/group_std_mean`
+- `reward/bestcov_rank_corr_mean`
 - `reward/comp_smcov_frac`
 
 ### Optional diversity proxy

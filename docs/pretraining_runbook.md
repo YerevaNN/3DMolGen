@@ -28,7 +28,7 @@ This section controls initialization mode and tokenizer selection.
   - `resume` → loads a previous Titan DCP; you must also set `resume_run_path_tag` and re-use the same run name.
 - `tokenizer_tag` *(required)* – alias under `paths.yaml.tokenizers`. `tokenizers:qwen3_0.6b_custom` lives inside the repo, while `tokenizers:qwen3_0.6b_origin` points at the untouched HF snapshot.
 - `base_model_tag` *(required when `init_mode="hf_pretrain"`)* – alias under `paths.yaml.base_paths` for the official checkpoint (`qwen3_0.6b_base_model`).
-- `resume_run_path_tag` *(required when `init_mode="resume"`)* – alias pointing to the existing checkpoint directory (e.g. `ckpts:qwen3_06b/<run-name>`).
+- `resume_run_path_tag` *(required when `init_mode="resume"`)* – alias pointing to the specific checkpoint folder (e.g. `ckpts:qwen3_06b/<run-name>/step-90000`). The `ckpts` aliases are defined in `paths.yaml.ckpts` so you can keep Slurm configs portable.
 - `run_name` *(optional)* – force a specific run name (used when resuming a run and you want logs/checkpoints to stay in the same directories). If absent, the runner auto-generates `YYMMDD-HHMM-<4hex>-<description>` using `[job].description` to avoid collisions even when launchers don’t inject one.
 
 ### `[model]`
