@@ -25,6 +25,21 @@ Usage:
     # Stack optimizations: test all combinations of expandable_segments x batch_sizes x compile_modes
     python scripts/benchmark_inference.py --limit 50 --test_expandable_segments \\
         --batch_sizes 128,256 --compile_modes reduce-overhead,max-autotune
+
+    # Profile prefill vs decode phases (to evaluate "prefill once" optimization potential)
+    python scripts/benchmark_inference.py --limit 50 --profile_phases --batch_sizes 256
+
+    # Slurm job with phase profiling
+    python scripts/benchmark_inference.py --limit 100 --profile_phases --device a100
+
+    # A/B test: current approach vs "prefill once, decode many" caching (local)
+    python scripts/benchmark_inference.py --test_prefill_caching --limit 5 --gens_per_mol 50
+
+    # A/B test submitted to A100 via Slurm (returns immediately)
+    python scripts/benchmark_inference.py --test_prefill_caching --limit 5 --gens_per_mol 100 --device a100
+
+    # Test with more molecules and higher generation count
+    python scripts/benchmark_inference.py --test_prefill_caching --limit 10 --gens_per_mol 200 --device a100
 """
 
 from __future__ import annotations
@@ -66,6 +81,12 @@ class BenchmarkResult:
     expandable_segments: bool
     compile_mode: str | None
     warmup_time_sec: float = 0.0
+    # Phase timing breakdown (when --profile_phases is enabled)
+    prefill_time_sec: float = 0.0
+    decode_time_sec: float = 0.0
+    prefill_pct: float = 0.0  # Percentage of time spent in prefill
+    avg_prompt_tokens: float = 0.0
+    avg_generated_tokens: float = 0.0
 
 
 @dataclass
@@ -151,6 +172,429 @@ def run_warmup(model, tokenizer, gen_config, eos_token_id, num_warmup: int = 3) 
         torch.cuda.synchronize()
 
     return time.perf_counter() - warmup_start
+
+
+def measure_prefill_only(
+    model,
+    tokenizer,
+    prompts: list[str],
+    num_runs: int = 3,
+) -> tuple[float, float]:
+    """Measure ONLY the prefill phase (no token generation).
+
+    Prefill = processing all prompt tokens in parallel to build the KV cache.
+    This is the "understand the prompt" phase before generation starts.
+
+    Args:
+        model: The loaded model
+        tokenizer: The tokenizer
+        prompts: List of prompt strings
+        num_runs: Number of runs to average
+
+    Returns:
+        (avg_prefill_time_ms, avg_prompt_tokens)
+    """
+    inputs = tokenizer(prompts, return_tensors="pt", padding=True, pad_to_multiple_of=8)
+    inputs = {k: v.to(model.device, non_blocking=True) for k, v in inputs.items()}
+
+    avg_prompt_tokens = inputs["attention_mask"].sum().item() / len(prompts)
+
+    times = []
+    for _ in range(num_runs):
+        torch.cuda.synchronize()
+        start = time.perf_counter()
+
+        with torch.inference_mode():
+            # Forward pass only (prefill) - no generation
+            # This computes the KV cache for all prompt tokens
+            outputs = model(
+                input_ids=inputs["input_ids"],
+                attention_mask=inputs["attention_mask"],
+                use_cache=True,  # Build KV cache
+            )
+            # Force synchronization to get accurate timing
+            torch.cuda.synchronize()
+
+        times.append(time.perf_counter() - start)
+        del outputs
+
+    avg_time_sec = sum(times) / len(times)
+    return avg_time_sec, avg_prompt_tokens
+
+
+def expand_kv_cache(past_key_values, num_copies: int):
+    """Expand KV cache from batch_size=1 to batch_size=num_copies.
+
+    This is the key operation for "prefill once, decode many":
+    - We prefill a single prompt to get KV cache for 1 sequence
+    - We tile/repeat it to N copies so we can decode N different outputs
+
+    Args:
+        past_key_values: KV cache from model forward pass. Can be:
+                        - Tuple of (key, value) tuples (older format)
+                        - DynamicCache object (newer transformers)
+        num_copies: Number of copies to expand to
+
+    Returns:
+        Expanded past_key_values with batch_size=num_copies
+    """
+    from transformers.cache_utils import DynamicCache
+
+    # Handle DynamicCache (newer transformers format)
+    if isinstance(past_key_values, DynamicCache):
+        expanded_cache = DynamicCache()
+        for layer_idx in range(len(past_key_values)):
+            # New API: access via .layers[idx].keys/.values
+            layer = past_key_values.layers[layer_idx]
+            key_states = layer.keys
+            value_states = layer.values
+
+            # Expand batch dimension: (1, H, S, D) -> (N, H, S, D)
+            # IMPORTANT: Use .clone() to break CUDA graph dependencies when using torch.compile
+            # The repeat() operation creates new storage, but we clone first to ensure
+            # we're not referencing tensors that CUDA graphs might overwrite
+            expanded_key = key_states.clone().repeat(num_copies, 1, 1, 1)
+            expanded_value = value_states.clone().repeat(num_copies, 1, 1, 1)
+
+            expanded_cache.update(expanded_key, expanded_value, layer_idx)
+
+        return expanded_cache
+
+    # Handle tuple format (older transformers)
+    expanded = []
+    for layer_kv in past_key_values:
+        # layer_kv is a tuple (key_states, value_states)
+        # Each has shape (batch, num_heads, seq_len, head_dim)
+        key_states, value_states = layer_kv
+
+        # Expand batch dimension: (1, H, S, D) -> (N, H, S, D)
+        # Clone first to break CUDA graph dependencies
+        expanded_key = key_states.clone().repeat(num_copies, 1, 1, 1)
+        expanded_value = value_states.clone().repeat(num_copies, 1, 1, 1)
+
+        expanded.append((expanded_key, expanded_value))
+
+    return tuple(expanded)
+
+
+def generate_with_cached_prefill(
+    model,
+    tokenizer,
+    prompt: str,
+    num_generations: int,
+    gen_config,
+    eos_token_id,
+    max_new_tokens: int = 2500,
+) -> tuple[list[str], float, float]:
+    """Generate multiple outputs from one prompt using cached prefill.
+
+    Uses the official HuggingFace approach:
+    1. Initialize StaticCache and prefill with prompt
+    2. Clone the cache with copy.deepcopy()
+    3. Use model.generate() with the cloned cache
+
+    This approach is compatible with torch.compile and CUDA graphs.
+
+    Args:
+        model: The model
+        tokenizer: The tokenizer
+        prompt: Single prompt string
+        num_generations: Number of different outputs to generate
+        gen_config: Generation config (sampling parameters)
+        eos_token_id: EOS token ID
+        max_new_tokens: Max tokens to generate
+
+    Returns:
+        (decoded_outputs, prefill_time_sec, decode_time_sec)
+    """
+    import copy
+    from transformers import StaticCache
+
+    # Tokenize single prompt
+    inputs = tokenizer(prompt, return_tensors="pt", padding=True)
+    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+    prompt_len = inputs["input_ids"].shape[1]
+
+    # === PHASE 1: Prefill once using StaticCache ===
+    # Estimate max cache length: prompt + max_new_tokens
+    max_cache_len = prompt_len + max_new_tokens
+
+    torch.cuda.synchronize()
+    prefill_start = time.perf_counter()
+
+    with torch.no_grad():
+        # Initialize StaticCache - this is the official HuggingFace approach
+        prompt_cache = StaticCache(config=model.config, max_cache_len=max_cache_len, batch_size=1)
+
+        # Prefill: run forward pass to populate the cache
+        _ = model(
+            input_ids=inputs["input_ids"],
+            attention_mask=inputs["attention_mask"],
+            past_key_values=prompt_cache,
+            use_cache=True,
+        )
+        torch.cuda.synchronize()
+
+    prefill_time = time.perf_counter() - prefill_start
+
+    # === PHASE 2: Generate multiple sequences using cloned caches ===
+    torch.cuda.synchronize()
+    decode_start = time.perf_counter()
+
+    decoded_outputs = []
+
+    with torch.no_grad():
+        for _ in range(num_generations):
+            # Clone the prefilled cache - official HuggingFace pattern
+            cloned_cache = copy.deepcopy(prompt_cache)
+
+            # Generate using model.generate() with the cloned cache
+            # Important: pass full input_ids for position tracking
+            outputs = model.generate(
+                input_ids=inputs["input_ids"],
+                attention_mask=inputs["attention_mask"],
+                past_key_values=cloned_cache,
+                max_new_tokens=max_new_tokens,
+                eos_token_id=eos_token_id,
+                generation_config=gen_config,
+                use_cache=True,
+            )
+
+            decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
+            decoded_outputs.append(decoded)
+
+        torch.cuda.synchronize()
+
+    decode_time = time.perf_counter() - decode_start
+
+    return decoded_outputs, prefill_time, decode_time
+
+
+def benchmark_prefill_caching(
+    model,
+    tokenizer,
+    unique_molecules: dict[str, int],
+    gen_config,
+    eos_token_id,
+    max_generations_per_mol: int = 200,
+) -> dict:
+    """Compare current approach vs cached prefill approach.
+
+    Args:
+        model: The model
+        tokenizer: The tokenizer
+        unique_molecules: Dict of {smiles: num_conformers_needed}
+        gen_config: Generation config
+        eos_token_id: EOS token ID
+        max_generations_per_mol: Cap on generations per molecule for testing
+
+    Returns:
+        Dict with timing comparison results
+    """
+    results = {
+        "current_approach": {"total_time": 0, "prefill_time": 0, "decode_time": 0, "num_generated": 0},
+        "cached_prefill": {"total_time": 0, "prefill_time": 0, "decode_time": 0, "num_generated": 0},
+    }
+
+    # Test on a few molecules
+    test_mols = list(unique_molecules.items())[:5]  # Test 5 molecules
+
+    for smiles, num_gens in tqdm(test_mols, desc="Comparing approaches"):
+        num_gens = min(num_gens, max_generations_per_mol)
+        prompt = f"[SMILES]{smiles}[/SMILES]"
+
+        # === Current approach: duplicate prompts, batch together ===
+        logger.info(f"Testing CURRENT approach: {smiles[:30]}... x{num_gens}")
+        prompts = [prompt] * num_gens
+        inputs = tokenizer(prompts, return_tensors="pt", padding=True)
+        inputs = {k: v.to(model.device) for k, v in inputs.items()}
+
+        torch.cuda.synchronize()
+        current_start = time.perf_counter()
+
+        with torch.inference_mode():
+            outputs = model.generate(
+                input_ids=inputs["input_ids"],
+                attention_mask=inputs["attention_mask"],
+                max_new_tokens=800,  # Shorter for testing
+                eos_token_id=eos_token_id,
+                generation_config=gen_config,
+                use_cache=True,
+            )
+        torch.cuda.synchronize()
+
+        current_time = time.perf_counter() - current_start
+        results["current_approach"]["total_time"] += current_time
+        results["current_approach"]["num_generated"] += num_gens
+        del outputs
+        torch.cuda.empty_cache()
+
+        # === Cached prefill approach: prefill once, decode many ===
+        logger.info(f"Testing CACHED PREFILL approach: {smiles[:30]}... x{num_gens}")
+
+        try:
+            _, prefill_time, decode_time = generate_with_cached_prefill(
+                model, tokenizer, prompt, num_gens,
+                gen_config, eos_token_id, max_new_tokens=800,
+            )
+            cached_total = prefill_time + decode_time
+            results["cached_prefill"]["total_time"] += cached_total
+            results["cached_prefill"]["prefill_time"] += prefill_time
+            results["cached_prefill"]["decode_time"] += decode_time
+            results["cached_prefill"]["num_generated"] += num_gens
+        except Exception as e:
+            import traceback
+            logger.warning(f"Cached prefill failed: {e}")
+            logger.warning(f"Full traceback:\n{traceback.format_exc()}")
+            # Fall back to current approach timing
+            results["cached_prefill"]["total_time"] += current_time
+            results["cached_prefill"]["num_generated"] += num_gens
+
+        torch.cuda.empty_cache()
+
+    # Calculate speedup
+    if results["cached_prefill"]["total_time"] > 0:
+        results["speedup"] = results["current_approach"]["total_time"] / results["cached_prefill"]["total_time"]
+    else:
+        results["speedup"] = 1.0
+
+    return results
+
+
+def run_single_benchmark_with_phases(
+    model,
+    tokenizer,
+    mols_list: list,
+    batch_size: int,
+    gen_config,
+    eos_token_id,
+    config_name: str,
+    expandable_segments: bool,
+    compile_mode: str | None,
+    warmup_time: float,
+) -> BenchmarkResult:
+    """Run benchmark WITH detailed prefill vs decode phase timing.
+
+    This runs the benchmark in two passes:
+    1. Prefill-only pass: Measure time to process prompts (no generation)
+    2. Full generation pass: Measure total time
+
+    Decode time = Total time - Prefill time
+    """
+    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.synchronize()
+
+    total_tokens = 0
+    total_prompt_tokens = 0
+    total_generated_tokens = 0
+    oom_occurred = False
+
+    # Accumulators for phase timing
+    total_prefill_time = 0.0
+    total_generation_time = 0.0
+    num_batches = 0
+
+    try:
+        for start_idx in tqdm(range(0, len(mols_list), batch_size), desc=f"{config_name} (profiling)", leave=False):
+            batch = mols_list[start_idx:start_idx + batch_size]
+            prompts = [item[1] for item in batch]
+
+            inputs = tokenizer(prompts, return_tensors="pt", padding=True, pad_to_multiple_of=8)
+            inputs = {k: v.to(model.device, non_blocking=True) for k, v in inputs.items()}
+
+            prompt_lens = inputs["attention_mask"].sum(dim=1)
+            total_prompt_tokens += int(prompt_lens.sum().item())
+
+            # === PHASE 1: Prefill only ===
+            torch.cuda.synchronize()
+            prefill_start = time.perf_counter()
+
+            with torch.inference_mode():
+                prefill_outputs = model(
+                    input_ids=inputs["input_ids"],
+                    attention_mask=inputs["attention_mask"],
+                    use_cache=True,
+                )
+                torch.cuda.synchronize()
+
+            prefill_time = time.perf_counter() - prefill_start
+            total_prefill_time += prefill_time
+            del prefill_outputs
+
+            # === PHASE 2: Full generation ===
+            torch.cuda.synchronize()
+            gen_start = time.perf_counter()
+
+            with torch.inference_mode():
+                outputs = model.generate(
+                    input_ids=inputs["input_ids"],
+                    attention_mask=inputs["attention_mask"],
+                    max_new_tokens=2500,
+                    eos_token_id=eos_token_id,
+                    generation_config=gen_config,
+                    use_cache=True,
+                )
+                torch.cuda.synchronize()
+
+            gen_time = time.perf_counter() - gen_start
+            total_generation_time += gen_time
+
+            # Count tokens
+            gen_lens = (outputs != tokenizer.pad_token_id).sum(dim=1) - prompt_lens.to(outputs.device)
+            batch_generated = int(gen_lens.sum().item())
+            total_generated_tokens += batch_generated
+            total_tokens += batch_generated
+
+            num_batches += 1
+            del outputs
+
+    except torch.cuda.OutOfMemoryError:
+        oom_occurred = True
+        torch.cuda.empty_cache()
+        logger.warning(f"OOM at batch_size={batch_size}")
+
+    torch.cuda.synchronize()
+
+    # Calculate metrics
+    peak_mem = torch.cuda.max_memory_allocated() / (1024**3)
+
+    # Decode time = Generation time - Prefill time
+    # (because generate() includes prefill internally)
+    total_decode_time = max(0, total_generation_time - total_prefill_time)
+
+    # But wait - generate() does its OWN prefill, so we measured prefill twice.
+    # The actual breakdown is:
+    # - total_prefill_time: Our separate prefill measurement
+    # - total_generation_time: Includes HF's internal prefill + decode
+    #
+    # So the TRUE prefill percentage based on our measurement:
+    prefill_pct = (total_prefill_time / total_generation_time * 100) if total_generation_time > 0 else 0
+
+    tps = total_tokens / total_generation_time if total_generation_time > 0 and not oom_occurred else 0
+    mps = len(mols_list) / total_generation_time if total_generation_time > 0 and not oom_occurred else 0
+
+    avg_prompt = total_prompt_tokens / len(mols_list) if mols_list else 0
+    avg_gen = total_generated_tokens / len(mols_list) if mols_list else 0
+
+    return BenchmarkResult(
+        config_name=config_name,
+        batch_size=batch_size,
+        num_molecules=len(mols_list),
+        total_time_sec=total_generation_time,
+        tokens_per_sec=tps,
+        molecules_per_sec=mps,
+        peak_memory_gb=peak_mem,
+        oom_occurred=oom_occurred,
+        expandable_segments=expandable_segments,
+        compile_mode=compile_mode,
+        warmup_time_sec=warmup_time,
+        # Phase breakdown
+        prefill_time_sec=total_prefill_time,
+        decode_time_sec=total_decode_time,
+        prefill_pct=prefill_pct,
+        avg_prompt_tokens=avg_prompt,
+        avg_generated_tokens=avg_gen,
+    )
 
 
 def run_single_benchmark(
@@ -274,13 +718,22 @@ def run_single_config_job(
     compile_str = config["compile_mode"] if config["compile_mode"] else "none"
     config_name = f"{expand_str}_compile={compile_str}_bs={config['batch_size']}"
 
-    # Run benchmark
-    result = run_single_benchmark(
-        model, tokenizer, mols_list, config["batch_size"],
-        gen_config, eos_token_id, config_name,
-        config["expandable_segments"], config["compile_mode"],
-        warmup_time,
-    )
+    # Run benchmark (use phase profiling if requested)
+    profile_phases = config.get("profile_phases", False)
+    if profile_phases:
+        result = run_single_benchmark_with_phases(
+            model, tokenizer, mols_list, config["batch_size"],
+            gen_config, eos_token_id, config_name,
+            config["expandable_segments"], config["compile_mode"],
+            warmup_time,
+        )
+    else:
+        result = run_single_benchmark(
+            model, tokenizer, mols_list, config["batch_size"],
+            gen_config, eos_token_id, config_name,
+            config["expandable_segments"], config["compile_mode"],
+            warmup_time,
+        )
 
     # Save result
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -307,6 +760,40 @@ def load_test_data(test_set: str, limit: int) -> list[tuple[str, str]]:
     # Sort by length (like inference.py) and limit
     mols_list.sort(key=lambda x: len(x[0]))
     return mols_list[:limit]
+
+
+def load_unique_molecules_with_counts(test_set: str, limit: int) -> dict[str, int]:
+    """Load unique molecules with their conformer counts for prefill caching test.
+
+    This is different from load_test_data which duplicates molecules.
+    Here we return {smiles: num_conformers_needed} for the caching comparison.
+
+    Args:
+        test_set: Test set name (clean, distinct, xl, qm9)
+        limit: Max number of unique molecules to return
+
+    Returns:
+        Dict mapping SMILES to number of conformers needed
+    """
+    with open(get_data_path(f"{test_set}_smi"), 'rb') as f:
+        test_data = cloudpickle.load(f)
+
+    unique_mols = {}
+    for geom_smiles, data in test_data.items():
+        if test_set == "clean":
+            smiles = data['corrected_smi']
+            # In clean mode, conformer count is num_confs * 2 (like inference.py)
+            num_confs = data.get("num_confs", 1) * 2
+            unique_mols[smiles] = num_confs
+        else:
+            # distinct, xl, qm9 - each sub_smiles has a count
+            for sub_smiles, count in data.get("sub_smiles_counts", {}).items():
+                num_confs = count * 2  # Match inference.py duplication
+                unique_mols[sub_smiles] = num_confs
+
+    # Sort by SMILES length and limit
+    sorted_mols = sorted(unique_mols.items(), key=lambda x: len(x[0]))
+    return dict(sorted_mols[:limit])
 
 
 def run_benchmark(args: argparse.Namespace) -> None:
@@ -441,20 +928,38 @@ def run_single_gpu_benchmark(
         config_name = f"{expand_str}_compile={compile_str}_bs={bs}"
         logger.info(f"Benchmarking: {config_name}")
 
-        result = run_single_benchmark(
-            model, tokenizer, mols_list, bs,
-            gen_config, eos_token_id, config_name,
-            expand, compile_mode,
-            warmup_time,
-        )
+        # Choose benchmark function based on --profile_phases flag
+        if args.profile_phases:
+            result = run_single_benchmark_with_phases(
+                model, tokenizer, mols_list, bs,
+                gen_config, eos_token_id, config_name,
+                expand, compile_mode,
+                warmup_time,
+            )
+        else:
+            result = run_single_benchmark(
+                model, tokenizer, mols_list, bs,
+                gen_config, eos_token_id, config_name,
+                expand, compile_mode,
+                warmup_time,
+            )
         results.append(result)
 
-        logger.info(
-            f"  -> {result.tokens_per_sec:.1f} tok/s, "
-            f"{result.molecules_per_sec:.2f} mol/s, "
-            f"peak={result.peak_memory_gb:.2f} GB, "
-            f"OOM={result.oom_occurred}"
-        )
+        # Log results - include phase timing if profiling
+        if args.profile_phases and not result.oom_occurred:
+            logger.info(
+                f"  -> {result.tokens_per_sec:.1f} tok/s, "
+                f"peak={result.peak_memory_gb:.2f} GB | "
+                f"PREFILL: {result.prefill_time_sec:.2f}s ({result.prefill_pct:.1f}%), "
+                f"DECODE: {result.decode_time_sec:.2f}s ({100-result.prefill_pct:.1f}%)"
+            )
+        else:
+            logger.info(
+                f"  -> {result.tokens_per_sec:.1f} tok/s, "
+                f"{result.molecules_per_sec:.2f} mol/s, "
+                f"peak={result.peak_memory_gb:.2f} GB, "
+                f"OOM={result.oom_occurred}"
+            )
 
     # Cleanup
     if model is not None:
@@ -497,6 +1002,7 @@ def run_multi_gpu_benchmark(
             "compile_mode": compile_mode,
             "model_alias": args.model_alias,
             "model_step": args.model_step,
+            "profile_phases": args.profile_phases,
         }
         result_file = output_dir / f"result_{i}.json"
 
@@ -557,6 +1063,44 @@ def print_benchmark_summary(
                     f"{r.tokens_per_sec:7.1f} tok/s, "
                     f"peak={r.peak_memory_gb:.2f} GB"
                 )
+
+    # Print phase timing breakdown if profiling was enabled
+    if args.profile_phases:
+        logger.info("\n" + "=" * 60)
+        logger.info("PREFILL vs DECODE PHASE BREAKDOWN")
+        logger.info("=" * 60)
+        logger.info("")
+        logger.info("What these numbers mean:")
+        logger.info("  PREFILL: Processing the prompt (SMILES) to build KV cache")
+        logger.info("  DECODE:  Generating coordinates token-by-token")
+        logger.info("")
+        logger.info("-" * 60)
+        for r in results:
+            if not r.oom_occurred and r.prefill_time_sec > 0:
+                logger.info(f"Config: {r.config_name}")
+                logger.info(f"  Avg prompt tokens:  {r.avg_prompt_tokens:.0f}")
+                logger.info(f"  Avg generated tokens: {r.avg_generated_tokens:.0f}")
+                logger.info(f"  Total time:    {r.total_time_sec:.2f}s")
+                logger.info(f"  Prefill time:  {r.prefill_time_sec:.2f}s ({r.prefill_pct:.1f}%)")
+                logger.info(f"  Decode time:   {r.decode_time_sec:.2f}s ({100-r.prefill_pct:.1f}%)")
+                logger.info("")
+
+        # Calculate aggregate stats
+        valid = [r for r in results if not r.oom_occurred and r.prefill_time_sec > 0]
+        if valid:
+            avg_prefill_pct = sum(r.prefill_pct for r in valid) / len(valid)
+            logger.info("-" * 60)
+            logger.info(f"AVERAGE PREFILL PERCENTAGE: {avg_prefill_pct:.1f}%")
+            logger.info("")
+            if avg_prefill_pct < 5:
+                logger.info("CONCLUSION: Prefill is <5% of time - 'prefill once' optimization")
+                logger.info("            would save minimal time. Focus on other optimizations.")
+            elif avg_prefill_pct < 15:
+                logger.info("CONCLUSION: Prefill is 5-15% of time - moderate savings possible")
+                logger.info("            from 'prefill once' but may not be worth implementation effort.")
+            else:
+                logger.info("CONCLUSION: Prefill is >15% of time - 'prefill once' optimization")
+                logger.info("            could provide meaningful speedup. Consider vLLM migration.")
 
 
 def collect_results(run_dir: Path) -> None:
@@ -654,6 +1198,42 @@ def collect_results(run_dir: Path) -> None:
             expand_str = "ON " if r.expandable_segments else "OFF"
             logger.info(f"  expand={expand_str} bs={r.batch_size}: {r.tokens_per_sec:.1f} tok/s, peak={r.peak_memory_gb:.2f} GB")
 
+    # Print phase timing breakdown if results include phase data
+    phase_results = [r for r in valid_results if r.prefill_time_sec > 0]
+    if phase_results:
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info("PREFILL vs DECODE PHASE BREAKDOWN")
+        logger.info("=" * 60)
+        logger.info("")
+        logger.info("What these numbers mean:")
+        logger.info("  PREFILL: Processing the prompt (SMILES) to build KV cache")
+        logger.info("  DECODE:  Generating coordinates token-by-token")
+        logger.info("")
+        logger.info("-" * 60)
+        for r in phase_results:
+            logger.info(f"Config: {r.config_name}")
+            logger.info(f"  Avg prompt tokens:  {r.avg_prompt_tokens:.0f}")
+            logger.info(f"  Avg generated tokens: {r.avg_generated_tokens:.0f}")
+            logger.info(f"  Total time:    {r.total_time_sec:.2f}s")
+            logger.info(f"  Prefill time:  {r.prefill_time_sec:.2f}s ({r.prefill_pct:.1f}%)")
+            logger.info(f"  Decode time:   {r.decode_time_sec:.2f}s ({100-r.prefill_pct:.1f}%)")
+            logger.info("")
+
+        avg_prefill_pct = sum(r.prefill_pct for r in phase_results) / len(phase_results)
+        logger.info("-" * 60)
+        logger.info(f"AVERAGE PREFILL PERCENTAGE: {avg_prefill_pct:.1f}%")
+        logger.info("")
+        if avg_prefill_pct < 5:
+            logger.info("CONCLUSION: Prefill is <5% of time - 'prefill once' optimization")
+            logger.info("            would save minimal time. Focus on other optimizations.")
+        elif avg_prefill_pct < 15:
+            logger.info("CONCLUSION: Prefill is 5-15% of time - moderate savings possible")
+            logger.info("            from 'prefill once' but may not be worth implementation effort.")
+        else:
+            logger.info("CONCLUSION: Prefill is >15% of time - 'prefill once' optimization")
+            logger.info("            could provide meaningful speedup. Consider vLLM migration.")
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -678,6 +1258,12 @@ def main():
                         help="Comma-separated compile modes: none,default,reduce-overhead,max-autotune")
     parser.add_argument("--test_expandable_segments", action="store_true",
                         help="Run A/B comparison with/without expandable_segments")
+    parser.add_argument("--profile_phases", action="store_true",
+                        help="Measure prefill vs decode time breakdown (adds ~50%% overhead)")
+    parser.add_argument("--test_prefill_caching", action="store_true",
+                        help="A/B test: current approach vs 'prefill once, decode many' (runs locally)")
+    parser.add_argument("--gens_per_mol", type=int, default=50,
+                        help="Number of generations per molecule for prefill caching test (default: 50)")
     parser.add_argument("--output_dir", type=str, default="outputs/gen_benchmarking",
                         help="Base directory for benchmark results (default: outputs/gen_benchmarking)")
     parser.add_argument("--num_gpus", type=int, default=1,
@@ -693,7 +1279,233 @@ def main():
         collect_results(Path(args.collect))
         return
 
+    # Handle --test_prefill_caching mode (A/B test, runs locally)
+    if args.test_prefill_caching:
+        run_prefill_caching_test(args)
+        return
+
     run_benchmark(args)
+
+
+def run_prefill_caching_job(config: dict, output_dir: Path) -> dict:
+    """Run the prefill caching A/B test. Can be submitted as a Slurm job.
+
+    Args:
+        config: Dict with keys: test_set, limit, gens_per_mol, model_alias, model_step
+        output_dir: Directory to save results
+
+    Returns:
+        Results dict with timing comparison
+    """
+    set_seed(42)
+
+    # Set expandable_segments
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+    # Setup logging
+    output_dir.mkdir(parents=True, exist_ok=True)
+    logger.add(output_dir / "benchmark.log")
+
+    logger.info("=" * 60)
+    logger.info("PREFILL CACHING A/B TEST (Slurm Job)")
+    logger.info("=" * 60)
+    logger.info(f"Config: {config}")
+
+    # Load model
+    logger.info("Loading model...")
+    model, tokenizer = load_model_tokenizer(
+        model_path=get_ckpt(config["model_alias"], config["model_step"]),
+        tokenizer_path=get_tokenizer_path("qwen3_0.6b_custom"),
+        torch_dtype="bfloat16",
+        compile_mode="reduce-overhead",
+    )
+    logger.info(f"Model loaded: {model.dtype}, {model.device}")
+
+    eos_token_id = tokenizer.encode("<|endoftext|>", add_special_tokens=False)
+    gen_config = sampling_configs["top_p_sampling1"]
+
+    # Warmup
+    logger.info("Running warmup...")
+    run_warmup(model, tokenizer, gen_config, eos_token_id)
+
+    # Load unique molecules
+    logger.info("Loading test molecules...")
+    unique_mols = load_unique_molecules_with_counts(config["test_set"], config["limit"])
+    logger.info(f"Loaded {len(unique_mols)} unique molecules")
+
+    # Run comparison
+    logger.info("Starting A/B comparison...")
+    results = benchmark_prefill_caching(
+        model, tokenizer, unique_mols,
+        gen_config, eos_token_id,
+        max_generations_per_mol=config["gens_per_mol"],
+    )
+
+    # Save results
+    results_file = output_dir / "prefill_caching_results.json"
+    with open(results_file, 'w') as f:
+        json.dump(results, f, indent=2)
+
+    logger.info(f"Results saved to: {results_file}")
+    return results
+
+
+def run_prefill_caching_test(args: argparse.Namespace) -> None:
+    """Run A/B comparison: current approach vs 'prefill once, decode many'.
+
+    This test compares:
+    - CURRENT: Duplicate prompts N times, batch them, each computes its own KV cache
+    - CACHED:  Prefill prompt once, expand KV cache to N copies, decode N sequences
+
+    Supports both local execution and Slurm submission via --device flag.
+    """
+    # Create output directory
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    run_name = f"prefill_caching_test_{args.test_set}_{args.limit}mols_{timestamp}"
+    output_dir = Path(args.output_dir) / run_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    config = {
+        "test_set": args.test_set,
+        "limit": args.limit,
+        "gens_per_mol": args.gens_per_mol,
+        "model_alias": args.model_alias,
+        "model_step": args.model_step,
+    }
+
+    # Submit to Slurm if device is specified
+    if args.device in ["a100", "h100"]:
+        logger.info(f"Submitting prefill caching test to Slurm partition '{args.device}'...")
+
+        executor = submitit.AutoExecutor(folder=str(output_dir / "slurm_jobs"))
+        executor.update_parameters(
+            name="prefill_cache_test",
+            timeout_min=120,
+            gpus_per_node=1,
+            nodes=1,
+            mem_gb=80,
+            cpus_per_task=12,
+            slurm_additional_parameters={"partition": args.device},
+        )
+
+        job = executor.submit(run_prefill_caching_job, config, output_dir)
+
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info(f"Job submitted! Job ID: {job.job_id}")
+        logger.info(f"Monitor with: squeue -u $USER")
+        logger.info(f"View logs: tail -f {output_dir}/slurm_jobs/{job.job_id}_log.out")
+        logger.info(f"Results will be at: {output_dir}/prefill_caching_results.json")
+        logger.info("=" * 60)
+        return
+
+    # Local execution
+    set_seed(42)
+    logger.add(output_dir / "benchmark.log")
+
+    logger.info("=" * 60)
+    logger.info("PREFILL CACHING A/B TEST")
+    logger.info("=" * 60)
+    logger.info("")
+    logger.info("Comparing two approaches:")
+    logger.info("  CURRENT: Duplicate prompts, each computes its own KV cache")
+    logger.info("  CACHED:  Prefill once, expand KV cache, decode many")
+    logger.info("")
+    logger.info(f"Test set: {args.test_set}")
+    logger.info(f"Unique molecules: {args.limit}")
+    logger.info(f"Generations per molecule: {args.gens_per_mol}")
+    logger.info(f"Output: {output_dir}")
+    logger.info("")
+
+    # Set expandable_segments (use it for both to be fair)
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+    # Load model
+    logger.info("Loading model...")
+    model, tokenizer = load_model_tokenizer(
+        model_path=get_ckpt(args.model_alias, args.model_step),
+        tokenizer_path=get_tokenizer_path("qwen3_0.6b_custom"),
+        torch_dtype="bfloat16",
+        compile_mode="reduce-overhead",
+    )
+    logger.info(f"Model loaded: {model.dtype}, {model.device}")
+
+    eos_token_id = tokenizer.encode("<|endoftext|>", add_special_tokens=False)
+    gen_config = sampling_configs["top_p_sampling1"]
+
+    # Warmup
+    logger.info("Running warmup...")
+    run_warmup(model, tokenizer, gen_config, eos_token_id)
+
+    # Load unique molecules
+    logger.info("Loading test molecules...")
+    unique_mols = load_unique_molecules_with_counts(args.test_set, args.limit)
+    logger.info(f"Loaded {len(unique_mols)} unique molecules")
+
+    # Get conformer counts
+    total_gens = sum(min(count, args.gens_per_mol) for count in unique_mols.values())
+    avg_gens = total_gens / len(unique_mols) if unique_mols else 0
+    logger.info(f"Total generations to compare: {total_gens} (avg {avg_gens:.1f} per mol)")
+    logger.info("")
+
+    # Run comparison
+    logger.info("Starting A/B comparison...")
+    results = benchmark_prefill_caching(
+        model, tokenizer, unique_mols,
+        gen_config, eos_token_id,
+        max_generations_per_mol=args.gens_per_mol,
+    )
+
+    # Print results
+    logger.info("")
+    logger.info("=" * 60)
+    logger.info("PREFILL CACHING TEST RESULTS")
+    logger.info("=" * 60)
+    logger.info("")
+
+    current = results["current_approach"]
+    cached = results["cached_prefill"]
+
+    logger.info(f"CURRENT APPROACH (duplicate prompts):")
+    logger.info(f"  Total time:     {current['total_time']:.2f}s")
+    logger.info(f"  Generations:    {current['num_generated']}")
+    if current['total_time'] > 0:
+        logger.info(f"  Throughput:     {current['num_generated'] / current['total_time']:.2f} gen/s")
+    logger.info("")
+
+    logger.info(f"CACHED PREFILL (prefill once, decode many):")
+    logger.info(f"  Total time:     {cached['total_time']:.2f}s")
+    logger.info(f"  Prefill time:   {cached['prefill_time']:.3f}s")
+    logger.info(f"  Decode time:    {cached['decode_time']:.2f}s")
+    logger.info(f"  Generations:    {cached['num_generated']}")
+    if cached['total_time'] > 0:
+        logger.info(f"  Throughput:     {cached['num_generated'] / cached['total_time']:.2f} gen/s")
+    logger.info("")
+
+    speedup = results["speedup"]
+    logger.info("-" * 60)
+    if speedup > 1.05:
+        logger.info(f"SPEEDUP: {speedup:.2f}x FASTER with cached prefill!")
+        logger.info("")
+        logger.info("CONCLUSION: 'Prefill once' optimization provides measurable benefit.")
+        logger.info("            Consider implementing this in production inference.")
+    elif speedup > 0.95:
+        logger.info(f"SPEEDUP: {speedup:.2f}x (roughly equal)")
+        logger.info("")
+        logger.info("CONCLUSION: No significant difference between approaches.")
+        logger.info("            Current approach is fine, optimization not needed.")
+    else:
+        logger.info(f"SPEEDUP: {speedup:.2f}x (cached approach is SLOWER)")
+        logger.info("")
+        logger.info("CONCLUSION: Cached prefill is slower (unexpected).")
+        logger.info("            This might indicate overhead from KV cache expansion.")
+
+    # Save results
+    results_file = output_dir / "prefill_caching_results.json"
+    with open(results_file, 'w') as f:
+        json.dump(results, f, indent=2)
+    logger.info("")
+    logger.info(f"Results saved to: {results_file}")
 
 
 if __name__ == "__main__":
