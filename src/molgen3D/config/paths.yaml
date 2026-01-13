@@ -42,9 +42,13 @@ ckpts:
 
 data:
   clean_smi: "clean_smi.pickle"
-  distinct_smi: "distinct_smi.pickle"
+  distinct_smi: "tmp/distinct_smi_filtered_13.pickle"
   xl_smi: "xl_smi.pickle"
   qm9_smi: "qm9_smi.pickle"
+  icl_5_smi: "icl_5_smi.pickle"
+  icl_10_smi: "icl_10_smi.pickle"
+  icl_20_smi: "icl_20_smi.pickle"
+
 
   pretokenized_prompts: "3DMolGen_data/pretokenized_prompts.json"
   validation_pickle: "3DMolGen_data/valid_set.pickle"

@@ -87,21 +87,21 @@ def summarize_metrics(agg: Dict[str, np.ndarray]) -> Tuple[pd.DataFrame, Dict[st
     df = pd.DataFrame(
         {
             "Threshold": agg["thresholds"],
-            "COV-R_mean": np.mean(agg["CoverageR"], axis=0) if agg["CoverageR"].size else np.zeros_like(agg["thresholds"]),
-            "COV-R_median": np.median(agg["CoverageR"], axis=0) if agg["CoverageR"].size else np.zeros_like(agg["thresholds"]),
-            "COV-P_mean": np.mean(agg["CoverageP"], axis=0) if agg["CoverageP"].size else np.zeros_like(agg["thresholds"]),
-            "COV-P_median": np.median(agg["CoverageP"], axis=0) if agg["CoverageP"].size else np.zeros_like(agg["thresholds"]),
+            "COV-R_mean": np.nanmean(agg["CoverageR"], axis=0) if agg["CoverageR"].size else np.zeros_like(agg["thresholds"]),
+            "COV-R_median": np.nanmedian(agg["CoverageR"], axis=0) if agg["CoverageR"].size else np.zeros_like(agg["thresholds"]),
+            "COV-P_mean": np.nanmean(agg["CoverageP"], axis=0) if agg["CoverageP"].size else np.zeros_like(agg["thresholds"]),
+            "COV-P_median": np.nanmedian(agg["CoverageP"], axis=0) if agg["CoverageP"].size else np.zeros_like(agg["thresholds"]),
         }
     )
     stats = {
-        "COV-R_mean": float(np.mean(agg["CoverageR"])) if agg["CoverageR"].size else float("nan"),
-        "COV-R_median": float(np.median(agg["CoverageR"])) if agg["CoverageR"].size else float("nan"),
-        "COV-P_mean": float(np.mean(agg["CoverageP"])) if agg["CoverageP"].size else float("nan"),
-        "COV-P_median": float(np.median(agg["CoverageP"])) if agg["CoverageP"].size else float("nan"),
-        "MAT-R_mean": float(np.mean(agg["MatchingR"])) if agg["MatchingR"].size else float("nan"),
-        "MAT-R_median": float(np.median(agg["MatchingR"])) if agg["MatchingR"].size else float("nan"),
-        "MAT-P_mean": float(np.mean(agg["MatchingP"])) if agg["MatchingP"].size else float("nan"),
-        "MAT-P_median": float(np.median(agg["MatchingP"])) if agg["MatchingP"].size else float("nan"),
+        "COV-R_mean": float(np.nanmean(agg["CoverageR"])) if agg["CoverageR"].size else float("nan"),
+        "COV-R_median": float(np.nanmedian(agg["CoverageR"])) if agg["CoverageR"].size else float("nan"),
+        "COV-P_mean": float(np.nanmean(agg["CoverageP"])) if agg["CoverageP"].size else float("nan"),
+        "COV-P_median": float(np.nanmedian(agg["CoverageP"])) if agg["CoverageP"].size else float("nan"),
+        "MAT-R_mean": float(np.nanmean(agg["MatchingR"])) if agg["MatchingR"].size else float("nan"),
+        "MAT-R_median": float(np.nanmedian(agg["MatchingR"])) if agg["MatchingR"].size else float("nan"),
+        "MAT-P_mean": float(np.nanmean(agg["MatchingP"])) if agg["MatchingP"].size else float("nan"),
+        "MAT-P_median": float(np.nanmedian(agg["MatchingP"])) if agg["MatchingP"].size else float("nan"),
     }
     return df, stats
 
@@ -262,7 +262,7 @@ def run_evaluation(directory_name: str, gen_base: str, eval_base: str, args: arg
     print(f"Loaded {len(gt_dict)} ground truth geom_smiles")
     
     results_path = os.path.join(eval_base, f"{directory_name}")
-    process_generation_pickle(gens_dict, gt_dict, gens_path, results_path, args)
+    return process_generation_pickle(gens_dict, gt_dict, gens_path, results_path, args)
 
 def run_directory_mode(args) -> None:
     gen_base = get_base_path("gen_results_root")
