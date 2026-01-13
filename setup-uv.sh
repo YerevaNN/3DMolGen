@@ -3,34 +3,29 @@
 # 3DMolGen Environment Setup - Pure uv (No Conda)
 # =============================================================================
 # Fast, reproducible environment using only uv.
-# Portable across clusters: YNN (with Slurm), new H100 cluster (SSH-only), etc.
+# Auto-detects CUDA version and cluster for optimal configuration.
+# Portable across clusters: YNN (Slurm, CUDA 12.8), Superpod (CUDA 13.0), etc.
 #
 # Usage:
-#   ./setup-uv.sh                              # Defaults for YNN cluster
-#   ./setup-uv.sh --dir /path/to/env           # Custom env location
-#   ./setup-uv.sh --project /path/to/project   # Custom project (pyproject.toml)
+#   ./setup-uv.sh --dev --install-project      # Auto-detect everything
+#   ./setup-uv.sh --python 3.12 --cuda cu130   # Explicit Python/CUDA
 #   ./setup-uv.sh --fa-wheel /path/to/wheel    # Custom Flash Attention wheel
-#   ./setup-uv.sh --dev                        # Include dev dependencies
+#   ./setup-uv.sh --help                       # Full help
 #
 # Requirements:
 #   - Linux x86_64
-#   - CUDA 12.8 drivers (system-level)
+#   - CUDA 12.8+ drivers (system-level)
 #   - Internet access (or pre-downloaded wheels)
 # =============================================================================
 
 set -euo pipefail
 
 # =============================================================================
-# Defaults (YNN cluster)
+# Defaults (auto-detected at runtime)
 # =============================================================================
 PYTHON_VERSION="3.10"
 PYTORCH_VERSION="2.9.1"
-PYTORCH_INDEX="https://download.pytorch.org/whl/cu128"
-
-# Flash Attention: try local wheel first, fall back to GitHub
-FA_WHEEL_DEFAULT="/nfs/ap/mnt/sxtn2/chem/wheels/flash_attn-2.8.3+cu128torch2.9-cp310-cp310-linux_x86_64.whl"
-FA_WHEEL_URL="https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.0/flash_attn-2.8.3+cu128torch2.9-cp310-cp310-linux_x86_64.whl"
-
+# CUDA_VERSION and PYTORCH_INDEX are set after argument parsing (auto-detected)
 # Script directory (default project location)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -49,14 +44,78 @@ log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
 log_warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
 
-# Determine default env directory based on what exists
+# Default env directory: project .venv (simpler, persistent)
 get_default_env_dir() {
-    if [[ -d "/scratch" && -w "/scratch" ]]; then
-        echo "/scratch/${USER}/3dmolgen"
-    elif [[ -d "/tmp" ]]; then
-        echo "/tmp/${USER}/3dmolgen"
+    echo "${SCRIPT_DIR}"
+}
+
+# Auto-detect CUDA version from nvidia-smi
+detect_cuda_version() {
+    local cuda_ver
+    cuda_ver=$(nvidia-smi 2>/dev/null | grep -oP 'CUDA Version: \K[0-9]+\.[0-9]+' || echo "")
+    case "$cuda_ver" in
+        13.*) echo "cu130" ;;
+        12.*) echo "cu128" ;;
+        *)    echo "cu128" ;;  # Default fallback
+    esac
+}
+
+# Auto-detect cluster based on available paths
+detect_cluster() {
+    if [[ -d "/nfs/ap/mnt/sxtn2/chem" ]]; then
+        echo "ynn"
+    elif [[ -d "/home/chem-project" ]]; then
+        echo "superpod"
     else
-        echo "${HOME}/envs/3dmolgen"
+        echo "generic"
+    fi
+}
+
+# Get flash attention wheel path based on python, cuda, and cluster
+get_fa_wheel() {
+    local py_ver="$1"   # "3.10" or "3.12"
+    local cuda="$2"     # "cu128" or "cu130"
+    local cluster="$3"  # "ynn", "superpod", or "generic"
+
+    # Convert python version to cpython tag
+    local cp_tag
+    case "$py_ver" in
+        3.10) cp_tag="cp310" ;;
+        3.12) cp_tag="cp312" ;;
+        *)    cp_tag="cp310" ;;
+    esac
+
+    local wheel_name="flash_attn-2.8.3+${cuda}torch2.9-${cp_tag}-${cp_tag}-linux_x86_64.whl"
+
+    # Cluster-specific paths
+    local ynn_path="/nfs/ap/mnt/sxtn2/chem/wheels/${wheel_name}"
+    local superpod_path="/home/chem-project/flash-attention-wheels/${wheel_name}"
+    local github_url="https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.0/${wheel_name}"
+
+    # Try cluster-specific path first
+    case "$cluster" in
+        ynn)
+            if [[ -f "$ynn_path" ]]; then
+                echo "$ynn_path"
+                return
+            fi
+            ;;
+        superpod)
+            if [[ -f "$superpod_path" ]]; then
+                echo "$superpod_path"
+                return
+            fi
+            ;;
+    esac
+
+    # Fallback: try both paths
+    if [[ -f "$ynn_path" ]]; then
+        echo "$ynn_path"
+    elif [[ -f "$superpod_path" ]]; then
+        echo "$superpod_path"
+    else
+        # Last resort: GitHub URL
+        echo "$github_url"
     fi
 }
 
@@ -65,7 +124,8 @@ get_default_env_dir() {
 # =============================================================================
 ENV_DIR=""
 PROJECT_DIR="$SCRIPT_DIR"
-FA_WHEEL="$FA_WHEEL_DEFAULT"
+FA_WHEEL=""              # Set after parsing (auto-detected)
+CUDA_VERSION=""          # Set after parsing (auto-detected)
 INSTALL_EXTRAS=""
 VERIFY_ONLY=false
 SKIP_FLASH_ATTN=false
@@ -76,11 +136,14 @@ show_help() {
 Usage: ./setup-uv.sh [OPTIONS]
 
 Creates a Python environment with PyTorch, Flash Attention, and project dependencies.
+Auto-detects CUDA version and cluster for optimal configuration.
 
 Options:
-  --dir PATH        Environment directory (default: auto-detect /scratch or /tmp)
+  --python VER      Python version: 3.10 or 3.12 (default: 3.10)
+  --cuda VER        CUDA version: cu128 or cu130 (default: auto-detect from nvidia-smi)
+  --dir PATH        Environment directory (default: .venv in project dir)
   --project PATH    Project directory containing pyproject.toml (default: script dir)
-  --fa-wheel PATH   Flash Attention wheel path or URL (default: YNN cluster path)
+  --fa-wheel PATH   Flash Attention wheel path or URL (default: auto-detect)
   --skip-fa         Skip Flash Attention installation
   --dev             Include dev dependencies (pytest, black, etc.)
   --install-project Editable install of molgen3D package (default: deps only)
@@ -89,28 +152,48 @@ Options:
 
 Environment Variables:
   UV_CACHE_DIR      Override uv cache location (default: auto-detect)
-  PYTORCH_INDEX     Override PyTorch index URL (default: cu128)
+
+Clusters:
+  YNN (YerevaNN):   CUDA 12.8, wheels at /nfs/ap/mnt/sxtn2/chem/wheels/
+  Superpod:         CUDA 13.0, wheels at /home/chem-project/flash-attention-wheels/
+  Generic:          Falls back to GitHub wheel download
 
 Examples:
-  # YNN cluster (deps only, no molgen3D package)
-  ./setup-uv.sh --dev
-
-  # Include molgen3D package (editable install)
+  # Auto-detect everything (recommended)
   ./setup-uv.sh --dev --install-project
 
-  # New cluster with custom wheel location
-  ./setup-uv.sh --dir /data/envs/molgen --fa-wheel ~/wheels/flash_attn.whl --dev
+  # Superpod with Python 3.12 and CUDA 13.0
+  ./setup-uv.sh --python 3.12 --cuda cu130 --dev --install-project
 
-  # Download Flash Attention from GitHub (no local wheel)
-  ./setup-uv.sh --fa-wheel https://github.com/.../flash_attn-2.8.3+cu128torch2.9-cp310-cp310-linux_x86_64.whl
+  # YNN cluster explicit
+  ./setup-uv.sh --cuda cu128 --dev --install-project
 
-  # Install without Flash Attention (CPU-only or incompatible GPU)
+  # Custom wheel location
+  ./setup-uv.sh --fa-wheel ~/wheels/flash_attn.whl --dev
+
+  # Install without Flash Attention (CPU-only)
   ./setup-uv.sh --skip-fa
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --python)
+            PYTHON_VERSION="$2"
+            if [[ "$PYTHON_VERSION" != "3.10" && "$PYTHON_VERSION" != "3.12" ]]; then
+                log_error "Invalid Python version: $PYTHON_VERSION (use 3.10 or 3.12)"
+                exit 1
+            fi
+            shift 2
+            ;;
+        --cuda)
+            CUDA_VERSION="$2"
+            if [[ "$CUDA_VERSION" != "cu128" && "$CUDA_VERSION" != "cu130" ]]; then
+                log_error "Invalid CUDA version: $CUDA_VERSION (use cu128 or cu130)"
+                exit 1
+            fi
+            shift 2
+            ;;
         --dir)
             ENV_DIR="$2"
             shift 2
@@ -151,9 +234,29 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Set defaults after parsing (so --dir can override)
+# Set defaults after parsing
 if [[ -z "$ENV_DIR" ]]; then
     ENV_DIR="$(get_default_env_dir)"
+fi
+
+# Auto-detect CUDA version if not specified
+if [[ -z "$CUDA_VERSION" ]]; then
+    CUDA_VERSION="$(detect_cuda_version)"
+    log_info "Auto-detected CUDA version: $CUDA_VERSION"
+fi
+
+# Set PyTorch index URL based on CUDA version
+case "$CUDA_VERSION" in
+    cu128) PYTORCH_INDEX="https://download.pytorch.org/whl/cu128" ;;
+    cu130) PYTORCH_INDEX="https://download.pytorch.org/whl/cu130" ;;
+    *)     PYTORCH_INDEX="https://download.pytorch.org/whl/cu128" ;;
+esac
+
+# Auto-detect cluster and flash attention wheel if not specified
+if [[ -z "$FA_WHEEL" ]]; then
+    DETECTED_CLUSTER="$(detect_cluster)"
+    FA_WHEEL="$(get_fa_wheel "$PYTHON_VERSION" "$CUDA_VERSION" "$DETECTED_CLUSTER")"
+    log_info "Auto-detected cluster: $DETECTED_CLUSTER"
 fi
 
 # =============================================================================
@@ -208,7 +311,7 @@ create_venv() {
 # Step 4: Install PyTorch
 # =============================================================================
 install_pytorch() {
-    log_info "Installing PyTorch ${PYTORCH_VERSION}+cu128..."
+    log_info "Installing PyTorch ${PYTORCH_VERSION}+${CUDA_VERSION}..."
     uv pip install "torch==${PYTORCH_VERSION}" --index-url "$PYTORCH_INDEX"
     log_success "PyTorch installed"
 }
@@ -231,12 +334,10 @@ install_flash_attention() {
     elif [[ -f "$FA_WHEEL" ]]; then
         log_info "Using local wheel: $FA_WHEEL"
         uv pip install "$FA_WHEEL"
-    elif [[ -f "$FA_WHEEL_DEFAULT" ]]; then
-        log_info "Using default wheel: $FA_WHEEL_DEFAULT"
-        uv pip install "$FA_WHEEL_DEFAULT"
     else
-        log_info "Local wheel not found, downloading from GitHub..."
-        uv pip install "$FA_WHEEL_URL"
+        log_warn "Local wheel not found at: $FA_WHEEL"
+        log_info "Attempting download (may be a URL)..."
+        uv pip install "$FA_WHEEL"
     fi
     log_success "Flash Attention installed"
 }
@@ -403,11 +504,13 @@ main() {
     echo ""
     echo "=============================================="
     echo "  Environment Setup (uv)"
-    echo "  Python ${PYTHON_VERSION} | PyTorch ${PYTORCH_VERSION}+cu128"
+    echo "  Python ${PYTHON_VERSION} | PyTorch ${PYTORCH_VERSION}+${CUDA_VERSION}"
     echo "=============================================="
     echo ""
-    echo "Environment:    ${ENV_DIR}"
+    echo "Environment:    ${ENV_DIR}/.venv"
     echo "Project:        ${PROJECT_DIR}"
+    echo "CUDA version:   ${CUDA_VERSION}"
+    echo "PyTorch index:  ${PYTORCH_INDEX}"
     echo "FA wheel:       ${FA_WHEEL}"
     echo "Install pkg:    ${INSTALL_PROJECT}"
     echo ""
