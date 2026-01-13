@@ -55,7 +55,7 @@ def check_pytorch() -> CheckResult:
 
 
 def check_flash_attention() -> CheckResult:
-    """Check Flash Attention installation."""
+    """Check Flash Attention installation (optional - SDPA is fallback)."""
     try:
         import flash_attn
 
@@ -70,8 +70,22 @@ def check_flash_attention() -> CheckResult:
             version=version,
             message="flash_attn_func available",
         )
-    except ImportError as e:
-        return CheckResult(name="Flash Attention", passed=False, message=str(e))
+    except ImportError:
+        # Check if SDPA fallback is available
+        try:
+            import torch
+            _ = torch.nn.functional.scaled_dot_product_attention
+            return CheckResult(
+                name="Flash Attention",
+                passed=False,
+                message="not installed (SDPA fallback available)",
+            )
+        except (ImportError, AttributeError):
+            return CheckResult(
+                name="Flash Attention",
+                passed=False,
+                message="not installed (no SDPA fallback)",
+            )
 
 
 def check_transformers() -> CheckResult:
@@ -199,8 +213,8 @@ def print_results(results: list[CheckResult]) -> bool:
     critical_failed = []
     warnings = []
 
-    # Critical packages
-    critical = {"PyTorch", "Flash Attention", "transformers", "trl", "torchtitan"}
+    # Critical packages (Flash Attention is optional - SDPA is a valid fallback)
+    critical = {"PyTorch", "transformers", "trl", "torchtitan"}
 
     for result in results:
         status = "\033[92m[PASS]\033[0m" if result.passed else "\033[91m[FAIL]\033[0m"

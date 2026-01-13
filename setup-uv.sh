@@ -4,13 +4,14 @@
 # =============================================================================
 # Fast, reproducible environment using only uv.
 # Auto-detects CUDA version and cluster for optimal configuration.
-# Portable across clusters: YNN (Slurm, CUDA 12.8), Superpod (CUDA 13.0), etc.
 #
-# Usage:
-#   ./setup-uv.sh --dev --install-project      # Auto-detect everything
-#   ./setup-uv.sh --python 3.12 --cuda cu130   # Explicit Python/CUDA
-#   ./setup-uv.sh --fa-wheel /path/to/wheel    # Custom Flash Attention wheel
-#   ./setup-uv.sh --help                       # Full help
+# Clusters:
+#   YNN (CUDA 12.8):     ./setup-uv.sh --dev --install-project
+#   Superpod (CUDA 13.0): ./setup-uv.sh --nightly --dev --install-project
+#
+# The --nightly flag is required for Superpod because torchtitan 0.2.x
+# requires PyTorch nightly (for torch.nn.attention.varlen). Flash Attention
+# is automatically skipped with --nightly (no compatible wheels exist).
 #
 # Requirements:
 #   - Linux x86_64
@@ -130,6 +131,7 @@ INSTALL_EXTRAS=""
 VERIFY_ONLY=false
 SKIP_FLASH_ATTN=false
 INSTALL_PROJECT=false
+USE_NIGHTLY=false        # Use PyTorch nightly (required for torchtitan 0.2.x)
 
 show_help() {
     cat << EOF
@@ -139,6 +141,8 @@ Creates a Python environment with PyTorch, Flash Attention, and project dependen
 Auto-detects CUDA version and cluster for optimal configuration.
 
 Options:
+  --nightly         Use PyTorch nightly (required for Superpod/torchtitan 0.2.x)
+                    Automatically skips Flash Attention (no compatible wheels)
   --python VER      Python version: 3.10 or 3.12 (default: 3.10)
   --cuda VER        CUDA version: cu128 or cu130 (default: auto-detect from nvidia-smi)
   --dir PATH        Environment directory (default: .venv in project dir)
@@ -154,30 +158,34 @@ Environment Variables:
   UV_CACHE_DIR      Override uv cache location (default: auto-detect)
 
 Clusters:
-  YNN (YerevaNN):   CUDA 12.8, wheels at /nfs/ap/mnt/sxtn2/chem/wheels/
-  Superpod:         CUDA 13.0, wheels at /home/chem-project/flash-attention-wheels/
-  Generic:          Falls back to GitHub wheel download
+  YNN (YerevaNN):   CUDA 12.8, PyTorch stable, Flash Attention works
+  Superpod:         CUDA 13.0, PyTorch nightly required, uses SDPA attention
 
 Examples:
-  # Auto-detect everything (recommended)
+  # YNN cluster (stable PyTorch + Flash Attention)
   ./setup-uv.sh --dev --install-project
 
-  # Superpod with Python 3.12 and CUDA 13.0
-  ./setup-uv.sh --python 3.12 --cuda cu130 --dev --install-project
+  # Superpod cluster (nightly PyTorch + SDPA, no Flash Attention)
+  ./setup-uv.sh --nightly --dev --install-project
 
-  # YNN cluster explicit
-  ./setup-uv.sh --cuda cu128 --dev --install-project
+  # Superpod with Python 3.12
+  ./setup-uv.sh --nightly --python 3.12 --dev --install-project
 
-  # Custom wheel location
+  # Custom wheel location (YNN only)
   ./setup-uv.sh --fa-wheel ~/wheels/flash_attn.whl --dev
 
-  # Install without Flash Attention (CPU-only)
-  ./setup-uv.sh --skip-fa
+  # Skip Flash Attention explicitly
+  ./setup-uv.sh --skip-fa --dev --install-project
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --nightly)
+            USE_NIGHTLY=true
+            SKIP_FLASH_ATTN=true  # No compatible flash_attn wheels for nightly
+            shift
+            ;;
         --python)
             PYTHON_VERSION="$2"
             if [[ "$PYTHON_VERSION" != "3.10" && "$PYTHON_VERSION" != "3.12" ]]; then
@@ -245,12 +253,21 @@ if [[ -z "$CUDA_VERSION" ]]; then
     log_info "Auto-detected CUDA version: $CUDA_VERSION"
 fi
 
-# Set PyTorch index URL based on CUDA version
-case "$CUDA_VERSION" in
-    cu128) PYTORCH_INDEX="https://download.pytorch.org/whl/cu128" ;;
-    cu130) PYTORCH_INDEX="https://download.pytorch.org/whl/cu130" ;;
-    *)     PYTORCH_INDEX="https://download.pytorch.org/whl/cu128" ;;
-esac
+# Set PyTorch index URL based on CUDA version and nightly flag
+if [[ "$USE_NIGHTLY" == true ]]; then
+    case "$CUDA_VERSION" in
+        cu128) PYTORCH_INDEX="https://download.pytorch.org/whl/nightly/cu128" ;;
+        cu130) PYTORCH_INDEX="https://download.pytorch.org/whl/nightly/cu130" ;;
+        *)     PYTORCH_INDEX="https://download.pytorch.org/whl/nightly/cu128" ;;
+    esac
+    log_info "Using PyTorch NIGHTLY (required for torchtitan 0.2.x)"
+else
+    case "$CUDA_VERSION" in
+        cu128) PYTORCH_INDEX="https://download.pytorch.org/whl/cu128" ;;
+        cu130) PYTORCH_INDEX="https://download.pytorch.org/whl/cu130" ;;
+        *)     PYTORCH_INDEX="https://download.pytorch.org/whl/cu128" ;;
+    esac
+fi
 
 # Auto-detect cluster and flash attention wheel if not specified
 if [[ -z "$FA_WHEEL" ]]; then
@@ -311,8 +328,13 @@ create_venv() {
 # Step 4: Install PyTorch
 # =============================================================================
 install_pytorch() {
-    log_info "Installing PyTorch ${PYTORCH_VERSION}+${CUDA_VERSION}..."
-    uv pip install "torch==${PYTORCH_VERSION}" --index-url "$PYTORCH_INDEX"
+    if [[ "$USE_NIGHTLY" == true ]]; then
+        log_info "Installing PyTorch nightly+${CUDA_VERSION}..."
+        uv pip install --pre torch --index-url "$PYTORCH_INDEX"
+    else
+        log_info "Installing PyTorch ${PYTORCH_VERSION}+${CUDA_VERSION}..."
+        uv pip install "torch==${PYTORCH_VERSION}" --index-url "$PYTORCH_INDEX"
+    fi
     log_success "PyTorch installed"
 }
 
@@ -501,17 +523,29 @@ print_instructions() {
 # Main
 # =============================================================================
 main() {
+    local pytorch_label
+    if [[ "$USE_NIGHTLY" == true ]]; then
+        pytorch_label="nightly+${CUDA_VERSION}"
+    else
+        pytorch_label="${PYTORCH_VERSION}+${CUDA_VERSION}"
+    fi
+
     echo ""
     echo "=============================================="
     echo "  Environment Setup (uv)"
-    echo "  Python ${PYTHON_VERSION} | PyTorch ${PYTORCH_VERSION}+${CUDA_VERSION}"
+    echo "  Python ${PYTHON_VERSION} | PyTorch ${pytorch_label}"
     echo "=============================================="
     echo ""
     echo "Environment:    ${ENV_DIR}/.venv"
     echo "Project:        ${PROJECT_DIR}"
     echo "CUDA version:   ${CUDA_VERSION}"
+    echo "Nightly:        ${USE_NIGHTLY}"
     echo "PyTorch index:  ${PYTORCH_INDEX}"
-    echo "FA wheel:       ${FA_WHEEL}"
+    if [[ "$SKIP_FLASH_ATTN" == true ]]; then
+        echo "Flash Attn:     SKIPPED (using SDPA)"
+    else
+        echo "Flash Attn:     ${FA_WHEEL}"
+    fi
     echo "Install pkg:    ${INSTALL_PROJECT}"
     echo ""
 

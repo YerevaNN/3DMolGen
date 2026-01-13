@@ -50,31 +50,72 @@ We provide **two setup options**:
 
 **What is uv?** [uv](https://docs.astral.sh/uv/) is a Rust-based Python package manager from Astral (the Ruff team). It's 10-100x faster than pip and can manage Python versions directly—no conda needed.
 
-### Version Matrix
+---
 
-| Component | Version | Source |
-|-----------|---------|--------|
-| Python | 3.10.x | Conda |
-| PyTorch | 2.9.1+cu128 | [pytorch.org/whl/cu128](https://download.pytorch.org/whl/cu128) |
-| Flash Attention | 2.8.3+cu128torch2.9 | [Prebuilt wheel](https://github.com/mjun0812/flash-attention-prebuild-wheels) |
-| CUDA | 12.8 | System drivers |
-| transformers | ≥4.50.0 | PyPI |
-| trl | ≥0.15.0 | PyPI |
-| torchtitan | ≥0.2.0 | PyPI |
+### Cluster-Specific Setup
+
+Different clusters require different configurations due to CUDA versions and torchtitan requirements:
+
+| Cluster | CUDA | PyTorch | Flash Attention | Command |
+|---------|------|---------|-----------------|---------|
+| **YNN (YerevaNN)** | 12.8 | Stable 2.9.x | ✅ Works | `./setup-uv.sh --dev --install-project` |
+| **Superpod** | 13.0 | Nightly | ❌ Use SDPA | `./setup-uv.sh --nightly --dev --install-project` |
+
+**Why the difference?**
+- TorchTitan 0.2.x requires `torch.nn.attention.varlen` which only exists in PyTorch nightly (not in stable 2.9.x)
+- Flash Attention prebuilt wheels are only compatible with PyTorch stable (no nightly wheels exist)
+- On Superpod, we use PyTorch's built-in SDPA (Scaled Dot Product Attention) as the fallback
+
+#### YNN Cluster Setup (CUDA 12.8)
+```bash
+cd ~/3DMolGen-new/3DMolGen
+./setup-uv.sh --dev --install-project
+source .venv/bin/activate
+python verify_env.py
+```
+
+#### Superpod Setup (CUDA 13.0)
+```bash
+cd /home/chem-project/aram-3dmolgen/3DMolGen
+./setup-uv.sh --nightly --dev --install-project
+source .venv/bin/activate
+python verify_env.py
+```
+
+**Note:** On Superpod, Flash Attention will show as `[FAIL]` with "SDPA fallback available" - this is expected and OK. The environment will use PyTorch's native attention implementation.
 
 ---
 
-### Option 1: Pure uv (Recommended for new clusters)
+### Version Matrix
+
+| Component | YNN (Stable) | Superpod (Nightly) |
+|-----------|--------------|---------------------|
+| Python | 3.10.x | 3.10.x |
+| PyTorch | 2.9.1+cu128 | nightly+cu130 |
+| Flash Attention | 2.8.3 | ❌ (SDPA fallback) |
+| CUDA | 12.8 | 13.0 |
+| transformers | ≥4.50.0 | ≥4.50.0 |
+| trl | ≥0.15.0 | ≥0.15.0 |
+| torchtitan | ≥0.2.0 | ≥0.2.0 |
+
+---
+
+### Option 1: Pure uv (Recommended)
 
 The `setup-uv.sh` script creates an environment without conda:
 
 ```bash
-./setup-uv.sh                              # Defaults (auto-detects /scratch or /tmp)
-./setup-uv.sh --dev                        # Include dev tools
-./setup-uv.sh --dir ~/envs/molgen          # Custom location
-./setup-uv.sh --fa-wheel /path/to/wheel    # Custom Flash Attention wheel
-./setup-uv.sh --skip-fa                    # Skip Flash Attention (CPU-only)
-./setup-uv.sh --verify                     # Verify existing installation
+# YNN cluster (stable PyTorch + Flash Attention)
+./setup-uv.sh --dev --install-project
+
+# Superpod cluster (nightly PyTorch + SDPA)
+./setup-uv.sh --nightly --dev --install-project
+
+# Other options
+./setup-uv.sh --python 3.12 --dev           # Use Python 3.12
+./setup-uv.sh --fa-wheel /path/to/wheel     # Custom Flash Attention wheel
+./setup-uv.sh --skip-fa                     # Skip Flash Attention explicitly
+./setup-uv.sh --verify                      # Verify existing installation
 ```
 
 **What it does:**
@@ -129,36 +170,60 @@ uv pip install -e ".[dev]"
 python verify_env.py
 ```
 
-Expected output:
+**YNN cluster output (stable PyTorch):**
 ```
-==================================================================
+======================================================================
 3DMolGen Environment Verification
-==================================================================
+======================================================================
   [PASS] PyTorch              v2.9.1+cu128             (CUDA 12.8, 8x NVIDIA H100)
-  [PASS] Flash Attention      v2.8.3+cu128torch2.9     (flash_attn_func available)
+  [PASS] Flash Attention      v2.8.3                   (flash_attn_func available)
   [PASS] transformers         v4.57.0
   [PASS] trl                  v0.15.0
   [PASS] torchtitan           v0.2.0
   ...
-==================================================================
+======================================================================
 All checks passed! Environment is ready.
-==================================================================
+======================================================================
+```
+
+**Superpod output (nightly PyTorch):**
+```
+======================================================================
+3DMolGen Environment Verification
+======================================================================
+  [PASS] PyTorch              v2.11.0.dev...+cu130     (CUDA 13.0, 8x NVIDIA H100)
+  [FAIL] Flash Attention                               (not installed (SDPA fallback available))
+  [PASS] transformers         v4.57.0
+  [PASS] trl                  v0.26.0
+  [PASS] torchtitan           v0.2.1
+  ...
+----------------------------------------------------------------------
+WARNINGS (non-critical):
+  - Flash Attention: not installed (SDPA fallback available)
+
+Core checks passed with warnings. Environment should work.
+======================================================================
 ```
 
 ### Flash Attention Notes
 
-Flash Attention 2 requires prebuilt wheels (compilation takes 2+ hours without ninja). Our wheel is for:
-- Python 3.10
-- PyTorch 2.9
-- CUDA 12.8
+Flash Attention 2 requires prebuilt wheels (compilation takes 2+ hours without ninja).
 
-**Local copy available at:** `/nfs/ap/mnt/sxtn2/chem/wheels/flash_attn-2.8.3+cu128torch2.9-cp310-cp310-linux_x86_64.whl`
+**YNN Cluster (works):**
+- Wheel: `flash_attn-2.8.3+cu128torch2.9-cp310-cp310-linux_x86_64.whl`
+- Location: `/nfs/ap/mnt/sxtn2/chem/wheels/`
+- Compatible with PyTorch 2.9.x stable
+
+**Superpod (not available):**
+- No prebuilt wheels exist for PyTorch nightly
+- Building from source requires `nvcc` (not installed on GPU nodes)
+- **Fallback:** PyTorch's native SDPA (Scaled Dot Product Attention) - works well, similar performance
 
 **For other configurations:** Download from [mjun0812/flash-attention-prebuild-wheels](https://github.com/mjun0812/flash-attention-prebuild-wheels). See [`docs/python_cuda_packaging_guide.md`](docs/python_cuda_packaging_guide.md) for the wheel compatibility matrix.
 
-### Slurm Job Template
+### Slurm Job Template (YNN)
 
-For ephemeral environments on the new DGX cluster:
+For YNN cluster with Slurm:
 
 ```bash
 #!/bin/bash
@@ -167,18 +232,33 @@ For ephemeral environments on the new DGX cluster:
 #SBATCH --gres=gpu:8
 #SBATCH --nodes=1
 
-# Fast setup with uv (warm installs <30s)
-cd /path/to/3DMolGen
-./setup-uv.sh --dev --install-project  # include molgen3D package for training
+cd ~/3DMolGen-new/3DMolGen
+./setup-uv.sh --dev --install-project
 
 # Activate and run
-source /scratch/$USER/3dmolgen/.venv/bin/activate
+source .venv/bin/activate
 torchrun --nproc_per_node=8 \
   -m molgen3D.training.pretraining.torchtitan_runner \
   --train-toml src/molgen3D/config/pretrain/qwen3_06b.toml
 ```
 
-For existing machines with conda:
+### SSH Job (Superpod)
+
+For Superpod (SSH access, no Slurm):
+
+```bash
+# Setup (one-time)
+cd /home/chem-project/aram-3dmolgen/3DMolGen
+./setup-uv.sh --nightly --dev --install-project
+
+# Run training
+source .venv/bin/activate
+torchrun --nproc_per_node=8 \
+  -m molgen3D.training.pretraining.torchtitan_runner \
+  --train-toml src/molgen3D/config/pretrain/qwen3_06b.toml
+```
+
+### Conda Alternative (existing machines)
 
 ```bash
 ./setup.sh --dev --install-project
