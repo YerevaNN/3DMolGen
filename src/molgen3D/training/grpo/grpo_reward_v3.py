@@ -273,11 +273,22 @@ def compute_group_reward(
     soft_cov_mean = float("nan")
     soft_cov_values = EMPTY_FLOAT32
 
+    # Check if binned mode is enabled
+    binned = getattr(config.model, 'binned', False)
+    # Debug: Log on first few calls
+    if not hasattr(reward_function, '_debug_count'):
+        setattr(reward_function, '_debug_count', 0)
+    debug_count = getattr(reward_function, '_debug_count')
+    if debug_count < 3:
+        setattr(reward_function, '_debug_count', debug_count + 1)
+        logger.info(f"[reward_v3] Binned mode forced to: {binned}, step: {getattr(stats, 'global_step', 'unknown')}")
+
     rollout_mols, graph_mask, parsed_mask = parse_rollout_group(
         canonical_smiles,
         completions,
         stats,
         profiler,
+        binned=binned,
     )
     graph_match_count = int(np.count_nonzero(graph_mask))
     graph_match_rate = float(graph_match_count) / K if K > 0 else 0.0
@@ -634,7 +645,30 @@ def reward_function(
     completion_lengths: Optional[List[Optional[float]]] = None,
 ) -> List[float]:
     """Main GRPO reward function (TRL-compatible)."""
-    del tokenizer  # unused
+    # Don't delete tokenizer - we might need it
+
+    # Debug: Check completions format
+    first_comp = completions[0] if completions else 'None'
+    comp_type = type(first_comp)
+
+    # Check if completions are token IDs that need decoding
+    if isinstance(first_comp, list) and len(first_comp) > 0 and isinstance(first_comp[0], int):
+        logger.info("[reward_function] Completions are token IDs, decoding...")
+        decoded_completions = tokenizer.batch_decode(completions, skip_special_tokens=False)
+        completions = decoded_completions
+        first_comp = completions[0] if completions else 'None'
+        logger.info(f"[reward_function] After decoding: {str(first_comp)[:200]}...")
+
+    # Check for CONFORMER tags
+    has_conformer_tag = '[CONFORMER]' in str(first_comp)
+    logger.info(f"[reward_function] Has [CONFORMER] tag: {has_conformer_tag}")
+
+    # Check binned mode
+    binned = getattr(config.model, 'binned', False)
+    logger.info(f"[reward_function] Binned mode: {binned}")
+
+    # Log sample completion
+    logger.info(f"[reward_function] Sample completion: {str(first_comp)[:300]}...")
 
     expected_k = config.grpo.num_generations
     delta = float(getattr(config.grpo, "delta", 0.75))

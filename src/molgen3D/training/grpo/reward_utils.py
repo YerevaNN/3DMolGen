@@ -15,7 +15,7 @@ import pandas as pd
 from loguru import logger
 from rdkit import Chem
 
-from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2, strip_smiles
+from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2, decode_cartesian_binned, get_bins_for_coords, strip_smiles
 from molgen3D.evaluation.utils import extract_between, same_molecular_graph
 from molgen3D.training.grpo.utils import load_ground_truths
 from molgen3D.utils.utils import get_best_rmsd
@@ -163,17 +163,68 @@ def make_reward_rng(config, stats) -> np.random.Generator:
 
 
 def extract_conformer_text(completion: str) -> Optional[str]:
+    # First try to extract between [CONFORMER] tags
     conformer_text = extract_between(completion, "[CONFORMER]", "[/CONFORMER]")
-    return conformer_text if conformer_text else None
+    if conformer_text:
+        return conformer_text
+
+    # If no tags found, assume the entire completion is the conformer text
+    # This handles the case where special tokens were stripped during decoding
+    if completion and len(completion.strip()) > 0:
+        # Debug: Log what we're trying to parse
+        if not hasattr(extract_conformer_text, '_debug_logged_completion'):
+            setattr(extract_conformer_text, '_debug_logged_completion', True)
+            logger.info(f"[extract_conformer_text] Completion sample: '{completion[:100]}...'")
+
+        # Clean the text: remove extra whitespace and filter out non-numeric tokens
+        tokens = completion.split()
+        valid_tokens = [token for token in tokens if token.strip().isdigit() and len(token.strip()) == 3]
+        cleaned = ' '.join(valid_tokens)
+
+        if not hasattr(extract_conformer_text, '_debug_logged_cleaned') and cleaned:
+            setattr(extract_conformer_text, '_debug_logged_cleaned', True)
+            logger.info(f"[extract_conformer_text] Cleaned tokens: '{cleaned[:100]}...' (from {len(tokens)} to {len(valid_tokens)} tokens)")
+
+        if cleaned:
+            return cleaned
+        return completion.strip()
+
+    return None
 
 
-def parse_conformer_text(conformer_text: Optional[str]) -> Optional[Chem.Mol]:
+# Global bins cache for binned decoding
+_BINNED_BINS_CACHE: Optional[Dict[str, Any]] = None
+
+def _get_binned_bins():
+    """Get cached binned coordinate bins."""
+    global _BINNED_BINS_CACHE
+    if _BINNED_BINS_CACHE is None:
+        ranges = [(-13.0, 13.0), (-13.0, 13.0), (-13.0, 13.0)]
+        bin_size = 0.104  # Match the bin size used during training
+        _BINNED_BINS_CACHE = get_bins_for_coords(ranges, bin_size=bin_size)
+        logger.info(f"Initialized binned coordinate bins with bin_size={bin_size}")
+    return _BINNED_BINS_CACHE
+
+def parse_conformer_text(conformer_text: Optional[str], binned: bool = False) -> Optional[Chem.Mol]:
     if not conformer_text:
         return None
     try:
-        return decode_cartesian_v2(conformer_text)
+        if binned:
+            bins = _get_binned_bins()
+            mol = decode_cartesian_binned(conformer_text, bins)
+            # Debug: Log successful parsing on first call
+            if hasattr(parse_conformer_text, '_debug_logged') is False:
+                setattr(parse_conformer_text, '_debug_logged', True)
+                logger.info(f"[parse_conformer_text] Successfully parsed binned conformer, mol has {mol.GetNumAtoms() if mol else 0} atoms")
+            return mol
+        else:
+            return decode_cartesian_v2(conformer_text)
     except Exception as exc:  # pragma: no cover - RDKit errors depend on inputs
-        logger.debug(f"Conformer parsing failed: {exc}")
+        # Debug: Log parsing failure on first failure
+        if not hasattr(parse_conformer_text, '_debug_failed_logged'):
+            setattr(parse_conformer_text, '_debug_failed_logged', True)
+            logger.info(f"[parse_conformer_text] Parsing failed (binned={binned}): {exc}")
+            logger.info(f"[parse_conformer_text] Failed text sample: '{conformer_text[:200]}...'")
         return None
 
 
@@ -182,7 +233,10 @@ def parse_rollout_group(
     completions: List[str],
     stats,
     profiler: Optional[RewardProfiler],
+    binned: bool = False,
 ) -> Tuple[List[Optional[Chem.Mol]], np.ndarray, np.ndarray]:
+    if hasattr(stats, 'global_step') and getattr(stats, 'global_step', 0) == 0 and len(completions) > 0:
+        logger.info(f"[parse_rollout_group] Called with binned={binned}, first completion preview: {completions[0][:100]}...")
     rollout_mols: List[Optional[Chem.Mol]] = []
     graph_flags: List[bool] = []
     parsed_flags: List[bool] = []
@@ -200,7 +254,7 @@ def parse_rollout_group(
                     else:
                         stats.failed_matching_smiles += 1
 
-            mol = parse_conformer_text(conformer_text)
+            mol = parse_conformer_text(conformer_text, binned=binned)
             if mol is None:
                 stats.failed_conformer_generation += 1
 

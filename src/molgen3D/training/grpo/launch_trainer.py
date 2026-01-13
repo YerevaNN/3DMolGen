@@ -69,17 +69,28 @@ def load_and_update_configs(args, project_root: Path):
     """Load configuration files and apply CLI overrides in-memory."""
     with open(args.config, "r", encoding='utf-8', errors='replace') as f:
         config_data = yaml.safe_load(f)
-    
+
     if "device" in config_data:
         config_data["device"]["device_type"] = args.device
         config_data["device"]["num_gpus"] = args.ngpus
         logger.info(f"Applied CLI device overrides in-memory: {args.device} x{args.ngpus}")
-    
+
+    # Handle binned configuration
+    if args.binned:
+        # Use binned tokenizer - resolve to absolute path
+        binned_tokenizer_path = (project_root / "src" / "molgen3D" / "training" / "tokenizers" / "Qwen3_tokenizer_binned").resolve()
+        config_data["model"]["tokenizer_path"] = str(binned_tokenizer_path)
+        config_data["processing"]["eos_token_id"] = 151672  # [/CONFORMER]
+        config_data["model"]["conf_tags"] = ["[CONFORMER]", "[/CONFORMER]"]
+        config_data["model"]["mol_tags"] = ["[SMILES]", "[/SMILES]"]
+        config_data["model"]["binned"] = True
+        logger.info(f"Applied binned tokenizer configuration: {binned_tokenizer_path}")
+
     if args.strategy != "single":
         accelerate_config_path = project_root / "src" / "molgen3D" / "config" / "grpo" / f"{args.strategy}.conf"
         if not accelerate_config_path.exists():
             raise FileNotFoundError(f"Accelerate config not found for strategy '{args.strategy}': {accelerate_config_path}")
-    
+
     return config_data
 
 def create_directories(config_data, args, project_root: Path):
@@ -97,6 +108,10 @@ def create_directories(config_data, args, project_root: Path):
         dataloader=DataLoaderConfig(**config_data.get('dataloader', {})),
         validation=ValidationConfig(**config_data.get('validation', {}))
     )
+
+    # Update run name to include binned if enabled
+    if args.binned and "binned" not in config.run.name.lower():
+        config.run.name = f"{config.run.name}_binned"
     
     timestamp = datetime.now().strftime("%y%m%d-%H%M")
     
@@ -116,6 +131,8 @@ def create_directories(config_data, args, project_root: Path):
     logger.info(f"Output directory: {output_dir}")
     logger.info(f"Checkpoint directory: {checkpoint_dir}")
     logger.info(f"Using device: {config.device.device_type} with {config.device.num_gpus} GPUs")
+    if args.binned:
+        logger.info("Binned mode enabled: using coordinate token bins 000-249")
     
     return config, output_dir
 
@@ -181,7 +198,7 @@ def setup_job_executor(device_type, num_gpus, run_name):
             timeout_min=24 * 24 * 60,  # 24 hours
             gpus_per_node=num_gpus,
             nodes=1,
-            mem_gb=80,
+            mem_gb=64,
             cpus_per_task=num_gpus * 8,
             slurm_additional_parameters={"partition": device_type},
         )
@@ -215,8 +232,9 @@ def main():
     parser.add_argument("--device", type=str, choices=["local", "a100", "h100", "all"], 
                        default="local", help="Target device type for job submission")
     parser.add_argument("--ngpus", type=int, default=1, help="Number of GPUs to use")
-    parser.add_argument("--strategy", type=str, choices=["single", "ddp", "fsdp", "ds"], 
+    parser.add_argument("--strategy", type=str, choices=["single", "ddp", "fsdp", "ds"],
                        default="single", help="Training strategy")
+    parser.add_argument("--binned", action="store_true", help="Use binned tokenizer and processing for coordinate tokens")
     parser.add_argument("--nccl-debug", action="store_true", help="Enable NCCL debug logging")
     
     args = parser.parse_args()
@@ -258,6 +276,7 @@ def main():
         logger.info(f"Target device: {args.device}")
         logger.info(f"Number of GPUs: {config.device.num_gpus}")
         logger.info(f"Training strategy: {args.strategy}")
+        logger.info(f"Binned mode: {'enabled' if args.binned else 'disabled'}")
         
     except Exception as e:
         logger.error(f"Failed to launch training: {str(e)}")

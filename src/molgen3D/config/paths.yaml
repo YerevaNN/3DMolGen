@@ -179,6 +179,15 @@ models:
       "3e": "step-12600-hf"
       "4e": "step-16800-hf"
 
+  qw600_pre_binned_filtered_v2:
+    root: "qwen3_06b/260112-1912-1a69-qwen3_06b_pre_5e_48effb_4kseq"
+    steps:
+      "1e": "step-8100-hf"
+      "2e": "step-16200-hf"
+      "3e": "step-24300-hf"
+      "4e": "step-32400-hf"
+      "5e": "step-40500-hf"
+
   # ---------- GRPO / FINETUNED MODELS (same structure) ----------
 
   m380_1e_1xgrpo_100e_100s:

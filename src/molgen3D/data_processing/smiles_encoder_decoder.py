@@ -491,7 +491,7 @@ def coords_rmsd(mol_a, mol_b):
     rmsd_rdkit = AllChem.GetBestRMS(mol_a, mol_b)
     return min(math.sqrt(sse / n), rmsd_rdkit)
 
-def get_bins_for_coords(ranges, bin_size=0.042):
+def get_bins_for_coords(ranges, bin_size=0.104):
     """Get bins for coordinates based on the ranges and bin size."""
     bins = []
     for start, end in ranges:

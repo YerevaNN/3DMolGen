@@ -16,6 +16,7 @@ generation:
   num_return_sequences: 1
   repetition_penalty: 1.0
   temperature: 1.0
+  skip_special_tokens: false
 grpo:
   adam_beta1: 0.9
   adam_beta2: 0.95
@@ -27,7 +28,7 @@ grpo:
   epsilon_high: 0.0012
   epsilon_low: 5e-4
   grad_acc_steps: 4
-  importance_sampling_level: sequence
+  importance_sampling_level: token
   lambda_match: 0.0
   lambda_qual: 0.0
   lambda_smcov: 5.0
