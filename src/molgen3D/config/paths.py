@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from functools import lru_cache
 import os
+from collections.abc import Sequence
+from functools import lru_cache
 from pathlib import Path
 import importlib.resources as pkg_resources
 import copy
@@ -45,6 +46,31 @@ def _to_absolute_path(p: str | Path) -> Path:
     return p if p.is_absolute() else REPO_ROOT / p
 
 
+def _as_path_candidates(value: str | Path | Sequence[str | Path]) -> list[str | Path]:
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, Path)):
+        return list(value)
+    return [value]
+
+
+def _resolve_path_value(value: str | Path | Sequence[str | Path]) -> Path:
+    """
+    Resolve a config path value that may include fallback candidates.
+    The first existing candidate is returned; otherwise, the first candidate.
+    """
+    candidates = _as_path_candidates(value)
+    if not candidates:
+        raise ValueError("Cannot resolve an empty set of path candidates")
+
+    resolved: list[Path] = []
+    for candidate in candidates:
+        candidate_path = _to_absolute_path(candidate)
+        resolved.append(candidate_path)
+        if candidate_path.exists():
+            return candidate_path
+
+    return resolved[0]
+
+
 @lru_cache(maxsize=1)
 def _cfg() -> dict:
     """Load and cache the paths.yaml configuration file."""
@@ -58,17 +84,24 @@ def _get_config_section(section: str) -> dict:
     return _cfg().get(section, {})
 
 
-def _get_ckpt_base_path(root_rel: str, base_paths: dict) -> str:
+def _get_ckpt_base_path(root_rel: str, base_paths: dict) -> Path:
     """Determine the base path for a checkpoint based on root_rel pattern."""
-    if root_rel.startswith("qwen3_06b") or root_rel.startswith("Qwen3-0.6B") or root_rel.startswith("qw600"):
-        return base_paths.get("qwen_yerevann_root", base_paths.get("hf_yerevann_root", "."))
+
+    def _resolve_from_keys(*keys: str, default: str = ".") -> Path:
+        for key in keys:
+            if key in base_paths:
+                return _resolve_path_value(base_paths[key])
+        return _resolve_path_value(default)
+
+    if root_rel.startswith("qwen3_06b"):
+        return _resolve_from_keys("qwen_yerevann_root", "hf_yerevann_root")
     if "qwen3" in root_rel:
-        return base_paths.get("qwen3_grpo_root", base_paths.get("grpo_root", "."))
+        return _resolve_from_keys("qwen3_grpo_root", "grpo_root")
     if "code_snapshot" in root_rel or "grpo_outputs" in root_rel:
-        return base_paths.get("grpo_outputs_root", ".")
+        return _resolve_from_keys("grpo_outputs_root")
     if root_rel.startswith("2025-"):
-        return base_paths.get("grpo_root", base_paths.get("ckpts_root", "."))
-    return base_paths.get("hf_yerevann_root", ".")
+        return _resolve_from_keys("grpo_root", "ckpts_root")
+    return _resolve_from_keys("hf_yerevann_root", default=".")
 
 
 def load_paths_yaml() -> dict:
@@ -113,7 +146,7 @@ def get_ckpt(alias: str, key: str | None = None) -> Path:
     base_paths = _get_config_section("base_paths")
     base = _get_ckpt_base_path(root_rel, base_paths)
 
-    return _to_absolute_path(base) / root_rel / step_rel
+    return base / root_rel / step_rel
 
 
 def get_tokenizer_path(name: str) -> Path:
@@ -129,7 +162,7 @@ def get_tokenizer_path(name: str) -> Path:
     tokenizers = _get_config_section("tokenizers")
     if name not in tokenizers:
         raise KeyError(f"Unknown tokenizer '{name}', available: {sorted(tokenizers.keys())}")
-    return _to_absolute_path(tokenizers[name])
+    return _resolve_path_value(tokenizers[name])
 
 
 def get_base_path(key: str) -> Path:
@@ -145,7 +178,7 @@ def get_base_path(key: str) -> Path:
     base_paths = _get_config_section("base_paths")
     if key not in base_paths:
         raise KeyError(f"Unknown base path '{key}', available: {sorted(base_paths.keys())}")
-    return _to_absolute_path(base_paths[key])
+    return _resolve_path_value(base_paths[key])
 
 
 def get_data_path(key: str) -> Path:
@@ -168,11 +201,12 @@ def get_data_path(key: str) -> Path:
 
     base_paths = _get_config_section("base_paths")
     if key in GEOM_DATA_KEYS or str(rel).startswith(("geom_processed", "rdkit_folder")):
-        base = base_paths.get("geom_data_root", base_paths.get("data_root", "."))
+        base_value = base_paths.get("geom_data_root") or base_paths.get("data_root") or "."
     else:
-        base = base_paths.get("data_root", ".")
+        base_value = base_paths.get("data_root") or "."
 
-    return _to_absolute_path(base) / rel
+    base_path = _resolve_path_value(base_value)
+    return base_path / rel
 
 
 def get_root_path(base_key: str, folder: str | Path) -> Path:
@@ -257,7 +291,7 @@ def get_ckpt_tag_path(key: str) -> Path:
         raise KeyError(
             f"Unknown ckpts alias '{alias}', available: {sorted(ckpt_cfg.keys())}"
         )
-    base_path = _to_absolute_path(base)
+    base_path = _resolve_path_value(base)
     return base_path / remainder if sep else base_path
 
 
