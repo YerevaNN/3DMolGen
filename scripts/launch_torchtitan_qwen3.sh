@@ -3,7 +3,7 @@
 #SBATCH --cpus-per-task=64
 #SBATCH --partition=a100
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:4
+#SBATCH --gres=gpu:8
 #SBATCH --mem=200G
 #SBATCH --time=6-00:00:00
 #SBATCH --output=outputs/slurm_jobs/titan/%j.out
@@ -61,11 +61,8 @@ fi
 
 MASTER_ADDR=${MASTER_ADDR:-$(hostname)}
 MASTER_PORT=${MASTER_PORT:-$(( (RANDOM % 20000) + 20000 ))}
-if [[ -z "${SLURM_GPUS_ON_NODE:-}" ]]; then
-    echo "SLURM_GPUS_ON_NODE is unset; please request GPUs via --gres."
-    exit 1
-fi
-NGPU_PER_NODE=${SLURM_GPUS_ON_NODE}
+_DEFAULT_GPUS=$(grep -E '^#SBATCH --gres=gpu:' "$0" | sed 's/.*gpu:\([0-9]*\).*/\1/' | head -1)
+NGPU_PER_NODE=${SLURM_GPUS_ON_NODE:-${NGPU_PER_NODE:-${_DEFAULT_GPUS:-8}}}
 NNODES=${SLURM_NNODES:-1}
 NODE_RANK=${SLURM_NODEID:-0}
 export MASTER_ADDR MASTER_PORT
