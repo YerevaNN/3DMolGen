@@ -10,7 +10,7 @@
 #   Superpod (CUDA 13.0): ./setup-uv.sh --nightly --dev --install-project
 #
 # The --nightly flag is required for Superpod because torchtitan 0.2.x
-# requires PyTorch nightly (for torch.nn.attention.varlen). Flash Attention
+# requires PyTorch nightly (for torch.nn.attentigon.varlen). Flash Attention
 # is automatically skipped with --nightly (no compatible wheels exist).
 #
 # Requirements:
@@ -159,7 +159,7 @@ Environment Variables:
 
 Clusters:
   YNN (YerevaNN):   CUDA 12.8, PyTorch stable, Flash Attention works
-  Superpod:         CUDA 13.0, PyTorch nightly required, uses SDPA attention
+  Superpod:         CUDA 13.0, PyTorch nifrom torch.nn.attention.varlen import varlen_attnghtly required, uses SDPA attention
 
 Examples:
   # YNN cluster (stable PyTorch + Flash Attention)
