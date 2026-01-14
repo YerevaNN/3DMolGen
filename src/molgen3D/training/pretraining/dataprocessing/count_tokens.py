@@ -667,6 +667,7 @@ def dump_json_summary(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Simplified MolGen3D token counting tool")
+    parser.add_argument("--dataset", type=str, default="conformers_train")
     parser.add_argument("--seq-len", type=int, default=2048)
     parser.add_argument("--sample-lines", type=int, default=1000)
     parser.add_argument("--batch-size", type=int, default=4)
@@ -679,8 +680,8 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    train_path = str(get_data_path("filtered_conformers_train"))
-    valid_path = str(get_data_path("filtered_conformers_valid"))
+    train_path = str(get_data_path(args.dataset))
+    valid_path = str(get_data_path(args.dataset.replace("train", "valid")))
 
     tokenizer_map: Dict[str, Tuple[str, AutoTokenizer]] = {}
     for alias in args.tokenizers:
