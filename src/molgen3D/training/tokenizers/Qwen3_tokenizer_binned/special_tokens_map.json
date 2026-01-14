@@ -1,33 +1,18 @@
 {
   "additional_special_tokens": [
-    {
-      "content": "[SMILES]",
-      "lstrip": false,
-      "normalized": false,
-      "rstrip": false,
-      "single_word": false
-    },
-    {
-      "content": "[CONFORMER]",
-      "lstrip": false,
-      "normalized": false,
-      "rstrip": false,
-      "single_word": false
-    },
-    {
-      "content": "[/SMILES]",
-      "lstrip": false,
-      "normalized": false,
-      "rstrip": false,
-      "single_word": false
-    },
-    {
-      "content": "[/CONFORMER]",
-      "lstrip": false,
-      "normalized": false,
-      "rstrip": false,
-      "single_word": false
-    }
+    "<|im_start|>",
+    "<|im_end|>",
+    "<|object_ref_start|>",
+    "<|object_ref_end|>",
+    "<|box_start|>",
+    "<|box_end|>",
+    "<|quad_start|>",
+    "<|quad_end|>",
+    "<|vision_start|>",
+    "<|vision_end|>",
+    "<|vision_pad|>",
+    "<|image_pad|>",
+    "<|video_pad|>"
   ],
   "eos_token": {
     "content": "<|endoftext|>",

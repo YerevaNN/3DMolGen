@@ -243,8 +243,8 @@
       "single_word": false,
       "lstrip": false,
       "rstrip": false,
-      "normalized": false,
-      "special": true
+      "normalized": true,
+      "special": false
     },
     {
       "id": 151670,
@@ -252,8 +252,8 @@
       "single_word": false,
       "lstrip": false,
       "rstrip": false,
-      "normalized": false,
-      "special": true
+      "normalized": true,
+      "special": false
     },
     {
       "id": 151671,
@@ -261,8 +261,8 @@
       "single_word": false,
       "lstrip": false,
       "rstrip": false,
-      "normalized": false,
-      "special": true
+      "normalized": true,
+      "special": false
     },
     {
       "id": 151672,
@@ -270,8 +270,8 @@
       "single_word": false,
       "lstrip": false,
       "rstrip": false,
-      "normalized": false,
-      "special": true
+      "normalized": true,
+      "special": false
     },
     {
       "id": 151673,

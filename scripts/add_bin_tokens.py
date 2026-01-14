@@ -4,7 +4,7 @@ from molgen3D.config.paths import get_base_path, get_tokenizer_path
 
 # Paths
 tokenizer_dir = get_tokenizer_path("qwen3_0.6b_origin")
-new_tokenizer_binned = get_base_path("tokenizers_root") / "Qwen3_tokenizer_binned_v2"
+new_tokenizer_binned = get_base_path("tokenizers_root") / "Qwen3_tokenizer_binned"
 
 # Ensure output directory exists
 os.makedirs(new_tokenizer_binned, exist_ok=True)
@@ -17,16 +17,13 @@ tokenizer = AutoTokenizer.from_pretrained(tokenizer_dir, trust_remote_code=True)
 new_tokens = [f"{i:03d}" for i in range(250)]
 
 special_tokens = ["[SMILES]", "[CONFORMER]", "[/SMILES]", "[/CONFORMER]"]
-special_tokens_dict = {
-    "additional_special_tokens": special_tokens
-}
 
 
-num_added = tokenizer.add_special_tokens(special_tokens_dict)
-print(f"Successfully added {num_added} tokens (special).")
+
+tokenizer.add_tokens(special_tokens)
 
 tokenizer.add_tokens(new_tokens)
-print(f"Successfully added {len(new_tokens)} tokens (numerical).")
+print(f"Successfully added {len(new_tokens+special_tokens)} tokens (numerical).")
 
 print(f"Total number of tokens: {len(tokenizer)}")
 
