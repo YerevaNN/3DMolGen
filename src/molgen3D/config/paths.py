@@ -10,6 +10,7 @@ import yaml
 
 
 _ENV_REPO_ROOT = os.environ.get("MOLGEN3D_REPO_ROOT")
+_ENV_PROJECT_ROOT = os.environ.get("MOLGEN3D_PROJECT_ROOT")
 _CANDIDATE_ROOT = (
     Path(_ENV_REPO_ROOT).expanduser().resolve()
     if _ENV_REPO_ROOT
@@ -35,10 +36,43 @@ GEOM_DATA_KEYS = {
 }
 
 
-def _to_absolute_path(p: str | Path) -> Path:
-    """Convert a path to absolute, resolving relative paths against REPO_ROOT."""
-    p = Path(p)
-    return p if p.is_absolute() else REPO_ROOT / p
+def _path_candidate_roots() -> list[Path]:
+    """Return ordered roots used when resolving relative paths."""
+    roots: list[Path] = []
+
+    def _add_root(path: Path) -> None:
+        resolved = path.resolve()
+        if resolved not in roots:
+            roots.append(resolved)
+
+    if _ENV_PROJECT_ROOT:
+        _add_root(Path(_ENV_PROJECT_ROOT).expanduser())
+
+    _add_root(REPO_ROOT)
+    for ancestor in REPO_ROOT.parents[:2]:
+        _add_root(ancestor)
+
+    return roots
+
+
+def _absolute_path_candidates(value: str | Path) -> list[Path]:
+    """Return the absolute paths to try for a single candidate."""
+    candidate = Path(value)
+    if candidate.is_absolute():
+        return [candidate]
+
+    resolved: list[Path] = []
+    seen: set[Path] = set()
+    for root in _path_candidate_roots():
+        path = (root / candidate).resolve()
+        if path in seen:
+            continue
+        seen.add(path)
+        resolved.append(path)
+
+    if not resolved:
+        return [candidate]
+    return resolved
 
 
 def _as_path_candidates(value: str | Path | Sequence[str | Path]) -> list[str | Path]:
@@ -57,11 +91,15 @@ def _resolve_path_value(value: str | Path | Sequence[str | Path]) -> Path:
         raise ValueError("Cannot resolve an empty set of path candidates")
 
     resolved: list[Path] = []
+    seen: set[Path] = set()
     for candidate in candidates:
-        candidate_path = _to_absolute_path(candidate)
-        resolved.append(candidate_path)
-        if candidate_path.exists():
-            return candidate_path
+        for candidate_path in _absolute_path_candidates(candidate):
+            if candidate_path in seen:
+                continue
+            seen.add(candidate_path)
+            resolved.append(candidate_path)
+            if candidate_path.exists():
+                return candidate_path
 
     return resolved[0]
 
@@ -69,6 +107,11 @@ def _resolve_path_value(value: str | Path | Sequence[str | Path]) -> Path:
 @lru_cache(maxsize=1)
 def _cfg() -> dict:
     """Load and cache the paths.yaml configuration file."""
+    repo_path = REPO_ROOT / "src" / "molgen3D" / "config" / "paths.yaml"
+    if repo_path.exists():
+        with repo_path.open("r") as f:
+            return yaml.safe_load(f) or {}
+
     paths_file = pkg_resources.files("molgen3D.config").joinpath("paths.yaml")
     with paths_file.open("r") as f:
         return yaml.safe_load(f) or {}
@@ -97,6 +140,14 @@ def _get_ckpt_base_path(root_rel: str, base_paths: dict) -> Path:
     if root_rel.startswith("2025-"):
         return _resolve_from_keys("grpo_root", "ckpts_root")
     return _resolve_from_keys("hf_yerevann_root", default=".")
+
+
+def _resolve_direct_path(value: str | Path) -> Path:
+    """Resolve a single, possibly relative path without a section tag."""
+    candidate = Path(value)
+    if candidate.is_absolute():
+        return candidate
+    return _absolute_path_candidates(candidate)[0]
 
 
 def load_paths_yaml() -> dict:
@@ -190,18 +241,49 @@ def get_data_path(key: str) -> Path:
     if key not in data_cfg:
         raise KeyError(f"Unknown data path '{key}', available: {sorted(data_cfg.keys())}")
     
-    rel = Path(data_cfg[key])
-    if rel.is_absolute():
-        return rel
+    rel_candidates = _as_path_candidates(data_cfg[key])
+    if not rel_candidates:
+        raise ValueError(f"No data path candidates defined for '{key}'")
 
     base_paths = _get_config_section("base_paths")
-    if key in GEOM_DATA_KEYS or str(rel).startswith(("geom_processed", "rdkit_folder")):
-        base_value = base_paths.get("geom_data_root") or base_paths.get("data_root") or "."
-    else:
-        base_value = base_paths.get("data_root") or "."
 
-    base_path = _resolve_path_value(base_value)
-    return base_path / rel
+    def _base_candidate_values(base_key: str) -> list[str | Path]:
+        value = base_paths.get(base_key)
+        if value is not None:
+            return _as_path_candidates(value)
+        if base_key == "geom_data_root":
+            return _base_candidate_values("data_root")
+        return ["."]
+
+    default_path: Path | None = None
+    for rel_candidate in rel_candidates:
+        rel_path = Path(rel_candidate)
+        if rel_path.is_absolute():
+            if default_path is None:
+                default_path = rel_path
+            if rel_path.exists():
+                return rel_path
+            continue
+
+        rel_str = str(rel_candidate)
+        base_key = (
+            "geom_data_root"
+            if key in GEOM_DATA_KEYS or rel_str.startswith(("geom_processed", "rdkit_folder"))
+            else "data_root"
+        )
+
+        for base_value in _base_candidate_values(base_key):
+            for base_path in _absolute_path_candidates(base_value):
+                candidate_path = base_path / rel_path
+                if default_path is None:
+                    default_path = candidate_path
+                if candidate_path.exists():
+                    return candidate_path
+
+    if default_path is not None:
+        return default_path
+
+    return Path(rel_candidates[0])
 
 
 def get_root_path(base_key: str, folder: str | Path) -> Path:
@@ -308,7 +390,7 @@ def resolve_tag(tag: str) -> Path:
 
     if ":" not in tag:
         candidate = Path(tag)
-        return candidate if candidate.is_absolute() else _to_absolute_path(candidate)
+        return candidate if candidate.is_absolute() else _resolve_direct_path(candidate)
 
     section, key = tag.split(":", 1)
     section = section.strip()
