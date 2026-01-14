@@ -139,15 +139,6 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         steps_per_generation=config.grpo.steps_per_generation,
         seed=config.grpo.seed
     )
-
-    # Set generation parameters if specified
-    generation_attrs = ['skip_special_tokens', 'do_sample', 'repetition_penalty']
-    for attr in generation_attrs:
-        if hasattr(config.generation, attr):
-            value = getattr(config.generation, attr)
-            setattr(training_args, attr, value)
-            logger.info(f"Set {attr}={value} for generation")
-
     scale_rewards = getattr(config.grpo, "scale_rewards", None)
     if isinstance(scale_rewards, str):
         scale_rewards_value = scale_rewards.lower()
@@ -173,19 +164,6 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         config.model.tokenizer_path,
         padding_side="left",
     )
-
-    # Set tokenizer properties if specified
-    if hasattr(config.generation, 'skip_special_tokens') and hasattr(tokenizer, 'skip_special_tokens'):
-        tokenizer.skip_special_tokens = config.generation.skip_special_tokens
-        logger.info(f"Set tokenizer.skip_special_tokens={config.generation.skip_special_tokens}")
-
-    # Monkey patch tokenizer decode to not skip special tokens during generation
-    original_decode = tokenizer.decode
-    def decode_with_special_tokens(*args, **kwargs):
-        kwargs['skip_special_tokens'] = False
-        return original_decode(*args, **kwargs)
-    tokenizer.decode = decode_with_special_tokens
-    logger.info("Monkey patched tokenizer.decode to skip_special_tokens=False")
 
     # Load dataset from text file and create prompt column
     with open(config.dataset.dataset_path, 'r', encoding='utf-8', errors='replace') as f:
@@ -245,15 +223,11 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
 
     numerical_callback = None
     if config.validation.enable_numerical_validation:
-        # Use binned setting from config
-        binned = getattr(config.model, 'binned', False)
-
         numerical_validator = GRPONumericalValidator(
             config=config,
             tokenizer=tokenizer,
             stats=stats,
             output_dir=actual_output_dir,
-            binned=binned,
         )
         logger.info("Numerical validation enabled")
 

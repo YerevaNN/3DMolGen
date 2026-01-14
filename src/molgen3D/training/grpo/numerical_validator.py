@@ -24,8 +24,6 @@ from loguru import logger
 
 from molgen3D.data_processing.smiles_encoder_decoder import (
     decode_cartesian_v2,
-    decode_cartesian_binned,
-    get_bins_for_coords,
     strip_smiles,
 )
 from molgen3D.evaluation.utils import (
@@ -60,7 +58,6 @@ class GRPONumericalValidator:
         tokenizer,
         stats,
         output_dir: str,
-        binned: bool = False,
     ):
         """
         Initialize the numerical validator.
@@ -70,13 +67,11 @@ class GRPONumericalValidator:
             tokenizer: Tokenizer for decoding
             stats: Run statistics tracker
             output_dir: Output directory for saving results
-            binned: Whether to use binned coordinate decoding
         """
         self.config = config
         self.tokenizer = tokenizer
         self.stats = stats
         self.output_dir = Path(output_dir)
-        self.binned = binned
 
         self._validation_prompts: List[str] = []
         self._ground_truths: Dict[str, List] = {}
@@ -89,14 +84,6 @@ class GRPONumericalValidator:
 
         if self._conformer_start_id is None or self._conformer_end_id is None:
             raise ValueError("Tokenizer must define [CONFORMER] and [/CONFORMER] tokens.")
-
-        # Setup bins for binned coordinate decoding
-        self._bins = None
-        if self.binned:
-            ranges = [(-13.0, 13.0), (-13.0, 13.0), (-13.0, 13.0)]
-            bin_size = 0.104  # Match the bin size used during training
-            self._bins = get_bins_for_coords(ranges, bin_size=bin_size)
-            logger.info(f"Initialized binned coordinate decoding with bin_size={bin_size}")
 
     def _load_validation_prompts(self) -> List[str]:
         """
@@ -570,7 +557,7 @@ class GRPONumericalValidator:
 
                     sequences = generated_outputs.detach().cpu()
                     decoded_batch = self.tokenizer.batch_decode(
-                        sequences, skip_special_tokens=False
+                        sequences, skip_special_tokens=True
                     )
                     del sequences, generated_outputs
 
@@ -623,10 +610,7 @@ class GRPONumericalValidator:
 
                         # Try to parse the conformer
                         try:
-                            if self.binned:
-                                generated_mol = decode_cartesian_binned(conformer_text, self._bins)
-                            else:
-                                generated_mol = decode_cartesian_v2(conformer_text)
+                            generated_mol = decode_cartesian_v2(conformer_text)
                         except Exception as e:
                             failure_counts[FAIL_PARSING_ERROR] += 1
                             all_failed_generations.append(

@@ -11,7 +11,6 @@ class ModelConfig:
     conf_tags: List[str]
     pad_token: str
     dtype: str
-    binned: bool = False
 
 
 @dataclass
@@ -21,7 +20,6 @@ class GenerationConfig:
     do_sample: bool
     repetition_penalty: float
     num_return_sequences: int
-    skip_special_tokens: bool = True
 
 
 @dataclass
