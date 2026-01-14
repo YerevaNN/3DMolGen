@@ -1,4 +1,5 @@
 import argparse
+import ast
 import glob
 import json
 import os
@@ -23,9 +24,9 @@ from molgen3D.utils.utils import load_pkl
 random.seed(42)
 RDLogger.DisableLog("rdApp.*")
 def read_mol(
-    args: Tuple[str, int, int, Any, str, str]
+    args: Tuple[str, int, int, Any, float, List[Tuple[float, float]], bool, str, str]
 ) -> Optional[Tuple[List[str], Dict[str, Any]]]:
-    mol_path, max_confs, precision, embedding_func, pickle_dir, _geom_root = args
+    mol_path, max_confs, precision, embedding_func, bin_size, ranges, filter_ranges, pickle_dir, _geom_root = args
     mol_object = load_pkl(mol_path)
     geom_smiles = mol_object["smiles"]
 
@@ -37,15 +38,19 @@ def read_mol(
     filtered_mols: List[Chem.Mol] = []
 
     for mol in mols:
-        # Filter conformers with coordinates outside [-13, 13]
-        try:
+        if filter_ranges:
+            # Filter conformers with coordinates outside ranges
             pos = mol.GetConformer().GetPositions()
-            if np.any(pos < -13.0) or np.any(pos > 13.0):
+            out_of_range = False
+            for i in range(3):
+                min_val, max_val = ranges[i]
+                if np.any(pos[:, i] < min_val) or np.any(pos[:, i] > max_val):
+                    out_of_range = True
+                    break
+            
+            if out_of_range:
                 local_failures["coord_out_of_range"] += 1
                 continue
-        except Exception:
-            local_failures["coord_check_failed"] += 1
-            continue
 
         try:
             noniso = Chem.MolToSmiles(Chem.RemoveHs(mol, sanitize=False), canonical=True, isomericSmiles=False)
@@ -56,7 +61,10 @@ def read_mol(
             pass
 
         try:
-            embedded_smile, iso_smile = embedding_func(mol)
+            if embedding_func == encode_cartesian_binned:
+                embedded_smile, iso_smile = embedding_func(mol, bin_size=bin_size, ranges=ranges)
+            else:
+                embedded_smile, iso_smile = embedding_func(mol, precision=precision)
         except Exception as exc:
             log.error("Error encoding conformer | path={} | failure={}", mol_path, exc)
             local_failures["encoding_error"] += 1
@@ -124,6 +132,9 @@ def preprocess(
     splits: Optional[str] = None,
     dest_path: Optional[str] = None,
     max_confs: int = 30,
+    bin_size: float = 0.104,
+    ranges: str = "[-13.0, 13.0], [-13.0, 13.0], [-13.0, 13.0]",
+    filter_ranges: str = None,
 ) -> None:
     if dest_path is None:
         raise ValueError("dest_path must be provided for preprocessing output")
@@ -164,6 +175,21 @@ def preprocess(
     if pickle_paths.size == 0:
         raise FileNotFoundError(f"No pickle files found under pattern {pickle_glob}")
 
+    # Parse ranges string once
+    try:
+        parsed_ranges = ast.literal_eval(f"[{ranges}]")
+        parsed_ranges = [tuple(r) for r in parsed_ranges]
+    except Exception as e:
+        log.error(f"Failed to parse ranges: {ranges}. Error: {e}")
+        parsed_ranges = [(-13.0, 13.0), (-13.0, 13.0), (-13.0, 13.0)]
+
+    do_filter = False
+    if filter_ranges is not None:
+        if isinstance(filter_ranges, str):
+            do_filter = filter_ranges.lower() in ("true", "1", "yes", "on")
+        else:
+            do_filter = bool(filter_ranges)
+
     for split_name in requested_splits:
         split_idx = split_name_to_index[split_name]
         split_indices = np.array(sorted(split_indices_array[split_idx]), dtype=int)
@@ -195,6 +221,9 @@ def preprocess(
                 max_confs,
                 precision,
                 embedding_func,
+                bin_size,
+                parsed_ranges,
+                do_filter,
                 split_pickle_dirs[split_name],
                 geom_raw_path,
             )
@@ -371,7 +400,24 @@ if __name__ == "__main__":
         default=30,
         help="Maximum number of conformers per molecule.",
     )
-
+    parser.add_argument(
+        "--bin_size",
+        type=float,
+        default=0.104,
+        help="Bin size for binned embedding.",
+    )
+    parser.add_argument(
+        "--ranges",
+        type=str,
+        default="[-13.0, 13.0], [-13.0, 13.0], [-13.0, 13.0]",
+        help="Ranges for binned embedding.",
+    )
+    parser.add_argument(
+        "--filter_ranges",
+        type=str,
+        default=None,
+        help="Filter ranges for binned embedding.",
+    )
     args = parser.parse_args()
 
     dest_path = osp.join(args.dest, args.run_name)
@@ -394,5 +440,8 @@ if __name__ == "__main__":
         precision=args.precision,
         dataset_type=args.dataset_type,
         splits=args.splits,
+        bin_size=args.bin_size,
+        ranges=args.ranges,
+        filter_ranges=args.filter_ranges,
     )
     

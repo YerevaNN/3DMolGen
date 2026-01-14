@@ -537,7 +537,7 @@ def bins_to_coords(bin_indices, bins, use_bin_center=False):
 
 
 
-def encode_cartesian_binned(mol, bin_size=0.104, ranges=None):
+def encode_cartesian_binned(mol, bin_size, ranges=None):
     """
     Serialize a 3D RDKit Mol into an enriched text representation where
     the Cartesian coordinates are replaced by bin indices.
@@ -572,7 +572,6 @@ def encode_cartesian_binned(mol, bin_size=0.104, ranges=None):
 
     tokens = tokenize_smiles(smiles, expected_atom_tokens=expected_atom_tokens)
 
-    # Build bins per axis: use fixed global range [-9, 9] unless explicitly provided.
     if ranges is None:
         ranges = [(-13.0, 13.0), (-13.0, 13.0), (-13.0, 13.0)]
     if len(ranges) != 3:

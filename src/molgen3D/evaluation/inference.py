@@ -107,8 +107,8 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id,
     # Create bins for binned decoding (must match encoding bins)
     bins = None
     if binned:
-        ranges = [(-21.0, 21.0), (-21.0, 21.0), (-21.0, 21.0)]
-        bins = get_bins_for_coords(ranges, bin_size=0.042)
+        ranges = [(-13.0, 13.0), (-13.0, 13.0), (-13.0, 13.0)]
+        bins = get_bins_for_coords(ranges, bin_size=0.104)
     generations = defaultdict(list)
     stats = {"smiles_mismatch":0, "mol_parse_fail" :0, "no_eos":0}
     
@@ -147,17 +147,36 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id,
     log_cuda_memory("Post-first-forward")
     decoded_outputs = tokenizer.batch_decode(sequences, skip_special_tokens=False)
     for i, out in enumerate(decoded_outputs):
-        # Clean up padding and potential start tokens if they interfere with extract_between
-        out = out.replace(tokenizer.pad_token, "").replace("<|im_start|>", "").replace("<|im_end|>", "")
+        out_clean = out.replace(tokenizer.eos_token, "").replace(tokenizer.pad_token, "")
+
+        # Robust extraction for both standard and ICL prompts
+        # 1. Get the target SMILES from the prompt part to be safe
+        prompt = prompts[i]
+        canonical_smiles = ""
+        last_smiles_in_prompt = prompt.rfind("[SMILES]")
+        if last_smiles_in_prompt != -1:
+            smiles_content_start = last_smiles_in_prompt + len("[SMILES]")
+            smiles_end = prompt.find("[/SMILES]", smiles_content_start)
+            if smiles_end != -1:
+                canonical_smiles = prompt[smiles_content_start:smiles_end]
         
-        canonical_smiles = extract_between(out, "[SMILES]", "[/SMILES]")
-        generated_conformer = extract_between(out, "[CONFORMER]", "[/CONFORMER]")
+        # 2. Extract the generated conformer from the full output
+        # It should be between the LAST [CONFORMER] and the next [/CONFORMER]
+        generated_conformer = ""
+        last_conformer_start = out_clean.rfind("[CONFORMER]")
+        if last_conformer_start != -1:
+            conformer_content_start = last_conformer_start + len("[CONFORMER]")
+            conformer_end = out_clean.find("[/CONFORMER]", conformer_content_start)
+            if conformer_end != -1:
+                generated_conformer = out_clean[conformer_content_start:conformer_end]
+        
         geom_smiles = geom_smiles_list[i]
         
         if generated_conformer:
             generated_smiles = strip_smiles(generated_conformer)
             if not same_molecular_graph(canonical_smiles, generated_smiles):
-                logger.info(f"smiles mismatch: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
+                if stats["smiles_mismatch"] < 20: # Log first few mismatches in detail
+                    logger.info(f"smiles mismatch: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}\nFull output snippet: {out_clean[-500:]}")
                 stats["smiles_mismatch"] += 1
             else:
                 try:
@@ -165,14 +184,15 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id,
                         mol_obj = decode_cartesian_binned(generated_conformer, bins)
                     else:
                         mol_obj = decode_cartesian_v2(generated_conformer)
-                    # logger.info(f"smiles match: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
                     generations[geom_smiles].append(mol_obj)
-                except:
-                    logger.info(f"smiles fails parsing: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
+                except Exception as e:
+                    if stats["mol_parse_fail"] < 20:
+                        logger.info(f"smiles fails parsing: {e}\n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
                     stats["mol_parse_fail"] += 1
         else:
             stats["no_eos"] += 1
-            logger.info(f"no eos: \n{out[:1000]=}")
+            if stats["no_eos"] < 20:
+                logger.info(f"no eos: \n{out_clean[:500]=} ... {out_clean[-500:]=}")
     return generations, stats
 
 def split_batch_on_geom_size(batch: list[list], max_geom_len: int = 80) -> list[list]:
@@ -229,6 +249,12 @@ def run_inference(inference_config: dict):
         for geom_smiles, data in test_data.items():
             for sub_smiles, count in data["sub_smiles_counts"].items():
                 mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * count * 2)
+    elif test_set == "icl":
+        logger.info("Processing as icl dataset")
+        for geom_smiles, data in test_data.items():
+            icl_prompt = data.get('icl_prompt')
+            if icl_prompt:
+                mols_list.extend([(geom_smiles, icl_prompt)] * data.get("num_confs", 1) * 2)
     logger.info(f"mols_list length: {len(mols_list)}, mols_list_distinct: {len(set(mols_list))}, mols_list: {mols_list[:10]}")
 
     mols_list.sort(key=lambda x: len(x[0]))
@@ -258,7 +284,7 @@ def run_inference(inference_config: dict):
     return generations_all, stats
 
 
-def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:str = None, xl:bool = False, qm9:bool = False, limit: int = None, binned: bool = False) -> None:
+def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:str = None, xl:bool = False, qm9:bool = False, limit: int = None, binned: bool = False, icl:bool = False, icl_n:int = 5) -> None:
     # Determine which test sets to run
     test_sets_to_run = []
     if test_set:
@@ -267,6 +293,8 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         test_sets_to_run.append("xl")
     if qm9:
         test_sets_to_run.append("qm9")
+    if icl:
+        test_sets_to_run.append(f"icl_{icl_n}")
     if not test_sets_to_run:
         logger.info("No test sets specified. Skipping inference.")
         return
@@ -290,10 +318,10 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
     
     # Base configuration template
     base_inference_config = {
-        "model_path": get_ckpt("qw600_pre_binned_filtered", "1e"),
+        "model_path": get_ckpt("qw600_pre_binned_filtered", "4e"),
         "tokenizer_path": get_tokenizer_path("qwen3_0.6b_binned"),
         "torch_dtype": "bfloat16",
-        "batch_size": 256,
+        "batch_size": 128,
         "num_gens": gen_num_codes["2k_per_conf"],
         "gen_config": sampling_configs["top_p_sampling1"],
         "device": "cuda",
@@ -329,6 +357,9 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
                         
                         if test_set_name == "qm9":
                             grid_config["batch_size"] = 100
+                        
+                        if test_set_name == "icl":
+                            grid_config["batch_size"] = 64
 
                         grid_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
                         grid_config["test_set"] = test_set_name
@@ -345,6 +376,8 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
                         inference_config["batch_size"] = 100
                     if test_set_name == "qm9":
                         inference_config["batch_size"] = 100
+                    if test_set_name == "icl":
+                        inference_config["batch_size"] = 64
                     inference_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
                     inference_config["test_set"] = test_set_name
                     inference_config["run_name"] = f"new_data_p1_{test_set_name}"
@@ -375,7 +408,9 @@ if __name__ == "__main__":
     parser.add_argument("--xl", action="store_true")
     parser.add_argument("--qm9", action="store_true")
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--icl", action="store_true")
+    parser.add_argument("--icl_n", type=int, default=5)
     args = parser.parse_args() 
-    launch_inference_from_cli(device=args.device, grid_run_inference=args.grid_run_inference, test_set=args.test_set, xl=args.xl, qm9=args.qm9, limit=args.limit, binned=args.binned)
+    launch_inference_from_cli(device=args.device, grid_run_inference=args.grid_run_inference, test_set=args.test_set, xl=args.xl, qm9=args.qm9, limit=args.limit, binned=args.binned, icl=args.icl, icl_n=args.icl_n)
 
     
