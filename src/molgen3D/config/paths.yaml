@@ -1,21 +1,45 @@
 base_paths:
   project_root: "."
   data_root: "data"
-  geom_data_root: "/nfs/ap/mnt/sxtn2/chem/GEOM_data"
-  geom_dataset_root: "/nfs/ap/mnt/sxtn2/chem/GEOM_data/torsional_diff_gdrive/extracted"
-  ckpts_root: "/nfs/h100/raid/chem/checkpoints/yerevann"
-  hf_yerevann_root: "/nfs/h100/raid/chem/checkpoints/hf/yerevann"
-  qwen_yerevann_root: "/nfs/h100/raid/chem/checkpoints/yerevann"
-  grpo_root: "/nfs/h100/raid/chem/checkpoints/conf_grpo"
-  qwen3_grpo_root: "/nfs/h100/raid/chem/checkpoints/conf_grpo"
+  geom_data_root:
+    - "/nfs/ap/mnt/sxtn2/chem/GEOM_data"
+    - "/home/chem-project/data/GEOM_data"
+  geom_dataset_root:
+    - "/nfs/ap/mnt/sxtn2/chem/GEOM_data/torsional_diff_gdrive/extracted"
+    - "/home/chem-project/data/GEOM_data/torsional_diff_gdrive/extracted"
+  ckpts_root:
+    - "/nfs/h100/raid/chem/checkpoints/yerevann"
+    - "/home/chem-project/checkpoints/yerevann"
+  hf_yerevann_root:
+    - "/nfs/h100/raid/chem/checkpoints/hf/yerevann"
+    - "/home/chem-project/checkpoints/hf/yerevann"
+  qwen_yerevann_root:
+    - "/nfs/h100/raid/chem/checkpoints/yerevann"
+    - "/home/chem-project/checkpoints/yerevann"
+  grpo_root:
+    - "/nfs/h100/raid/chem/checkpoints/conf_grpo"
+    - "/home/chem-project/checkpoints/conf_grpo"
+  qwen3_grpo_root:
+    - "/nfs/h100/raid/chem/checkpoints/conf_grpo"
+    - "/home/chem-project/checkpoints/conf_grpo"
   gen_results_root: "outputs/gen_results"
   eval_results_root: "outputs/eval_results"
   pretrain_results_root: "outputs/pretrain_results"
   pretrain_logs_root: "outputs/pretrain_logs"
   wandb_root: "wandb_runs"
-  qwen3_0.6b_base_model: "/nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b/Qwen3-0.6B-Base"
+  qwen3_0.6b_base_model:
+    - "/nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b/Qwen3-0.6B-Base"
+    - "/home/chem-project/checkpoints/yerevann/qwen3_06b/Qwen3-0.6B-Base"
   tokenizers_root: "src/molgen3D/training/tokenizers"
   aimnet2_model_root: "models/aimnet2"
+
+ckpts:
+  qwen3_06b:
+    - "/nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b"
+    - "/home/chem-project/checkpoints/yerevann/qwen3_06b"
+  qwen3_grpo:
+    - "/nfs/h100/raid/chem/checkpoints/conf_grpo"
+    - "/home/chem-project/checkpoints/conf_grpo"
 
 data:
   clean_smi: "clean_smi.pickle"
@@ -69,6 +93,13 @@ models:
       "2e": "step-40000-hf"
       "3e": "step-60000-hf"
       "4e": "step-80000-hf"
+  
+  m600_qwen_pre_4seq:
+    root: "qwen3_06b/251230-1352-da5b-qwen3_06b_pre_5e_48effb_4kseq"
+    steps:
+      "1e": "step-30000-hf"
+      "2e": "step-60000-hf"
+      "3e": "step-90000-hf"
 
   m380_conf:
     root: "Llama-3.2-380M_conformers"
@@ -238,3 +269,8 @@ models:
       "4000": "checkpoint-4000"
     run_id: "grpo-20251228-1438-qwen3-v3-match-qual-gspo-8*2*32comp-16steps"
     
+  qwen3_v3_125_rec-div_scale50_rho0.3_2000:
+    root: "260105-1309_qwen3_v3_125_rec-div_scale50_rho0.3"
+    steps:
+      "2000": "checkpoint-2000"
+    run_id: "grpo-20260105-1309-qwen3-v3-125-rec-div-scale50-rho0.3-2000"

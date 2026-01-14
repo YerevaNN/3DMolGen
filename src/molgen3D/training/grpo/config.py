@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Union
 from dataclasses import dataclass, field
 import yaml
 
@@ -85,12 +85,15 @@ class GRPOConfig:
     # V3 reward parameters (GEOM-Drugs aligned)
     delta: float = 0.75        # RMSD threshold (Å)
     sigma: float = 0.25        # Quality scale (Å)
-    rho: float = 0.75          # Smooth coverage kernel scale (Å)
+    rho: float = 0.75          # Soft coverage temperature for diagnostics/precision shaping
     lambda_qual: float = 1.0   # Weight for quality term
     lambda_smcov: float = 1.0  # Weight for smooth coverage term
     lambda_match: float = 1.0  # Weight for matching term
     r_floor: float = -1.0      # Reward for invalid samples
     hard_rmsd_gate: bool = True  # Drop PoseBusters-valid but RMSD-invalid rollouts
+    smcov_precision_weight: float = 0.10
+    smcov_unique_quality_weight: float = 0.20
+    scale_rewards: Optional[Union[str, bool]] = None  # TRL advantage scaling ("std", "rank", "none", False)
 
     # Posebusters configuration
     posebusters: Optional[dict] = None

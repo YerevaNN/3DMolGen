@@ -1,252 +1,193 @@
 # GRPO Training Metrics Guide
 
-This guide explains the **20 essential metrics** tracked during GRPO training for conformer generation. These metrics provide comprehensive monitoring of model performance, training stability, and generation quality.
+This guide explains the metrics emitted by the GRPO reward function for conformer generation. They cover validity gating, RMSD quality, coverage, reward shaping, and optional diagnostics so you can monitor both model correctness and reward-signal health.
 
 ## Overview
 
-The metrics are organized into 6 categories:
-1. **Validity Metrics** (3) - Whether outputs pass quality gates
-2. **Geometry Metrics** (3) - RMSD accuracy to reference conformers
-3. **Matching/Coverage Metrics** (5) - How well references are covered
-4. **Reward Components** (3) - Breakdown of reward signal
-5. **Coverage Metrics** (2) - Soft coverage statistics
-6. **Diversity & Additional** (4) - Conformer diversity and batch-level stats
+Metrics fall into eight families:
+1. **Validity & Gating** – SMILES parsing, graph alignment, final survival rate
+2. **PoseBusters** – Geometry health when PoseBusters is enabled
+3. **Geometry Quality** – RMSD statistics and thresholds
+4. **Coverage & Utilization** – How many references each batch touches
+5. **Smooth Coverage Diagnostics** – Sigmoid-based coverage proxies
+6. **Matching** – Hungarian assignment success and match quality
+7. **Reward Components** – Contribution and variance of each reward term
+8. **Diversity & Additional** – Optional pairwise RMSDs and other rollup stats
 
 ---
 
-## 1. Validity Metrics
+## 1. Validity & Gating Metrics
 
-These metrics track whether generated conformers pass quality gates.
+These describe how many completions pass the structural gates.
 
-### `validity_rate`
-- **Definition**: Final validity rate after all gates (graph match + optional RMSD gate)
-- **Range**: 0.0 to 1.0
-- **Formula**: `valid_rollouts / total_rollouts`
-- **Interpretation**:
-  - **> 0.8**: Excellent - model generates mostly valid conformers
-  - **0.5 - 0.8**: Good - acceptable validity rate
-  - **< 0.5**: Poor - many invalid outputs, training may be unstable
-- **What to watch**: Should increase over training. If it drops, check `graph_match_rate` and `finite_rmsd_rate` to identify the failure point.
+### `gate/graph_match_rate`
+- **Definition**: Fraction of completions whose decoded SMILES matches the canonical prompt SMILES.
+- **Interpretation**: Should remain >0.9 for conditioned generation. Drops mean the model is ignoring the prompt or emitting malformed SMILES.
 
-### `graph_match_rate`
-- **Definition**: Fraction of rollouts where generated SMILES matches the canonical molecular graph
-- **Range**: 0.0 to 1.0
-- **Meaning**: First validity gate - ensures conformers correspond to the correct molecule structure
-- **Interpretation**:
-  - **> 0.9**: Excellent - model rarely generates wrong molecules
-  - **0.7 - 0.9**: Good - occasional graph mismatches
-  - **< 0.7**: Poor - model frequently generates incorrect molecular structures
-- **What to watch**: If low, the model is generating chemically invalid structures. This should be very high (>0.9) for a well-trained model.
+### `gate/rdkit_parse_rate`
+- **Definition**: Fraction of completions that RDKit can parse after extracting the `[CONFORMER]` block.
+- **Interpretation**: >0.99 is healthy; sustained dips point to formatting issues in the text decoder.
 
-### `finite_rmsd_rate`
-- **Definition**: Fraction of rollouts that have finite RMSD values (can be computed against references)
-- **Range**: 0.0 to 1.0
-- **Meaning**: Second validity gate - indicates conformers are geometrically valid enough to compute RMSD
-- **Interpretation**:
-  - **> 0.8**: Good - most conformers are geometrically reasonable
-  - **0.5 - 0.8**: Acceptable - some conformers have geometric issues
-  - **< 0.5**: Poor - many conformers are geometrically invalid
-- **What to watch**: If `graph_match_rate` is high but `finite_rmsd_rate` is low, conformers pass graph check but have geometric problems (e.g., distorted bonds, clashes).
+### `gate/base_valid_rate`
+- **Definition**: Joint success of graph match ∧ RDKit parse.
+- **Interpretation**: Mirrors the lowest of the two upstream gates. Large gaps imply the pairwise combination is revealing extra issues (e.g., parses succeed but the graph drifts).
+
+### `gate/final_valid_rate`
+- **Definition**: Fraction of rollouts that survive PoseBusters (if enabled) plus the finite-RMSD gate.
+- **Interpretation**: Aim for ≥0.75. When `grpo.hard_rmsd_gate=false`, non-finite RMSD rows still count here but will receive the reward floor, so track `rmsd/frac_under_delta` to see if geometry is actually usable.
 
 ---
 
-## 2. Geometry Metrics
+## 2. PoseBusters Metrics
 
-These metrics measure how close generated conformers are to reference conformations.
+Only active when PoseBusters is on; otherwise these stay at 0.
 
-### `geom/d_min_p50`
-- **Definition**: 50th percentile (median) of minimum RMSD values
-- **Units**: Angstroms (Å)
-- **Formula**: For each valid rollout, `d_i = min_j RMSD(rollout_i, ref_j)`, then take median
-- **Interpretation**:
-  - **< 0.5 Å**: Excellent - typical conformers are very close to references
-  - **0.5 - 1.0 Å**: Good - typical conformers are reasonably accurate
-  - **1.0 - 1.5 Å**: Acceptable - some room for improvement
-  - **> 1.5 Å**: Poor - typical conformers are far from references
-- **What to watch**: Primary metric for geometric quality. Should decrease over training. Compare with `d_min_p90` to see if there are outliers.
+### `pose/checked_rate`
+- **Definition**: Checked rollouts divided by the base-valid count.
+- **Interpretation**: Equals 1.0 when every eligible rollout reached PoseBusters. Lower values mean PoseBusters was skipped due to mode, errors, or missing molecules.
 
-### `geom/d_min_p90`
-- **Definition**: 90th percentile of minimum RMSD values
-- **Units**: Angstroms (Å)
-- **Meaning**: Worst-case geometric accuracy (90% of conformers are better than this)
-- **Interpretation**:
-  - **< 1.0 Å**: Excellent - even worst conformers are reasonably close
-  - **1.0 - 2.0 Å**: Good - worst conformers are acceptable
-  - **> 2.0 Å**: Poor - worst conformers are far from references
-- **What to watch**: Identifies outliers. If `p50` is good but `p90` is high, you have a long tail of poor conformers. Gap between `p50` and `p90` indicates consistency.
+### `pose/pass_rate`
+- **Definition**: Pass rate conditioned on PoseBusters being run.
+- **Interpretation**: ≥0.95 indicates strong local geometry; <0.8 suggests clashes or chemistry failures that gate off most rewards.
 
-### `geom/d_min_mean`
-- **Definition**: Average of minimum RMSD values
-- **Units**: Angstroms (Å)
-- **Interpretation**:
-  - Should be close to `d_min_p50` if distribution is symmetric
-  - If `mean > p50`: Distribution is right-skewed (some very bad conformers)
-  - If `mean < p50`: Distribution is left-skewed (some very good conformers)
-- **What to watch**: Compare with `p50` to understand distribution shape. Large difference indicates outliers.
+### `pose/error_rate`
+- **Definition**: Fraction of PoseBusters attempts that errored.
+- **Interpretation**: Should stay at 0. Non-zero values usually mean PoseBusters lacks dependencies or encountered malformed molecules; those rollouts are forced invalid.
 
 ---
 
-## 3. Matching/Coverage Metrics
+## 3. Geometry Metrics
 
-These metrics track how well generated conformers cover reference conformations.
+These summarize best-RMSD quality for valid rollouts.
 
-### `match/match_efficiency`
-- **Definition**: Fraction of possible matches achieved: `num_matched / max_possible_matches`
-- **Range**: 0.0 to 1.0
-- **Meaning**: How efficiently the matching algorithm covers references
-- **Interpretation**:
-  - **> 0.7**: Excellent - matching algorithm is finding most possible matches
-  - **0.5 - 0.7**: Good - reasonable coverage efficiency
-  - **< 0.5**: Poor - many potential matches are missed
-- **What to watch**: Should increase over training. Low values indicate the matching algorithm isn't finding good assignments, possibly due to poor conformer quality or suboptimal matching.
+### `rmsd/d_min_mean`
+- **Definition**: Mean of $d_i = \min_j \mathrm{RMSD}(y_i, g_j)$ over PoseBusters-valid rollouts with finite RMSD.
+- **Interpretation**: ≤0.8 Å (for δ≈0.75–0.85) means good geometric fidelity; >1.0 Å signals the model is missing targets.
 
-### `match/num_matched`
-- **Definition**: Average number of matched pairs per prompt group
-- **Meaning**: Absolute count of successful matches
-- **Interpretation**:
-  - Higher is better - more references are being covered
-  - Depends on `num_generations` (K) and number of references (M)
-  - Should increase as model improves
-- **What to watch**: Track alongside `match_efficiency`. If `num_matched` increases but `efficiency` stays same, you're generating more valid conformers but not improving matching quality.
+### `rmsd/d_min_p50`
+- **Definition**: Median of the same $d_i$ distribution.
+- **Interpretation**: <δ indicates most generations are usable; compare with the mean to judge skew.
 
-### `match/dist_p50`
-- **Definition**: 50th percentile (median) RMSD of matched pairs
-- **Units**: Angstroms (Å)
-- **Meaning**: Typical quality of successful matches
-- **Interpretation**:
-  - **< 0.5 Å**: Excellent - typical matches are very close
-  - **0.5 - 0.75 Å**: Good - typical matches are within threshold
-  - **> 0.75 Å**: Warning - typical matches are at the threshold edge (may fail if threshold is strict)
-- **What to watch**: Should decrease over training. Compare with `match/eligible_dist_p50` - if `matched_dist_p50 < eligible_dist_p50`, matching is selecting better pairs (good!).
+### `rmsd/d_min_p90`
+- **Definition**: 90th percentile of $d_i$.
+- **Interpretation**: Keeps the tail in check. Values ≤2δ mean only a few outliers are bad.
 
-### `match/dist_p90`
-- **Definition**: 90th percentile RMSD of matched pairs
-- **Units**: Angstroms (Å)
-- **Meaning**: Worst-case match quality (90% of matches are better)
-- **Interpretation**:
-  - **< 0.75 Å**: Good - worst matches are still within threshold
-  - **≈ 0.75 Å**: Acceptable - worst matches are at threshold
-  - **> 0.75 Å**: Warning - some matches exceed threshold (shouldn't happen if matching is correct)
-- **What to watch**: Should be ≤ delta (default 0.75 Å). If higher, there may be a bug in matching logic.
+### `rmsd/frac_under_delta`
+- **Definition**: Fraction of valid rollouts with $d_i < \delta$.
+- **Interpretation**: A proxy for “COV-R recall.” >0.5 shows most rollouts land within threshold.
 
-### `match/refs_hit`
-- **Definition**: Average number of unique references covered per prompt group
-- **Meaning**: Coverage breadth - how many different reference conformations are matched
-- **Interpretation**:
-  - Higher is better - more diverse coverage
-  - Maximum is min(K, M) where K=num_generations, M=num_references
-  - Should increase as model improves
-- **What to watch**: Track alongside `match_efficiency`. If both increase, you're covering more references more efficiently.
+### `rmsd/frac_under_2delta`
+- **Definition**: Fraction with $d_i < 2\delta$.
+- **Interpretation**: Indicates how many samples are recoverable with looser post-processing. Near 1.0 is ideal.
 
 ---
 
-## 4. Reward Components
+## 4. Coverage & Utilization Metrics
 
-These metrics show the contribution of each reward term to the final reward signal.
+These look at discrete hit counts per prompt group.
 
-### `reward/component_quality`
-- **Definition**: Weighted quality reward: `λ_qual * mean(r_qual)`
-- **Formula**: `λ_qual * exp(-d_i / sigma)` where `d_i = min_j RMSD(rollout_i, ref_j)`
-- **Range**: 0.0 to λ_qual (typically 0.0 to 1.0)
-- **Meaning**: Contribution of the quality term (AMR-P proxy) to final reward
-- **Interpretation**:
-  - Higher is better - indicates conformers are close to references
-  - Should increase over training as geometric accuracy improves
-  - Exponential decay means small RMSD improvements yield large reward gains
-- **What to watch**: Primary driver of reward when conformers are close to references. Should correlate with `geom/d_min_p50`.
+### `cov/refs_hit_mean` and `cov/refs_hit_p50`
+- **Definition**: Mean/median number of references that have at least one rollout under δ.
+- **Interpretation**: Higher = broader coverage. Compare mean vs median to ensure coverage isn’t dominated by a single prompt.
 
-### `reward/component_smcov`
-- **Definition**: Weighted smooth coverage reward: `λ_smcov * mean(r_smcov)`
-- **Formula**: Group-aware coverage using smooth kernel `exp(-(D/rho)²)`
-- **Range**: 0.0 to λ_smcov (typically 0.0 to 1.0)
-- **Meaning**: Contribution of smooth marginal coverage term
-- **Interpretation**:
-  - Higher is better - indicates diverse coverage across the group
-  - Rewards rollouts that cover references not yet well-covered by other rollouts
-  - Should increase as model learns to generate diverse conformers
-- **What to watch**: Should correlate with `coverage/soft_mean`. If low, model may be generating similar conformers (mode collapse).
+### `cov/cov_ratio_mean`
+- **Definition**: `refs_hit / M`, where $M$ is the number of reference conformers loaded.
+- **Interpretation**: Normalized coverage fraction. Aim for ≥0.5 when K≈M; lower values mean the sampler revisits only a few references.
 
-### `reward/component_match`
-- **Definition**: Weighted matching reward: `λ_match * mean(r_match)`
-- **Formula**: `λ_match * (1 - D[i,j]/delta)` for matched pairs, 0 otherwise
-- **Range**: 0.0 to λ_match (typically 0.0 to 1.0)
-- **Meaning**: Contribution of hard matching bonus (COV-R proxy)
-- **Interpretation**:
-  - Higher is better - indicates more successful matches
-  - Should increase as `match/num_matched` increases
-  - Rewards unique one-to-one matches under δ threshold
-- **What to watch**: Should correlate with `match/match_efficiency`. If low, model isn't generating conformers that match references.
+### `cov/unique_nearest_refs_mean`
+- **Definition**: Average number of distinct references that are the *nearest* one for some valid rollout.
+- **Interpretation**: Scales with diversity; values near 1–2 despite many valid rollouts indicate collapse.
+
+### `cov/nearest_collision_rate_mean`
+- **Definition**: $1 - \text{unique\_nearest} / \text{valid\_rollouts}$.
+- **Interpretation**: Collision rates ≤0.3 imply rollouts spread across references; >0.6 means many rollouts share the same nearest neighbor.
+
+### `cov/valid_rollouts_mean`
+- **Definition**: Average number of PoseBusters-valid rollouts per prompt.
+- **Interpretation**: Should track `K * gate/final_valid_rate`. Drops mean gating is discarding whole prompt groups.
+
+### `covdiff/*` ratios
+- `covdiff/cover_ratio_mean`, `covdiff/covered_ratio_mean`: Fraction of references whose best RMSD is <δ (the two match today because both read the same intermediate array).
+- `covdiff/unique_cover_ratio_mean`, `covdiff/unique_covered_ratio_mean`: Fraction of references that are uniquely covered (best <δ, second-best ≥δ). Also duplicates currently but kept for future experiments.
+- **Interpretation**: Use these to monitor whether the discrete coverage behavior that feeds the smcov reward remains high even if smooth proxies look good.
 
 ---
 
-## 5. Coverage Metrics
+## 5. Smooth Coverage Diagnostics
 
-These metrics track soft coverage of reference conformations.
+These come directly from `compute_smooth_coverage_reward`.
 
-### `coverage/soft_mean`
-- **Definition**: Average soft coverage per reference conformer
-- **Range**: 0.0 to 1.0
-- **Formula**: `1 - ∏(1 - K[i,j])` where `K = exp(-(D/rho)²)` is a smooth kernel
-- **Meaning**: Probability that each reference is "covered" by at least one rollout (smooth version)
-- **Interpretation**:
-  - **> 0.7**: Excellent - most references are well-covered
-  - **0.5 - 0.7**: Good - reasonable coverage
-  - **< 0.5**: Poor - many references are poorly covered
-- **What to watch**: Should increase over training. Lower than `match_efficiency` because it's a smooth (softer) metric.
+### `bestcov/soft_cov_mean`
+- **Definition**: Mean of $1 - \prod_i (1 - K_{i,j})$ across references, where $K_{i,j} = \sigma((\delta - D_{i,j}) / \rho)$.
+- **Interpretation**: Dense soft coverage; should move with the smcov component. >0.7 indicates most references have a confident nearby rollout.
 
-### `coverage/pct_gt_0.5`
-- **Definition**: Fraction of references with soft coverage > 0.5
-- **Range**: 0.0 to 1.0
-- **Meaning**: How many references receive "good" coverage (above 50% threshold)
-- **Interpretation**:
-  - **> 0.7**: Excellent - most references are well-covered
-  - **0.5 - 0.7**: Good - majority of references are covered
-  - **< 0.5**: Poor - less than half of references are well-covered
-- **What to watch**: Should increase over training. More interpretable than `soft_mean` - directly tells you how many refs are "good enough".
+### `bestcov/pct_gt_cov_gt_0p1` and `bestcov/pct_gt_cov_gt_0p5`
+- **Definition**: Fraction of references whose soft coverage exceeds 0.1 or 0.5.
+- **Interpretation**: Helps distinguish broad-but-weak coverage (0.1) from strong hits (0.5).
+
+### `bestcov/corr_with_refs_hit`
+- **Definition**: Pearson correlation between per-prompt `refs_hit` and `soft_cov_mean`.
+- **Interpretation**: Positive correlation means the smooth term aligns with actual discrete hits; near zero indicates the smooth reward may be inflated by distant rollouts.
 
 ---
 
-## 6. Diversity & Additional Metrics
+## 6. Matching Metrics
 
-### `diversity/pairwise_mean`
-- **Definition**: Average RMSD between pairs of generated conformers
-- **Units**: Angstroms (Å)
-- **Meaning**: Conformer diversity - how different generated conformers are from each other
-- **Interpretation**:
-  - **> 1.0 Å**: Good diversity - conformers explore different conformations
-  - **0.5 - 1.0 Å**: Moderate diversity
-  - **< 0.5 Å**: Low diversity - conformers are similar (possible mode collapse)
-- **What to watch**: Should be reasonably high (>0.5 Å) to ensure diverse exploration. If very low, model may be generating similar conformers. However, if too high (>2.0 Å), conformers may be too scattered.
+### `match/num_matched_mean`
+- **Definition**: Mean number of rollout↔reference matches found by the Hungarian solver.
+- **Interpretation**: Goes up as more rollouts land under δ.
 
-### `fraction_under_delta`
-- **Definition**: Fraction of valid rollouts with `d_i < delta` (default δ=0.75 Å)
-- **Range**: 0.0 to 1.0
-- **Meaning**: Proportion of conformers that are "close enough" to references
-- **Interpretation**:
-  - **> 0.5**: Good - majority of conformers are within threshold
-  - **0.3 - 0.5**: Acceptable - reasonable fraction within threshold
-  - **< 0.3**: Poor - most conformers are far from references
-- **What to watch**: Should increase over training. Correlates with `match/num_matched` - more conformers under threshold means more potential matches.
+### `match/max_possible_mean`
+- **Definition**: Mean of $\min(\text{valid\_rollouts}, \text{refs\_hit})$ per prompt.
+- **Interpretation**: Upper bound for achievable matches; use with efficiency.
 
-### `match/eligible_dist_p50`
-- **Definition**: 50th percentile RMSD of all eligible edges (before matching)
-- **Units**: Angstroms (Å)
-- **Meaning**: Typical quality of all potential matches (not just selected ones)
-- **Interpretation**:
-  - Compare with `match/dist_p50`:
-    - If `matched_dist_p50 < eligible_dist_p50`: Matching algorithm is selecting better pairs (good!)
-    - If `matched_dist_p50 ≈ eligible_dist_p50`: Matching is selecting average-quality pairs
-    - If `matched_dist_p50 > eligible_dist_p50`: Matching is selecting worse pairs (unlikely, indicates bug)
-- **What to watch**: Diagnostic metric. Use to verify matching algorithm is working correctly.
+### `match/efficiency_mean`
+- **Definition**: `num_matched / max_possible`.
+- **Interpretation**: Near 1.0 means matching is saturated; low values indicate either sparse eligibility or solver failures.
 
-### `reward/matched_total`
-- **Definition**: Total number of matched pairs across entire batch
-- **Meaning**: Batch-level absolute count of successful matches
-- **Interpretation**:
-  - Higher is better - more total matches across batch
-  - Depends on batch size and number of prompts
-  - Should increase as model improves
-- **What to watch**: Track alongside `match/num_matched` (per-group average). If batch size changes, `matched_total` will change but `num_matched` should be stable.
+### `match/matched_dist_p50` and `match/matched_dist_p90`
+- **Definition**: Percentiles of RMSD values among matched pairs.
+- **Interpretation**: `p50 < 0.5 Å` and `p90 < δ` mean matches are tight. Larger tails mean the solver is forced to accept marginal alignments.
+
+### `match/eligible_edge_density`
+- **Definition**: Eligible edges (`distance < δ`) divided by `K*M`.
+- **Interpretation**: A dense graph (>0.1) gives the matching term room to work; extremely sparse graphs (<0.02) mean quality collapses regardless of solver.
+
+---
+
+## 7. Reward Components & Stability
+
+### `reward/total_mean`, `reward/total_std`
+- **Definition**: Mean and std of combined rewards over valid rollouts.
+- **Interpretation**: Monitor for sign flips or exploding variance. Std much larger than mean implies unstable scaling.
+
+### `reward/comp_qual_mean`, `reward/comp_smcov_mean`, `reward/comp_match_mean`
+- **Definition**: Component contributions after multiplying by their λ’s and averaging over valid rollouts.
+- **Interpretation**: Should roughly track λ-weighting. If one term dwarfs the others, consider retuning weights.
+
+### `reward/comp_qual_std`, `reward/comp_smcov_std`, `reward/comp_match_std`
+- **Definition**: Std dev of each weighted component over valid rollouts.
+- **Interpretation**: Highlights which component introduces most variance into the policy gradient.
+
+### `reward/qual_group_std_mean`, `reward/smcov_group_std_mean`, `reward/match_group_std_mean`, `reward/group_std_mean`
+- **Definition**: Average within-prompt std for each component and for the combined reward.
+- **Interpretation**: These mirror TRL’s `scale_rewards` behavior; high group std means strong per-prompt variance even after gating.
+
+### `reward/bestcov_rank_corr_mean`
+- **Definition**: Mean Spearman correlation between per-rollout smcov contributions and total rewards (computed within each prompt group).
+- **Interpretation**: Positive values confirm the smooth coverage signal is aligned with the final reward ordering.
+
+### `reward/comp_smcov_frac`
+- **Definition**: `reward/comp_smcov_mean / (reward/total_mean + 1e-8)`.
+- **Interpretation**: Fractional contribution of smcov to the overall reward. Values near 0 or 1 indicate imbalance.
+
+---
+
+## 8. Diversity & Additional Metrics
+
+### `div/pairwise_rmsd_p50`
+- **Definition**: Median RMSD among PoseBusters-valid rollouts (sampled) when `enable_pairwise_rmsd_logging` is true.
+- **Interpretation**: >1.0 Å = healthy diversity; <0.5 Å suggests the sampler produces near-duplicates. Logged only every `pairwise_rmsd_log_every` steps.
 
 ---
 
@@ -254,17 +195,16 @@ These metrics track soft coverage of reference conformations.
 
 | Metric | Excellent | Good | Acceptable | Poor |
 |--------|-----------|------|------------|------|
-| `validity_rate` | > 0.8 | 0.5-0.8 | 0.3-0.5 | < 0.3 |
-| `graph_match_rate` | > 0.9 | 0.7-0.9 | 0.5-0.7 | < 0.5 |
-| `finite_rmsd_rate` | > 0.8 | 0.5-0.8 | 0.3-0.5 | < 0.3 |
-| `geom/d_min_p50` | < 0.5 Å | 0.5-1.0 Å | 1.0-1.5 Å | > 1.5 Å |
-| `geom/d_min_p90` | < 1.0 Å | 1.0-2.0 Å | 2.0-3.0 Å | > 3.0 Å |
-| `match/match_efficiency` | > 0.7 | 0.5-0.7 | 0.3-0.5 | < 0.3 |
-| `match/dist_p50` | < 0.5 Å | 0.5-0.75 Å | 0.75-1.0 Å | > 1.0 Å |
-| `coverage/soft_mean` | > 0.7 | 0.5-0.7 | 0.3-0.5 | < 0.3 |
-| `coverage/pct_gt_0.5` | > 0.7 | 0.5-0.7 | 0.3-0.5 | < 0.3 |
-| `diversity/pairwise_mean` | 0.5-2.0 Å | 0.3-0.5 Å | 0.1-0.3 Å | < 0.1 Å |
-| `fraction_under_delta` | > 0.5 | 0.3-0.5 | 0.1-0.3 | < 0.1 |
+| `gate/final_valid_rate` | > 0.8 | 0.5-0.8 | 0.3-0.5 | < 0.3 |
+| `gate/graph_match_rate` | > 0.9 | 0.7-0.9 | 0.5-0.7 | < 0.5 |
+| `rmsd/d_min_p50` | < 0.5 Å | 0.5-1.0 Å | 1.0-1.5 Å | > 1.5 Å |
+| `rmsd/d_min_p90` | < 1.0 Å | 1.0-2.0 Å | 2.0-3.0 Å | > 3.0 Å |
+| `match/efficiency_mean` | > 0.7 | 0.5-0.7 | 0.3-0.5 | < 0.3 |
+| `match/matched_dist_p50` | < 0.5 Å | 0.5-0.75 Å | 0.75-1.0 Å | > 1.0 Å |
+| `bestcov/soft_cov_mean` | > 0.7 | 0.5-0.7 | 0.3-0.5 | < 0.3 |
+| `bestcov/pct_gt_cov_gt_0p5` | > 0.7 | 0.5-0.7 | 0.3-0.5 | < 0.3 |
+| `div/pairwise_rmsd_p50` | 0.5-2.0 Å | 0.3-0.5 Å | 0.1-0.3 Å | < 0.1 Å |
+| `rmsd/frac_under_delta` | > 0.5 | 0.3-0.5 | 0.1-0.3 | < 0.1 |
 
 ---
 
@@ -273,56 +213,52 @@ These metrics track soft coverage of reference conformations.
 ### During Training (Real-time Dashboard)
 
 **Primary Metrics (Monitor Continuously):**
-1. `validity_rate` - Are we generating valid conformers?
-2. `geom/d_min_p50` - Typical geometric accuracy
-3. `match/match_efficiency` - Coverage quality
-4. `train/loss` - Training objective (from TRL)
-5. `train/ratio_mean` - Policy stability (from TRL, should be ~1.0)
+1. `gate/final_valid_rate` – Are we generating usable conformers?
+2. `rmsd/d_min_p50` – Typical geometric accuracy.
+3. `match/efficiency_mean` – Coverage quality under the matching term.
+4. `train/loss` – TRL objective.
+5. `train/ratio_mean` – Policy stability (should stay near 1.0).
 
 **Secondary Metrics (Check Periodically):**
-6. `geom/d_min_p90` - Worst-case accuracy
-7. `match/dist_p50` - Typical match quality
-8. `reward/component_quality` - Quality reward contribution
-9. `coverage/soft_mean` - Soft coverage
+6. `rmsd/d_min_p90` – Tail behavior.
+7. `match/matched_dist_p50` – Quality of successful matches.
+8. `reward/comp_qual_mean` – Quality contribution magnitude.
+9. `bestcov/soft_cov_mean` – Smooth coverage health.
 
 ### Warning Signs
 
 **🚨 Training Issues:**
-- `validity_rate` dropping → Check `graph_match_rate` and `finite_rmsd_rate`
-- `train/ratio_mean` far from 1.0 → Policy updates too aggressive/conservative
-- `train/approx_kl` > 0.1 → Policy diverging too fast (from TRL)
-- `train/clip_ratio` > 0.5 → Too many updates clipped, may need larger trust region
+- `gate/final_valid_rate` dropping → check `gate/graph_match_rate` and `pose/*` to find the failing gate.
+- `train/ratio_mean` far from 1 or `train/approx_kl` > 0.1 → policy updates too aggressive.
+- `train/clip_ratio` > 0.5 → trust region too small or gradients too spiky.
 
 **🚨 Quality Issues:**
-- `geom/d_min_p50` not decreasing → Model not improving geometric accuracy
-- `match/match_efficiency` low → Not covering references well
-- `diversity/pairwise_mean` < 0.3 Å → Possible mode collapse
-- `match/dist_p90` > 0.75 Å → Some matches exceed threshold (check matching logic)
+- `rmsd/d_min_p50` stuck or rising → geometry not improving.
+- `match/efficiency_mean` < 0.4 → few unique matches being found.
+- `div/pairwise_rmsd_p50` < 0.3 Å → mode collapse among valid rollouts.
+- `match/matched_dist_p90` > δ → solver is forced to use borderline matches (investigate RMSD or δ).
 
 **🚨 Coverage Issues:**
-- `coverage/soft_mean` low → References not well-covered
-- `match/refs_hit` not increasing → Not exploring diverse conformations
-- `fraction_under_delta` low → Most conformers far from references
+- `bestcov/soft_cov_mean` low while `reward/comp_smcov_mean` high → smcov reward being exploited.
+- `cov/refs_hit_mean` stagnant → sampler not exploring new references even if overall quality improves.
+- `rmsd/frac_under_delta` < 0.2 → very few rollouts fall under δ, so both matching and smcov collapse.
 
 ---
 
 ## Metric Relationships
 
-Understanding how metrics relate helps diagnose issues:
-
-- **Validity → Geometry**: `validity_rate` must be high for geometry metrics to be meaningful
-- **Geometry → Matching**: Lower `d_min_p50` → more eligible edges → higher `match_efficiency`
-- **Matching → Coverage**: Higher `match_efficiency` → better `coverage/soft_mean`
-- **Reward Components**: `component_quality` + `component_smcov` + `component_match` ≈ total reward signal
-- **Diversity vs Coverage**: High `diversity/pairwise_mean` helps `coverage/soft_mean` by exploring more conformations
+- **Validity → Geometry**: High `gate/final_valid_rate` is a prerequisite for meaningful RMSD stats.
+- **Geometry → Matching**: Lower `rmsd/d_min_p50` increases eligible edges and boosts `match/efficiency_mean`.
+- **Matching → Coverage**: Higher `match/num_matched_mean` typically raises `bestcov/soft_cov_mean` and `covdiff/cover_ratio_mean`.
+- **Reward Coupling**: `reward/comp_qual_mean + reward/comp_smcov_mean + reward/comp_match_mean ≈ reward/total_mean`. Watch `reward/bestcov_rank_corr_mean` to confirm smcov aligns with total reward.
+- **Diversity vs Coverage**: Healthy `div/pairwise_rmsd_p50` supports both discrete (`cov/*`) and smooth (`bestcov/*`) coverage metrics.
 
 ---
 
 ## Notes
 
-- All metrics are computed per batch and logged to WandB
-- Metrics with `train/` prefix are from TRL's GRPOTrainer (not covered here)
-- Percentiles (p50, p90) are more robust than means for skewed distributions
-- Compare metrics over time to track training progress
-- Use percentiles together (p50 + p90) to understand distribution shape
-
+- All metrics are computed per batch and logged to W&B when `wandb.run` is active.
+- Pairwise RMSD metrics require `enable_pairwise_rmsd_logging` and obey `pairwise_rmsd_log_every`.
+- Metrics with `train/` prefixes still come from TRL’s trainer; this guide focuses on reward-side logging.
+- Percentiles (p50/p90) are more robust to outliers than means—use both.
+- Compare trends over time rather than single steps; the reward pipeline mean-centers per prompt, so transient dips are normal when prompts change.

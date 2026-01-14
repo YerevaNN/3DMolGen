@@ -36,6 +36,8 @@ def reward_harness(monkeypatch):
                 lambda_match=1.0,
                 r_floor=-1.0,
                 hard_rmsd_gate=True,
+                smcov_precision_weight=0.10,
+                smcov_unique_quality_weight=0.20,
                 max_ground_truths=len(self.refs),
                 num_generations=1,
                 profile_rewards=False,
@@ -174,9 +176,9 @@ def test_reward_function_matches_golden_batch(tmp_path, reward_harness):
     )
 
     expected = [
-        1.4191093444824219,
-        0.7860327363014221,
-        0.04110811650753021,
+        1.4147883653640747,
+        0.8596678972244263,
+        0.14022715389728546,
     ]
     assert np.allclose(rewards, expected, atol=1e-6)
 
