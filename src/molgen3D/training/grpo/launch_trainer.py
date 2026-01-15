@@ -1,5 +1,6 @@
 import argparse
 import os
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -11,9 +12,14 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-import submitit
 import yaml
 from loguru import logger
+from molgen3D.config.paths import resolve_data_path
+
+try:
+    import submitit
+except ImportError:  # fallback to local execution only
+    submitit = None
 
 from molgen3D.training.grpo.config import (
     Config,
@@ -80,6 +86,28 @@ def load_and_update_configs(args, project_root: Path):
         if not accelerate_config_path.exists():
             raise FileNotFoundError(f"Accelerate config not found for strategy '{args.strategy}': {accelerate_config_path}")
     
+    dataset_cfg = config_data.get("dataset", {})
+    for path_key in ("dataset_path", "smiles_mapping_path"):
+        path_value = dataset_cfg.get(path_key)
+        if path_value:
+            dataset_cfg[path_key] = str(resolve_data_path(path_value))
+    if dataset_cfg:
+        config_data["dataset"] = dataset_cfg
+
+    model_cfg = config_data.get("model", {})
+    for path_key in ("checkpoint_path", "tokenizer_path"):
+        path_value = model_cfg.get(path_key)
+        if path_value:
+            model_cfg[path_key] = str(resolve_data_path(path_value))
+    if model_cfg:
+        config_data["model"] = model_cfg
+
+    grpo_cfg = config_data.get("grpo", {})
+    checkpoint_base = grpo_cfg.get("checkpoint_base_dir")
+    if checkpoint_base:
+        grpo_cfg["checkpoint_base_dir"] = str(resolve_data_path(checkpoint_base))
+        config_data["grpo"] = grpo_cfg
+
     return config_data
 
 def create_directories(config_data, args, project_root: Path):
@@ -149,6 +177,8 @@ def prepare_snapshot_accelerate_config(snapshot_dir: Path, strategy: str, num_pr
 
 def setup_job_executor(device_type, num_gpus, run_name):
     """Setup the appropriate job executor based on device type."""
+    if submitit is None:
+        raise RuntimeError("submitit is required to configure job executors.")
     job_folder_path = Path("outputs") / "slurm_jobs" / "grpo"
     job_folder_path.mkdir(parents=True, exist_ok=True)
     job_folder = str(job_folder_path / "job_%j")
@@ -195,6 +225,12 @@ def setup_job_executor(device_type, num_gpus, run_name):
         logger.info(f"  - GPUs per node: {num_gpus}")
     
     return executor
+
+
+def run_command_locally(cmd: list[str], work_dir: Path | str):
+    """Execute the launch command locally when submitit is unavailable."""
+    logger.info("Running training command directly via subprocess for local device.")
+    subprocess.run(cmd, cwd=str(work_dir), check=True)
 
 def save_updated_config(config, config_file_path):
     """Save the updated configuration to file."""
@@ -248,6 +284,14 @@ def main():
             config_path=str(snapshot_config_path),
         )
         logger.info(f"Launch command: {' '.join(cmd)}")
+        
+        if args.device == "local":
+            run_command_locally(cmd, output_dir)
+            logger.info("Local execution finished.")
+            return
+
+        if submitit is None:
+            raise RuntimeError("submitit is required for remote execution modes.")
         
         # Setup and submit job
         executor = setup_job_executor(args.device, config.device.num_gpus, config.run.name)

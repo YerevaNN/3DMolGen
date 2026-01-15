@@ -158,6 +158,120 @@ def load_paths_yaml() -> dict:
     return copy.deepcopy(_cfg())
 
 
+_DATA_ROOT_KEYS = (
+    "ckpts_root",
+    "grpo_root",
+    "qwen3_grpo_root",
+    "hf_yerevann_root",
+    "qwen_yerevann_root",
+    "geom_data_root",
+    "data_root",
+    "project_root",
+)
+
+
+def _normalize_data_root(candidate: str | Path) -> Path:
+    """Return an absolute resolved data root."""
+    path = Path(candidate).expanduser()
+    if not path.is_absolute():
+        path = REPO_ROOT / path
+    return path.resolve(strict=False)
+
+
+def _collect_data_roots() -> list[Path]:
+    """Collect ordered roots to try when resolving data paths."""
+    base_paths = load_paths_yaml().get("base_paths", {})
+    roots: list[Path] = []
+    seen: set[Path] = set()
+
+    for key in _DATA_ROOT_KEYS:
+        candidates = _as_path_candidates(base_paths.get(key))
+        for candidate in candidates:
+            path = Path(candidate)
+            normalized = _normalize_data_root(path)
+            if normalized not in seen:
+                seen.add(normalized)
+                roots.append(normalized)
+
+    if not roots:
+        roots.append(REPO_ROOT.resolve(strict=False))
+
+    return roots
+
+
+def _resolve_relative_data_path(relative: Path, roots: list[Path]) -> Path | None:
+    for root in roots:
+        for variant in _relative_variants(relative):
+            candidate = (root / variant).resolve(strict=False)
+            if candidate.exists():
+                return candidate
+    return None
+
+
+def _resolve_absolute_data_path(absolute: Path, roots: list[Path]) -> Path | None:
+    for root in roots:
+        try:
+            rel = absolute.relative_to(root)
+        except ValueError:
+            continue
+        for fallback in roots:
+            for variant in _relative_variants(rel):
+                candidate = (fallback / variant).resolve(strict=False)
+                if candidate.exists():
+                    return candidate
+    return None
+
+
+def _relative_variants(relative: Path) -> list[Path]:
+    variants = [relative]
+    if relative.parts and relative.parts[0] == "geom_processed":
+        remainder = Path(*relative.parts[1:])
+        if remainder not in variants:
+            variants.append(remainder)
+    if relative.parts and relative.parts[0] == "3DMolGen_data":
+        remainder = Path("data", *relative.parts[1:])
+        if remainder not in variants:
+            variants.append(remainder)
+    if relative.parts and relative.parts[0] == "data":
+        remainder = Path(*relative.parts[1:])
+        if remainder not in variants:
+            variants.append(remainder)
+    if not (relative.parts and relative.parts[0] == "geom_processed"):
+        prefixed = Path("geom_processed") / relative
+        if prefixed not in variants:
+            variants.append(prefixed)
+    if not (relative.parts and relative.parts[0] == "3DMolGen_data"):
+        prefixed = Path("3DMolGen_data") / relative
+        if prefixed not in variants:
+            variants.append(prefixed)
+    if not (relative.parts and relative.parts[0] == "data"):
+        prefixed = Path("data") / relative
+        if prefixed not in variants:
+            variants.append(prefixed)
+    return variants
+
+
+def resolve_data_path(value: str | Path) -> Path:
+    """
+    Resolve a data file path against configured base roots.
+    """
+    candidate = Path(value).expanduser()
+    if candidate.exists():
+        return candidate.resolve(strict=False)
+
+    roots = _collect_data_roots()
+    if candidate.is_absolute():
+        resolved = _resolve_absolute_data_path(candidate.resolve(strict=False), roots)
+        if resolved:
+            return resolved
+    else:
+        resolved = _resolve_relative_data_path(candidate, roots)
+        if resolved:
+            return resolved
+
+    return candidate.resolve(strict=False)
+
+
 def get_ckpt(alias: str, key: str | None = None) -> Path:
     """
     Get the path to a checkpoint for a given model alias and step key.

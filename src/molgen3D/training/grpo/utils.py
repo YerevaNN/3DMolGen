@@ -1,6 +1,6 @@
 from numpy.random import f
-import logging
 from contextlib import contextmanager
+from molgen3D.config.paths import resolve_data_path
 from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2
 from molgen3D.utils.utils import get_best_rmsd, load_json, load_pkl
 from pathlib import Path
@@ -25,7 +25,7 @@ def _suppress_rdkit_pickle_warnings():
     finally:
         RDLogger.EnableLog("rdApp.warning")
 
-def load_smiles_mapping(mapping_path: str) -> None:
+def load_smiles_mapping(mapping_path: str | Path) -> None:
     """Load the SMILES mapping from a JSON file.
     
     Args:
@@ -33,8 +33,11 @@ def load_smiles_mapping(mapping_path: str) -> None:
     """
     global _smiles_mapping
     if _smiles_mapping is None:
-        _smiles_mapping = load_json(mapping_path)
-        logger.info(f"Loaded SMILES mapping with {len(_smiles_mapping)} entries")
+        resolved_path = resolve_data_path(mapping_path)
+        _smiles_mapping = load_json(str(resolved_path))
+        logger.info(
+            f"Loaded SMILES mapping ({len(_smiles_mapping)} entries) from {resolved_path}"
+        )
 
 def set_geom_data_path(path: str) -> None:
     """Set the path to the GEOM data folder.
