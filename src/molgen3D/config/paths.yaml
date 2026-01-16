@@ -75,6 +75,17 @@ data:
     qm9: "QM9"
     xl: "XL"
 
+  
+  filtered_conformers_train: 
+    - "3DMolGen_data/binned_filtered/processed_strings/train"
+    - "binned_filtered/processed_strings/train"
+  filtered_conformers_valid:
+    - "3DMolGen_data/binned_filtered/processed_strings/valid"
+    - "binned_filtered/processed_strings/valid"
+  filtered_conformers_test:
+    - "3DMolGen_data/binned_filtered/processed_strings/test"
+    - "binned_filtered/processed_strings/test"
+
   conformers_train:
     - "geom_cartesian_v3/processed_strings/train"
     - "geom_processed/geom_cartesian_v3/processed_strings/train"
