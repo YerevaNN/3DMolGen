@@ -271,7 +271,7 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
     
     # Base configuration template
     base_inference_config = {
-        "model_path": get_ckpt("m380_conf_v2","2e"),
+        "model_path": get_ckpt("qw600_pre","4e"),
         "tokenizer_path": get_tokenizer_path("qwen3_0.6b_custom"),
         "torch_dtype": "bfloat16",
         "batch_size": 256,
@@ -312,6 +312,7 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
 
                         if test_set_name == "loqi":
                             grid_config["batch_size"] = 100
+                            grid_config["num_gens"] = gen_num_codes["1x_per_mol"]
 
                         grid_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
                         grid_config["test_set"] = test_set_name
@@ -330,6 +331,7 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
                         inference_config["batch_size"] = 100
                     if test_set_name == "loqi":
                         inference_config["batch_size"] = 100
+                        inference_config["num_gens"] = gen_num_codes["1x_per_mol"]
                     inference_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
                     inference_config["test_set"] = test_set_name
                     inference_config["run_name"] = f"new_data_p1_{test_set_name}"
@@ -345,6 +347,7 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
                     inference_config["batch_size"] = 100
                 if test_set_name == "loqi":
                     inference_config["batch_size"] = 100
+                    inference_config["num_gens"] = gen_num_codes["1x_per_mol"]
                 inference_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
                 inference_config["test_set"] = test_set_name
                 inference_config["run_name"] = f"new_data_p1_{test_set_name}"
