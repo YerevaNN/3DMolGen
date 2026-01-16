@@ -82,7 +82,13 @@ def _absolute_path_candidates(value: str | Path) -> list[Path]:
 
 def _as_path_candidates(value: str | Path | Sequence[str | Path]) -> list[str | Path]:
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, Path)):
-        return list(value)
+        flattened: list[str | Path] = []
+        for item in value:
+            if isinstance(item, Sequence) and not isinstance(item, (str, bytes, Path)):
+                flattened.extend(list(item))
+            else:
+                flattened.append(item)
+        return flattened
     return [value]
 
 
