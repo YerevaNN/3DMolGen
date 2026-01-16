@@ -237,7 +237,7 @@ def run_inference(inference_config: dict):
     return generations_all, stats
 
 
-def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:str = None, xl:bool = False, qm9:bool = False, limit: int = None) -> None:
+def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:str = None, xl:bool = False, qm9:bool = False, loqi:bool = False, limit: int = None) -> None:
     # Determine which test sets to run
     test_sets_to_run = []
     if test_set:
@@ -246,6 +246,8 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         test_sets_to_run.append("xl")
     if qm9:
         test_sets_to_run.append("qm9")
+    if loqi:
+        test_sets_to_run.append("loqi")
     if not test_sets_to_run:
         logger.info("No test sets specified. Skipping inference.")
         return
@@ -308,6 +310,9 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
                         if test_set_name == "qm9":
                             grid_config["batch_size"] = 100
 
+                        if test_set_name == "loqi":
+                            grid_config["batch_size"] = 100
+
                         grid_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
                         grid_config["test_set"] = test_set_name
                         grid_config["run_name"] = f"{model_key_str}_{test_set_name}"
@@ -323,6 +328,8 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
                         inference_config["batch_size"] = 100
                     if test_set_name == "qm9":
                         inference_config["batch_size"] = 100
+                    if test_set_name == "loqi":
+                        inference_config["batch_size"] = 100
                     inference_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
                     inference_config["test_set"] = test_set_name
                     inference_config["run_name"] = f"new_data_p1_{test_set_name}"
@@ -335,6 +342,8 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
                 if test_set_name == "xl":
                     inference_config["batch_size"] = 100
                 if test_set_name == "qm9":
+                    inference_config["batch_size"] = 100
+                if test_set_name == "loqi":
                     inference_config["batch_size"] = 100
                 inference_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
                 inference_config["test_set"] = test_set_name
@@ -351,8 +360,10 @@ if __name__ == "__main__":
     parser.add_argument("--test_set", type=str, choices=["clean", "distinct", "corrected"], default=None)
     parser.add_argument("--xl", action="store_true")
     parser.add_argument("--qm9", action="store_true")
+    parser.add_argument("--loqi", action="store_true")
     parser.add_argument("--limit", type=int, default=None)
+
     args = parser.parse_args() 
-    launch_inference_from_cli(device=args.device, grid_run_inference=args.grid_run_inference, test_set=args.test_set, xl=args.xl, qm9=args.qm9, limit=args.limit)
+    launch_inference_from_cli(device=args.device, grid_run_inference=args.grid_run_inference, test_set=args.test_set, xl=args.xl, qm9=args.qm9, loqi=args.loqi, limit=args.limit)
 
     

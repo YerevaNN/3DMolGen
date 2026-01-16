@@ -46,6 +46,7 @@ data:
   distinct_smi: "distinct_smi.pickle"
   xl_smi: "xl_smi.pickle"
   qm9_smi: "qm9_smi.pickle"
+  loqi_smi: "loqi_smi.pickle"
 
   pretokenized_prompts: "3DMolGen_data/pretokenized_prompts.json"
   validation_pickle: "3DMolGen_data/valid_set.pickle"
