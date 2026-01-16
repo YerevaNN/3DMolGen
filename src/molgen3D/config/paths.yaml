@@ -1,44 +1,51 @@
 base_paths:
   project_root: "."
-  data_root: "data"
+  data_root:
+    - "/home/chem-project/data"
+    - "data"
   geom_data_root:
-    - "/nfs/ap/mnt/sxtn2/chem/GEOM_data"
+    - "/home/chem-project/data"
     - "/home/chem-project/data/GEOM_data"
+    - "/nfs/ap/mnt/sxtn2/chem/GEOM_data"
   geom_dataset_root:
     - "/nfs/ap/mnt/sxtn2/chem/GEOM_data/torsional_diff_gdrive/extracted"
     - "/home/chem-project/data/GEOM_data/torsional_diff_gdrive/extracted"
   ckpts_root:
+    - "/home/chem-project/checkpoints"
     - "/nfs/h100/raid/chem/checkpoints/yerevann"
     - "/home/chem-project/checkpoints/yerevann"
   hf_yerevann_root:
     - "/nfs/h100/raid/chem/checkpoints/hf/yerevann"
     - "/home/chem-project/checkpoints/hf/yerevann"
   qwen_yerevann_root:
-    - "/nfs/h100/raid/chem/checkpoints/yerevann"
+    - "/home/chem-project/checkpoints"
     - "/home/chem-project/checkpoints/yerevann"
+    - "/nfs/h100/raid/chem/checkpoints/yerevann"
   grpo_root:
-    - "/nfs/h100/raid/chem/checkpoints/conf_grpo"
     - "/home/chem-project/checkpoints/conf_grpo"
+    - "/nfs/h100/raid/chem/checkpoints/conf_grpo"
   qwen3_grpo_root:
-    - "/nfs/h100/raid/chem/checkpoints/conf_grpo"
     - "/home/chem-project/checkpoints/conf_grpo"
+    - "/nfs/h100/raid/chem/checkpoints/conf_grpo"
   gen_results_root: "outputs/gen_results"
   eval_results_root: "outputs/eval_results"
   pretrain_results_root: "outputs/pretrain_results"
   pretrain_logs_root: "outputs/pretrain_logs"
   wandb_root: "wandb_runs"
   qwen3_0.6b_base_model:
+    - "/home/chem-project/checkpoints/Qwen3-0.6B-Base"
     - "/nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b/Qwen3-0.6B-Base"
     - "/home/chem-project/checkpoints/yerevann/qwen3_06b/Qwen3-0.6B-Base"
   tokenizers_root: "src/molgen3D/training/tokenizers"
 
 ckpts:
   qwen3_06b:
+    - "/home/chem-project/checkpoints/qwen3_06b"
     - "/nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b"
     - "/home/chem-project/checkpoints/yerevann/qwen3_06b"
   qwen3_grpo:
-    - "/nfs/h100/raid/chem/checkpoints/conf_grpo"
     - "/home/chem-project/checkpoints/conf_grpo"
+    - "/nfs/h100/raid/chem/checkpoints/conf_grpo"
 
 data:
   clean_smi: "clean_smi.pickle"
@@ -63,9 +70,15 @@ data:
     qm9: "QM9"
     xl: "XL"
 
-  conformers_train: "geom_processed/geom_cartesian_v3/processed_strings/train"
-  conformers_valid: "geom_processed/geom_cartesian_v3/processed_strings/valid"
-  conformers_test: "geom_processed/geom_cartesian_v3/processed_strings/test"
+  conformers_train:
+    - "geom_cartesian_v3/processed_strings/train"
+    - "geom_processed/geom_cartesian_v3/processed_strings/train"
+  conformers_valid:
+    - "geom_cartesian_v3/processed_strings/valid"
+    - "geom_processed/geom_cartesian_v3/processed_strings/valid"
+  conformers_test:
+    - "geom_cartesian_v3/processed_strings/test"
+    - "geom_processed/geom_cartesian_v3/processed_strings/test"
 tokenizers:
   llama3_chem_v1: "src/molgen3D/training/tokenizers/Llama-3.2-chem-1B-v1"
   qwen3_0.6b_custom: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_custom"

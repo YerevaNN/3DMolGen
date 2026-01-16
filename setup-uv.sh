@@ -16,12 +16,14 @@
 # Requirements:
 #   - Linux x86_64
 #   - CUDA 12.8+ drivers (system-level)
+#   - CUDA 12.8+ drivers (system-level)
 #   - Internet access (or pre-downloaded wheels)
 # =============================================================================
 
 set -euo pipefail
 
 # =============================================================================
+# Defaults (auto-detected at runtime)
 # Defaults (auto-detected at runtime)
 # =============================================================================
 PYTHON_VERSION="3.10"
@@ -117,6 +119,76 @@ get_fa_wheel() {
     else
         # Last resort: GitHub URL
         echo "$github_url"
+    echo "${SCRIPT_DIR}"
+}
+
+# Auto-detect CUDA version from nvidia-smi
+detect_cuda_version() {
+    local cuda_ver
+    cuda_ver=$(nvidia-smi 2>/dev/null | grep -oP 'CUDA Version: \K[0-9]+\.[0-9]+' || echo "")
+    case "$cuda_ver" in
+        13.*) echo "cu130" ;;
+        12.*) echo "cu128" ;;
+        *)    echo "cu128" ;;  # Default fallback
+    esac
+}
+
+# Auto-detect cluster based on available paths
+detect_cluster() {
+    if [[ -d "/nfs/ap/mnt/sxtn2/chem" ]]; then
+        echo "ynn"
+    elif [[ -d "/home/chem-project" ]]; then
+        echo "superpod"
+    else
+        echo "generic"
+    fi
+}
+
+# Get flash attention wheel path based on python, cuda, and cluster
+get_fa_wheel() {
+    local py_ver="$1"   # "3.10" or "3.12"
+    local cuda="$2"     # "cu128" or "cu130"
+    local cluster="$3"  # "ynn", "superpod", or "generic"
+
+    # Convert python version to cpython tag
+    local cp_tag
+    case "$py_ver" in
+        3.10) cp_tag="cp310" ;;
+        3.12) cp_tag="cp312" ;;
+        *)    cp_tag="cp310" ;;
+    esac
+
+    local wheel_name="flash_attn-2.8.3+${cuda}torch2.9-${cp_tag}-${cp_tag}-linux_x86_64.whl"
+
+    # Cluster-specific paths
+    local ynn_path="/nfs/ap/mnt/sxtn2/chem/wheels/${wheel_name}"
+    local superpod_path="/home/chem-project/flash-attention-wheels/${wheel_name}"
+    local github_url="https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.0/${wheel_name}"
+
+    # Try cluster-specific path first
+    case "$cluster" in
+        ynn)
+            if [[ -f "$ynn_path" ]]; then
+                echo "$ynn_path"
+                return
+            fi
+            ;;
+        superpod)
+            if [[ -f "$superpod_path" ]]; then
+                echo "$superpod_path"
+                return
+            fi
+            ;;
+    esac
+
+    # Fallback: try both paths
+    if [[ -f "$ynn_path" ]]; then
+        echo "$ynn_path"
+    elif [[ -f "$superpod_path" ]]; then
+        echo "$superpod_path"
+    else
+        # Last resort: GitHub URL
+        echo "$github_url"
     fi
 }
 
@@ -127,10 +199,13 @@ ENV_DIR=""
 PROJECT_DIR="$SCRIPT_DIR"
 FA_WHEEL=""              # Set after parsing (auto-detected)
 CUDA_VERSION=""          # Set after parsing (auto-detected)
+FA_WHEEL=""              # Set after parsing (auto-detected)
+CUDA_VERSION=""          # Set after parsing (auto-detected)
 INSTALL_EXTRAS=""
 VERIFY_ONLY=false
 SKIP_FLASH_ATTN=false
 INSTALL_PROJECT=false
+USE_NIGHTLY=false        # Use PyTorch nightly (required for torchtitan 0.2.x)
 USE_NIGHTLY=false        # Use PyTorch nightly (required for torchtitan 0.2.x)
 
 show_help() {
@@ -139,6 +214,7 @@ Usage: ./setup-uv.sh [OPTIONS]
 
 Creates a Python environment with PyTorch, Flash Attention, and project dependencies.
 Auto-detects CUDA version and cluster for optimal configuration.
+Auto-detects CUDA version and cluster for optimal configuration.
 
 Options:
   --nightly         Use PyTorch nightly (required for Superpod/torchtitan 0.2.x)
@@ -146,7 +222,13 @@ Options:
   --python VER      Python version: 3.10 or 3.12 (default: 3.10)
   --cuda VER        CUDA version: cu128 or cu130 (default: auto-detect from nvidia-smi)
   --dir PATH        Environment directory (default: .venv in project dir)
+  --nightly         Use PyTorch nightly (required for Superpod/torchtitan 0.2.x)
+                    Automatically skips Flash Attention (no compatible wheels)
+  --python VER      Python version: 3.10 or 3.12 (default: 3.10)
+  --cuda VER        CUDA version: cu128 or cu130 (default: auto-detect from nvidia-smi)
+  --dir PATH        Environment directory (default: .venv in project dir)
   --project PATH    Project directory containing pyproject.toml (default: script dir)
+  --fa-wheel PATH   Flash Attention wheel path or URL (default: auto-detect)
   --fa-wheel PATH   Flash Attention wheel path or URL (default: auto-detect)
   --skip-fa         Skip Flash Attention installation
   --dev             Include dev dependencies (pytest, black, etc.)
@@ -163,8 +245,14 @@ Clusters:
 
 Examples:
   # YNN cluster (stable PyTorch + Flash Attention)
+  # YNN cluster (stable PyTorch + Flash Attention)
   ./setup-uv.sh --dev --install-project
 
+  # Superpod cluster (nightly PyTorch + SDPA, no Flash Attention)
+  ./setup-uv.sh --nightly --dev --install-project
+
+  # Superpod with Python 3.12
+  ./setup-uv.sh --nightly --python 3.12 --dev --install-project
   # Superpod cluster (nightly PyTorch + SDPA, no Flash Attention)
   ./setup-uv.sh --nightly --dev --install-project
 
@@ -173,7 +261,11 @@ Examples:
 
   # Custom wheel location (YNN only)
   ./setup-uv.sh --fa-wheel ~/wheels/flash_attn.whl --dev
+  # Custom wheel location (YNN only)
+  ./setup-uv.sh --fa-wheel ~/wheels/flash_attn.whl --dev
 
+  # Skip Flash Attention explicitly
+  ./setup-uv.sh --skip-fa --dev --install-project
   # Skip Flash Attention explicitly
   ./setup-uv.sh --skip-fa --dev --install-project
 EOF
@@ -181,6 +273,27 @@ EOF
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --nightly)
+            USE_NIGHTLY=true
+            SKIP_FLASH_ATTN=true  # No compatible flash_attn wheels for nightly
+            shift
+            ;;
+        --python)
+            PYTHON_VERSION="$2"
+            if [[ "$PYTHON_VERSION" != "3.10" && "$PYTHON_VERSION" != "3.12" ]]; then
+                log_error "Invalid Python version: $PYTHON_VERSION (use 3.10 or 3.12)"
+                exit 1
+            fi
+            shift 2
+            ;;
+        --cuda)
+            CUDA_VERSION="$2"
+            if [[ "$CUDA_VERSION" != "cu128" && "$CUDA_VERSION" != "cu130" ]]; then
+                log_error "Invalid CUDA version: $CUDA_VERSION (use cu128 or cu130)"
+                exit 1
+            fi
+            shift 2
+            ;;
         --nightly)
             USE_NIGHTLY=true
             SKIP_FLASH_ATTN=true  # No compatible flash_attn wheels for nightly
@@ -243,8 +356,38 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Set defaults after parsing
+# Set defaults after parsing
 if [[ -z "$ENV_DIR" ]]; then
     ENV_DIR="$(get_default_env_dir)"
+fi
+
+# Auto-detect CUDA version if not specified
+if [[ -z "$CUDA_VERSION" ]]; then
+    CUDA_VERSION="$(detect_cuda_version)"
+    log_info "Auto-detected CUDA version: $CUDA_VERSION"
+fi
+
+# Set PyTorch index URL based on CUDA version and nightly flag
+if [[ "$USE_NIGHTLY" == true ]]; then
+    case "$CUDA_VERSION" in
+        cu128) PYTORCH_INDEX="https://download.pytorch.org/whl/nightly/cu128" ;;
+        cu130) PYTORCH_INDEX="https://download.pytorch.org/whl/nightly/cu130" ;;
+        *)     PYTORCH_INDEX="https://download.pytorch.org/whl/nightly/cu128" ;;
+    esac
+    log_info "Using PyTorch NIGHTLY (required for torchtitan 0.2.x)"
+else
+    case "$CUDA_VERSION" in
+        cu128) PYTORCH_INDEX="https://download.pytorch.org/whl/cu128" ;;
+        cu130) PYTORCH_INDEX="https://download.pytorch.org/whl/cu130" ;;
+        *)     PYTORCH_INDEX="https://download.pytorch.org/whl/cu128" ;;
+    esac
+fi
+
+# Auto-detect cluster and flash attention wheel if not specified
+if [[ -z "$FA_WHEEL" ]]; then
+    DETECTED_CLUSTER="$(detect_cluster)"
+    FA_WHEEL="$(get_fa_wheel "$PYTHON_VERSION" "$CUDA_VERSION" "$DETECTED_CLUSTER")"
+    log_info "Auto-detected cluster: $DETECTED_CLUSTER"
 fi
 
 # Auto-detect CUDA version if not specified
@@ -335,6 +478,13 @@ install_pytorch() {
         log_info "Installing PyTorch ${PYTORCH_VERSION}+${CUDA_VERSION}..."
         uv pip install "torch==${PYTORCH_VERSION}" --index-url "$PYTORCH_INDEX"
     fi
+    if [[ "$USE_NIGHTLY" == true ]]; then
+        log_info "Installing PyTorch nightly+${CUDA_VERSION}..."
+        uv pip install --pre torch --index-url "$PYTORCH_INDEX"
+    else
+        log_info "Installing PyTorch ${PYTORCH_VERSION}+${CUDA_VERSION}..."
+        uv pip install "torch==${PYTORCH_VERSION}" --index-url "$PYTORCH_INDEX"
+    fi
     log_success "PyTorch installed"
 }
 
@@ -357,6 +507,9 @@ install_flash_attention() {
         log_info "Using local wheel: $FA_WHEEL"
         uv pip install "$FA_WHEEL"
     else
+        log_warn "Local wheel not found at: $FA_WHEEL"
+        log_info "Attempting download (may be a URL)..."
+        uv pip install "$FA_WHEEL"
         log_warn "Local wheel not found at: $FA_WHEEL"
         log_info "Attempting download (may be a URL)..."
         uv pip install "$FA_WHEEL"
@@ -530,14 +683,31 @@ main() {
         pytorch_label="${PYTORCH_VERSION}+${CUDA_VERSION}"
     fi
 
+    local pytorch_label
+    if [[ "$USE_NIGHTLY" == true ]]; then
+        pytorch_label="nightly+${CUDA_VERSION}"
+    else
+        pytorch_label="${PYTORCH_VERSION}+${CUDA_VERSION}"
+    fi
+
     echo ""
     echo "=============================================="
     echo "  Environment Setup (uv)"
     echo "  Python ${PYTHON_VERSION} | PyTorch ${pytorch_label}"
+    echo "  Python ${PYTHON_VERSION} | PyTorch ${pytorch_label}"
     echo "=============================================="
     echo ""
     echo "Environment:    ${ENV_DIR}/.venv"
+    echo "Environment:    ${ENV_DIR}/.venv"
     echo "Project:        ${PROJECT_DIR}"
+    echo "CUDA version:   ${CUDA_VERSION}"
+    echo "Nightly:        ${USE_NIGHTLY}"
+    echo "PyTorch index:  ${PYTORCH_INDEX}"
+    if [[ "$SKIP_FLASH_ATTN" == true ]]; then
+        echo "Flash Attn:     SKIPPED (using SDPA)"
+    else
+        echo "Flash Attn:     ${FA_WHEEL}"
+    fi
     echo "CUDA version:   ${CUDA_VERSION}"
     echo "Nightly:        ${USE_NIGHTLY}"
     echo "PyTorch index:  ${PYTORCH_INDEX}"
