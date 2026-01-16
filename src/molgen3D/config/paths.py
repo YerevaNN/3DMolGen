@@ -57,58 +57,6 @@ def _path_candidate_roots() -> list[Path]:
     for ancestor in REPO_ROOT.parents[:2]:
         _add_root(ancestor)
 
-import os
-from collections.abc import Sequence
-from functools import lru_cache
-from pathlib import Path
-import importlib.resources as pkg_resources
-import copy
-import yaml
-
-
-_ENV_REPO_ROOT = os.environ.get("MOLGEN3D_REPO_ROOT")
-_ENV_PROJECT_ROOT = os.environ.get("MOLGEN3D_PROJECT_ROOT")
-_CANDIDATE_ROOT = (
-    Path(_ENV_REPO_ROOT).expanduser().resolve()
-    if _ENV_REPO_ROOT
-    else Path(__file__).resolve().parents[3]
-)
-if not (_CANDIDATE_ROOT / "src" / "molgen3D").exists():
-    cwd = Path.cwd().resolve()
-    if (cwd / "src" / "molgen3D").exists():
-        _CANDIDATE_ROOT = cwd
-REPO_ROOT = _CANDIDATE_ROOT
-
-# Keys that should use geom_data_root instead of data_root
-GEOM_DATA_KEYS = {
-    "rdkit_folder",
-    "test_mols",
-    "drugs_summary",
-    "conformers_train",
-    "conformers_valid",
-    "conformers_test",
-    "pretokenized_prompts",
-    "validation_pickle",
-
-}
-
-
-def _path_candidate_roots() -> list[Path]:
-    """Return ordered roots used when resolving relative paths."""
-    roots: list[Path] = []
-
-    def _add_root(path: Path) -> None:
-        resolved = path.resolve()
-        if resolved not in roots:
-            roots.append(resolved)
-
-    if _ENV_PROJECT_ROOT:
-        _add_root(Path(_ENV_PROJECT_ROOT).expanduser())
-
-    _add_root(REPO_ROOT)
-    for ancestor in REPO_ROOT.parents[:2]:
-        _add_root(ancestor)
-
     return roots
 
 
