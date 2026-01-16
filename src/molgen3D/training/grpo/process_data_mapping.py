@@ -2,24 +2,13 @@ import json
 import random
 from pathlib import Path
 
-def sanitize_smiles_for_filename(smiles: str) -> str:
-    """
-    Sanitize SMILES string to match the pickle filename format.
-    Replaces characters that can't be used in filenames.
-    """
-    # Based on the pickle files observed, special characters like /, =, \ are replaced with _
-    sanitized = smiles
-    sanitized = sanitized.replace('/', '_')
-    sanitized = sanitized.replace('\\', '_')
-    sanitized = sanitized.replace('=', '=')  # Keep = as is based on examples
-    # Add more replacements if needed based on actual file naming
-    return sanitized
+from molgen3D.config.paths import resolve_data_path
 
 def create_geom_smiles_datasets(
     geom_mapping_path: str,
     pickle_dir: str,
     output_smiles_jsonl: str,
-    output_mapping_jsonl: str
+    output_mapping_jsonl: str,
 ):
     """
     Reads the GEOM train smiles mapping, creates:
@@ -32,6 +21,14 @@ def create_geom_smiles_datasets(
         output_smiles_jsonl: Path for output JSONL with tagged SMILES
         output_mapping_jsonl: Path for output JSONL with SMILES to pickle mapping
     """
+    geom_mapping_path = Path(resolve_data_path(geom_mapping_path))
+    pickle_dir = Path(resolve_data_path(pickle_dir))
+    output_smiles_jsonl = Path(resolve_data_path(output_smiles_jsonl))
+    output_mapping_jsonl = Path(resolve_data_path(output_mapping_jsonl))
+
+    for output_path in (output_smiles_jsonl, output_mapping_jsonl):
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
     unique_smiles = set()
     smiles_to_geom = {}  # Maps isomeric_smiles to geom_smiles
 
@@ -123,18 +120,20 @@ def create_geom_smiles_datasets(
 
 if __name__ == "__main__":
     # GEOM dataset paths
-    geom_mapping_file = '/nfs/ap/mnt/sxtn2/chem/GEOM_data/geom_processed/geom_cartesian_v3/train_geom_to_isomeric_smiles.jsonl'
-    pickle_directory = '/nfs/ap/mnt/sxtn2/chem/GEOM_data/geom_processed/geom_cartesian_v3/processed_pickles/train/'
+    # legacy nfs
+    # /nfs/ap/mnt/sxtn2/chem/GEOM_data/geom_processed
+    geom_mapping_file = 'geom_cartesian_v3/train_geom_to_isomeric_smiles.jsonl'
+    pickle_directory = 'geom_cartesian_v3/processed_pickles/train/'
 
     # Output paths
-    output_smiles_file = '/nfs/ap/mnt/sxtn2/chem/GEOM_data/geom_processed/grpo/train_smiles.jsonl'
-    output_mapping_file = '/nfs/ap/mnt/sxtn2/chem/GEOM_data/geom_processed/grpo/train_smiles_to_pickle.json'
+    output_smiles_file = 'grpo/train_smiles.jsonl'
+    output_mapping_file = 'grpo/train_smiles_to_pickle.json'
 
     create_geom_smiles_datasets(
         geom_mapping_path=geom_mapping_file,
         pickle_dir=pickle_directory,
         output_smiles_jsonl=output_smiles_file,
-        output_mapping_jsonl=output_mapping_file
+        output_mapping_jsonl=output_mapping_file,
     )
 
    
