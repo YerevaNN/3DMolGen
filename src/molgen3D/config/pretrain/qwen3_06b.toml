@@ -13,7 +13,7 @@ tokenizer_tag = "tokenizers:qwen3_0.6b_custom"
 [model]
 name = "molgen_qwen3"
 flavor = "0.6B"
-hf_assets_path = "base_paths:qwen3_0.6b_base_model"
+hf_assets_path = "src/molgen3D/training/tokenizers/Qwen3_tokenizer_custom"
 
 [experimental]
 custom_import = "molgen3D.training.pretraining.torchtitan_model.qwen3_custom"
