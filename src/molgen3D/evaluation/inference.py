@@ -34,185 +34,12 @@ from molgen3D.evaluation.utils import (
 )
 from molgen3D.config.paths import get_ckpt, get_tokenizer_path, get_data_path, get_base_path
 from molgen3D.config.sampling_config import sampling_configs, gen_num_codes
-import multiprocessing
-import subprocess
 
 torch.backends.cudnn.benchmark = False
 RDLogger.DisableLog("rdApp.warning")
 RDLogger.DisableLog("rdApp.error")
 rdBase.DisableLog("rdApp.warning")
 rdBase.DisableLog("rdApp.error")
-
-# Reduce CUDA memory fragmentation for large batch inference
-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
-
-# Shared param_grid for grid_run_inference and superpod modes
-PARAM_GRID = {
-    "model_path": [("qwen3_grpo_251226_1635", "4000")],
-    # Add more model checkpoints here for multi-GPU runs:
-    # "model_path": [
-    #     ("qwen3_grpo_251226_1635", "4000"),
-    #     ("qwen3_grpo_251224_1839", "2000"),
-    #     ("qwen3_grpo_251228_1438", "4000"),
-    #     ("qwen3_grpo_251228_1438", "2000"),
-    # ],
-}
-
-
-def resolve_model_key(model_key) -> tuple[str, str]:
-    """Resolve model_key to (model_path, model_alias).
-
-    Args:
-        model_key: Either a tuple (alias, step) or a string alias
-
-    Returns:
-        (model_path, model_alias) tuple
-    """
-    if isinstance(model_key, tuple):
-        return get_ckpt(model_key[0], model_key[1]), f"{model_key[0]}_{model_key[1]}"
-    return get_ckpt(model_key), model_key
-
-
-def get_base_inference_config(limit: int | None = None) -> dict:
-    """Return base inference configuration template."""
-    return {
-        "tokenizer_path": get_tokenizer_path("qwen3_0.6b_custom"),
-        "torch_dtype": "bfloat16",
-        "batch_size": 256,
-        "num_gens": gen_num_codes["2k_per_conf"],
-        "gen_config": sampling_configs["top_p_sampling1"],
-        "device": "cuda",
-        "results_path": get_base_path("gen_results_root"),
-        "limit": limit,
-    }
-
-
-def get_free_gpus(num_needed: int, memory_threshold_mb: int = 1000) -> list[int]:
-    """Auto-detect free GPUs based on memory usage.
-
-    Args:
-        num_needed: Number of free GPUs required
-        memory_threshold_mb: GPUs with less than this memory used are considered free
-
-    Returns:
-        List of GPU IDs that are free
-
-    Raises:
-        RuntimeError: If not enough free GPUs available
-    """
-    try:
-        result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=index,memory.used", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, check=True
-        )
-        free_gpus = []
-        for line in result.stdout.strip().split("\n"):
-            gpu_id, memory_used = line.split(", ")
-            if int(memory_used) < memory_threshold_mb:
-                free_gpus.append(int(gpu_id))
-
-        if len(free_gpus) < num_needed:
-            raise RuntimeError(
-                f"Not enough free GPUs. Need {num_needed}, found {len(free_gpus)} free "
-                f"(threshold: <{memory_threshold_mb}MB used). Free GPUs: {free_gpus}"
-            )
-        return free_gpus[:num_needed]
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"Failed to query GPUs via nvidia-smi: {e}")
-
-
-def run_inference_on_gpu(gpu_id: int, inference_config: dict):
-    """Wrapper to run inference on a specific GPU.
-
-    Sets CUDA_VISIBLE_DEVICES before calling run_inference.
-    Used by superpod mode for multiprocessing.
-    """
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-    logger.info(f"Process started on GPU {gpu_id} with CUDA_VISIBLE_DEVICES={gpu_id}")
-    logger.info(f"Model: {inference_config.get('model_path', 'unknown')}")
-    run_inference(inference_config)
-
-
-def launch_superpod_inference(test_sets_to_run: list[str], limit: int | None, gpu_ids: str | None) -> None:
-    """Launch parallel inference jobs on superpod using multiprocessing.
-
-    Each model in PARAM_GRID gets assigned to a separate GPU and runs all test sets.
-
-    Args:
-        test_sets_to_run: List of test set names to run
-        limit: Optional limit on number of molecules
-        gpu_ids: Comma-separated GPU IDs (e.g., "0,1,2,3"), or None to auto-detect
-    """
-    num_models = len(PARAM_GRID["model_path"])
-
-    # Parse or auto-detect GPU IDs
-    if gpu_ids is not None:
-        gpu_id_list = [int(x.strip()) for x in gpu_ids.split(",")]
-    else:
-        logger.info(f"Auto-detecting {num_models} free GPUs...")
-        gpu_id_list = get_free_gpus(num_models)
-        logger.info(f"Auto-detected free GPUs: {gpu_id_list}")
-
-    # Validate GPU count matches model count
-    if len(gpu_id_list) != num_models:
-        raise ValueError(
-            f"GPU count mismatch: {len(gpu_id_list)} GPU IDs provided ({gpu_id_list}) "
-            f"but {num_models} models in PARAM_GRID.\n"
-            f"Models: {PARAM_GRID['model_path']}\n"
-            f"Please provide exactly {num_models} GPU IDs via --gpu_ids, "
-            f"or adjust PARAM_GRID to have {len(gpu_id_list)} models."
-        )
-
-    base_config = get_base_inference_config(limit)
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    processes = []
-
-    logger.info(f"=== SUPERPOD MODE ===")
-    logger.info(f"Launching {num_models} inference processes on GPUs {gpu_id_list}")
-
-    for model_key, gpu_id in zip(PARAM_GRID["model_path"], gpu_id_list):
-        model_path, model_alias = resolve_model_key(model_key)
-
-        for test_set_name in test_sets_to_run:
-            config = dict(base_config)
-            config["model_path"] = model_path
-            config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
-            config["test_set"] = test_set_name
-            config["run_name"] = f"{model_alias}_{test_set_name}"
-
-            if test_set_name in ("xl", "qm9"):
-                config["batch_size"] = 100
-
-            # Unique output folder per model/test_set
-            results_path = os.path.join(
-                get_base_path("gen_results_root"),
-                f"{timestamp}_{model_alias}_{test_set_name}"
-            )
-            os.makedirs(results_path, exist_ok=True)
-            config["results_path"] = results_path
-
-            logger.info(f"GPU {gpu_id} | Model: {model_alias} | Test set: {test_set_name}")
-            logger.info(f"  → Output: {results_path}")
-
-            p = multiprocessing.Process(
-                target=run_inference_on_gpu,
-                args=(gpu_id, config),
-                name=f"inference_gpu{gpu_id}_{model_alias}"
-            )
-            p.start()
-            processes.append((p, gpu_id, model_alias))
-
-    logger.info(f"All {len(processes)} processes started. Waiting for completion...")
-    logger.info(f"Monitor with: tail -f {get_base_path('gen_results_root')}/{timestamp}_*/logs.txt")
-
-    for p, gpu_id, model_alias in processes:
-        p.join()
-        if p.exitcode == 0:
-            logger.info(f"✓ GPU {gpu_id} ({model_alias}) completed successfully")
-        else:
-            logger.error(f"✗ GPU {gpu_id} ({model_alias}) failed with exit code {p.exitcode}")
-
-    logger.info("=== SUPERPOD MODE COMPLETE ===")
 
 
 def set_seed(seed=42):
@@ -379,80 +206,12 @@ def split_batch_on_geom_size(batch: list[list], max_geom_len: int = 80) -> list[
             return [batch[:mid], batch[mid:]]
     return [batch]
 
-
-def shard_mols_list(mols_list: list, shard_id: int, total_shards: int) -> list:
-    """Split mols_list into shards for multi-GPU data parallelism.
-
-    Uses strided sharding (not contiguous chunks) to distribute molecule sizes
-    evenly across GPUs, since mols_list is sorted by length.
-
-    Args:
-        mols_list: Full list of (geom_smiles, prompt) tuples, sorted by length
-        shard_id: This GPU's shard index (0-indexed)
-        total_shards: Total number of GPUs/shards
-
-    Returns:
-        Subset of mols_list for this shard
-    """
-    if total_shards <= 1:
-        return mols_list
-    # Strided sharding: GPU 0 gets items 0, N, 2N, ...; GPU 1 gets 1, N+1, 2N+1, ...
-    return mols_list[shard_id::total_shards]
-
-
-def concatenate_shard_results(results_path: str, total_shards: int) -> dict:
-    """Merge per-GPU pickle files into a single result dictionary.
-
-    Args:
-        results_path: Directory containing generation_results_gpu_*.pickle files
-        total_shards: Number of shards to merge
-
-    Returns:
-        Merged dictionary {geom_smiles: [mol_objects]}
-    """
-    merged = defaultdict(list)
-
-    for shard_id in range(total_shards):
-        shard_file = os.path.join(results_path, f"generation_results_gpu_{shard_id}.pickle")
-        if not os.path.exists(shard_file):
-            logger.warning(f"Missing shard file: {shard_file}")
-            continue
-
-        with open(shard_file, 'rb') as f:
-            shard_data = cloudpickle.load(f)
-
-        for k, v in shard_data.items():
-            merged[k].extend(v)
-
-        logger.info(f"Merged shard {shard_id}: {len(shard_data)} unique SMILES, {sum(len(v) for v in shard_data.values())} conformers")
-
-    # Save merged result
-    merged_file = os.path.join(results_path, "generation_results.pickle")
-    with open(merged_file, 'wb') as f:
-        cloudpickle.dump(dict(merged), f, protocol=4)
-
-    total_conformers = sum(len(v) for v in merged.values())
-    logger.info(f"Final merged result: {len(merged)} unique SMILES, {total_conformers} total conformers")
-    return dict(merged)
-
-
-def run_inference(inference_config: dict, shard_id: int | None = None, total_shards: int | None = None):
-    # For multi-GPU: use pre-created shared results_path; for single GPU: create timestamped path
-    if shard_id is not None and total_shards is not None and total_shards > 1:
-        # Multi-GPU mode: use shared path created by launcher, set per-shard seed
-        results_path = inference_config["results_path"]
-        set_seed(42 + shard_id)
-        log_suffix = f"_gpu_{shard_id}"
-    else:
-        # Single GPU mode: create timestamped path (original behavior)
-        results_path = os.path.join(inference_config["results_path"],
-                                    datetime.now().strftime('%Y%m%d_%H%M%S') +
-                                    '_' + inference_config["run_name"])
-        log_suffix = ""
-
+def run_inference(inference_config: dict):
+    results_path = os.path.join(*[inference_config["results_path"], 
+                                  datetime.now().strftime('%Y%m%d_%H%M%S') + 
+                                  '_' + inference_config["run_name"]])
     os.makedirs(results_path, exist_ok=True)
-    logger.add(os.path.join(results_path, f"logs{log_suffix}.txt"), rotation="50 MB")
-    logger.info(f"shard_id={shard_id}, total_shards={total_shards}")
+    logger.add(os.path.join(results_path, "logs.txt"), rotation="50 MB")
     logger.info(inference_config)
 
     model, tokenizer = load_model_tokenizer(model_path=inference_config["model_path"],
@@ -499,15 +258,9 @@ def run_inference(inference_config: dict, shard_id: int | None = None, total_sha
     logger.info(f"mols_list length: {len(mols_list)}, mols_list_distinct: {len(set(mols_list))}, mols_list: {mols_list[:10]}")
 
     mols_list.sort(key=lambda x: len(x[0]))
-
+    
     limit = inference_config.get("limit")
     mols_list = mols_list[:limit]
-
-    # Apply sharding for multi-GPU parallelism
-    if shard_id is not None and total_shards is not None and total_shards > 1:
-        full_len = len(mols_list)
-        mols_list = shard_mols_list(mols_list, shard_id, total_shards)
-        logger.info(f"GPU {shard_id}/{total_shards}: Processing {len(mols_list)}/{full_len} molecules")
 
     stats = Counter({"smiles_mismatch":0, "mol_parse_fail" :0, "no_eos":0})
     batch_size = int(inference_config["batch_size"])
@@ -526,21 +279,12 @@ def run_inference(inference_config: dict, shard_id: int | None = None, total_sha
             for k, v in outputs.items():
                 generations_all[k].extend(v)
 
-    # Save results with shard-specific filename for multi-GPU, or standard name for single GPU
-    if shard_id is not None and total_shards is not None and total_shards > 1:
-        output_filename = f"generation_results_gpu_{shard_id}.pickle"
-        with open(os.path.join(results_path, output_filename), 'wb') as f:
-            cloudpickle.dump(dict(generations_all), f, protocol=4)
-        with open(os.path.join(results_path, f"stats_gpu_{shard_id}.txt"), 'w') as f:
-            f.write(f"{stats=}")
-        logger.info(f"GPU {shard_id}: Saved {len(generations_all)} unique SMILES to {output_filename}")
-    else:
-        save_results(results_path, dict(generations_all), stats)
+    save_results(results_path, dict(generations_all), stats)
 
     return generations_all, stats
 
 
-def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:str = None, xl:bool = False, qm9:bool = False, limit: int = None, binned: bool = False, icl:bool = False, icl_n:int = 5, num_gpus: int = 1, gpu_ids: str = None) -> None:
+def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:str = None, xl:bool = False, qm9:bool = False, limit: int = None, binned: bool = False, icl:bool = False, icl_n:int = 5) -> None:
     # Determine which test sets to run
     test_sets_to_run = []
     if test_set:
@@ -554,32 +298,23 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
     if not test_sets_to_run:
         logger.info("No test sets specified. Skipping inference.")
         return
-
-    # Superpod mode: local multi-GPU with multiprocessing
-    if device == "superpod":
-        launch_superpod_inference(test_sets_to_run, limit, gpu_ids)
-        return
-
+    
+    n_gpus = 1
     node = device if device in ["a100", "h100"] else "local"
-
-    # Create executor for inference jobs (1 GPU per job for multi-GPU parallelism)
     executor = None
     if device in ["a100", "h100"]:
         executor = submitit.AutoExecutor(folder="outputs/slurm_jobs/conf_gen/job_%j")
     elif device == "local":
         executor = submitit.LocalExecutor(folder="outputs/slurm_jobs/conf_gen/job_%j")
-
     executor.update_parameters(
         name="conf_gen",
         timeout_min=24 * 24 * 60,
-        gpus_per_node=1,  # Each job gets 1 GPU
+        gpus_per_node=n_gpus,
         nodes=1,
         mem_gb=80,
-        cpus_per_task=12,
+        cpus_per_task=n_gpus * 12,
         slurm_additional_parameters={"partition": node},
     )
-
-    logger.info(f"Multi-GPU mode: {num_gpus} GPUs requested")
     
     # Base configuration template
     base_inference_config = {
@@ -607,13 +342,20 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         jobs = []
         if executor is not None:
             with executor.batch():
-                for model_key in PARAM_GRID["model_path"]:
-                    model_path, model_alias = resolve_model_key(model_key)
+                for model_key in param_grid["model_path"]:
                     for test_set_name in test_sets_to_run:
                         grid_config = dict(base_inference_config)
-                        grid_config["model_path"] = model_path
-
-                        if test_set_name in ("xl", "qm9"):
+                        if isinstance(model_key, tuple):
+                            grid_config["model_path"] = get_ckpt(model_key[0], model_key[1])
+                            model_key_str = f"{model_key[0]}_{model_key[1]}"
+                        else:
+                            grid_config["model_path"] = get_ckpt(model_key)
+                            model_key_str = model_key
+                        
+                        if test_set_name == "xl":
+                            grid_config["batch_size"] = 100
+                        
+                        if test_set_name == "qm9":
                             grid_config["batch_size"] = 100
                         
                         if test_set_name == "icl":
@@ -621,21 +363,12 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
 
                         grid_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
                         grid_config["test_set"] = test_set_name
-                        grid_config["run_name"] = f"{model_alias}_{test_set_name}"
-
+                        grid_config["run_name"] = f"{model_key_str}_{test_set_name}"
+                        
                         job = executor.submit(run_inference, inference_config=grid_config)
                         jobs.append(job)
     else:
         if executor is not None:
-            for test_set_name in test_sets_to_run:
-                inference_config = dict(base_inference_config)
-                if test_set_name == "xl":
-                    inference_config["batch_size"] = 100
-                if test_set_name == "qm9":
-                    inference_config["batch_size"] = 100
-                inference_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
-                inference_config["test_set"] = test_set_name
-                inference_config["run_name"] = f"new_data_p1_{test_set_name}"
             with executor.batch():
                 for test_set_name in test_sets_to_run:
                     inference_config = dict(base_inference_config)
@@ -649,56 +382,9 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
                     inference_config["test_set"] = test_set_name
                     inference_config["run_name"] = f"new_data_p1_{test_set_name}"
 
-                if num_gpus > 1:
-                    # Multi-GPU mode: create shared results directory and submit N shard jobs
-                    shared_results_path = os.path.join(
-                        get_base_path("gen_results_root"),
-                        datetime.now().strftime('%Y%m%d_%H%M%S') + f'_multi_gpu_{test_set_name}'
-                    )
-                    os.makedirs(shared_results_path, exist_ok=True)
-                    inference_config["results_path"] = shared_results_path
-
-                    logger.info(f"Submitting {num_gpus} parallel jobs for {test_set_name}")
-                    shard_jobs = []
-                    with executor.batch():
-                        for gpu_id in range(num_gpus):
-                            job = executor.submit(
-                                run_inference,
-                                inference_config=inference_config,
-                                shard_id=gpu_id,
-                                total_shards=num_gpus
-                            )
-                            shard_jobs.append(job)
-
-                    # Submit concatenation job with dependency on all shard jobs
-                    if device in ["a100", "h100"]:
-                        concat_executor = submitit.AutoExecutor(folder="outputs/slurm_jobs/conf_gen/concat_%j")
-                        job_ids = ":".join(str(j.job_id) for j in shard_jobs)
-                        concat_executor.update_parameters(
-                            name="concat_results",
-                            timeout_min=60,
-                            gpus_per_node=0,  # CPU only
-                            nodes=1,
-                            cpus_per_task=4,
-                            mem_gb=32,
-                            slurm_additional_parameters={
-                                "partition": node,
-                                "dependency": f"afterok:{job_ids}"
-                            },
-                        )
-                        concat_job = concat_executor.submit(
-                            concatenate_shard_results,
-                            results_path=shared_results_path,
-                            total_shards=num_gpus
-                        )
-                        logger.info(f"Submitted concatenation job {concat_job.job_id} (depends on {job_ids})")
-                else:
-                    # Single GPU mode: original behavior
                     logger.info(f"Running inference for {test_set_name} with config: {inference_config}")
-                    with executor.batch():
-                        job = executor.submit(run_inference, inference_config=inference_config)
+                    job = executor.submit(run_inference, inference_config=inference_config)
         else:
-            # Local execution
             for test_set_name in test_sets_to_run:
                 inference_config = dict(base_inference_config)
                 if test_set_name == "xl":
@@ -715,30 +401,16 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
 if __name__ == "__main__":
     set_seed(42)
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device", type=str, choices=["local", "a100", "h100", "superpod"], required=True)
-    parser.add_argument("--gpu_ids", type=str, default=None,
-                        help="Comma-separated GPU IDs for superpod mode (e.g., '0,1,2,3'). "
-                             "If not specified with --device=superpod, will auto-detect free GPUs.")
+    parser.add_argument("--device", type=str, choices=["local", "a100", "h100"], required=True)
     parser.add_argument("--grid_run_inference", action="store_true")
     parser.add_argument("--test_set", type=str, choices=["clean", "distinct", "corrected"], default=None)
     parser.add_argument("--binned", action="store_true", default=False)
     parser.add_argument("--xl", action="store_true")
     parser.add_argument("--qm9", action="store_true")
     parser.add_argument("--limit", type=int, default=None)
-    parser.add_argument("--num_gpus", type=int, default=1,
-                        help="Number of GPUs for data-parallel inference (default: 1)")
     parser.add_argument("--icl", action="store_true")
     parser.add_argument("--icl_n", type=int, default=5)
-    args = parser.parse_args()
-    launch_inference_from_cli(
-        device=args.device,
-        grid_run_inference=args.grid_run_inference,
-        test_set=args.test_set,
-        xl=args.xl,
-        qm9=args.qm9,
-        limit=args.limit,
-        num_gpus=args.num_gpus,
-        gpu_ids=args.gpu_ids,
-        icl=args.icl,
-        icl_n=args.icl_n,
-    )
+    args = parser.parse_args() 
+    launch_inference_from_cli(device=args.device, grid_run_inference=args.grid_run_inference, test_set=args.test_set, xl=args.xl, qm9=args.qm9, limit=args.limit, binned=args.binned, icl=args.icl, icl_n=args.icl_n)
+
+    
