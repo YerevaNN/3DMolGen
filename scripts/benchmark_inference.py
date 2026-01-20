@@ -80,6 +80,7 @@ class BenchmarkResult:
     oom_occurred: bool
     expandable_segments: bool
     compile_mode: str | None
+    attn_implementation: str = "flash_attention_2"
     warmup_time_sec: float = 0.0
     # Phase timing breakdown (when --profile_phases is enabled)
     prefill_time_sec: float = 0.0
@@ -119,8 +120,22 @@ def set_seed(seed: int = 42) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-def load_model_tokenizer(model_path, tokenizer_path, torch_dtype="bfloat16", compile_mode="reduce-overhead"):
-    """Load model and tokenizer with specified settings."""
+def load_model_tokenizer(
+    model_path,
+    tokenizer_path,
+    torch_dtype="bfloat16",
+    compile_mode="reduce-overhead",
+    attn_implementation="flash_attention_2",
+):
+    """Load model and tokenizer with specified settings.
+
+    Args:
+        model_path: Path to model checkpoint
+        tokenizer_path: Path to tokenizer
+        torch_dtype: Data type for model weights
+        compile_mode: torch.compile mode (none, default, reduce-overhead, max-autotune)
+        attn_implementation: Attention implementation (flash_attention_2, sdpa, eager)
+    """
     from transformers import AutoTokenizer, AutoModelForCausalLM
 
     tokenizer = AutoTokenizer.from_pretrained(
@@ -131,7 +146,7 @@ def load_model_tokenizer(model_path, tokenizer_path, torch_dtype="bfloat16", com
     model = AutoModelForCausalLM.from_pretrained(
         str(model_path),
         dtype=dtype_obj,
-        attn_implementation="flash_attention_2",
+        attn_implementation=attn_implementation,
         device_map="auto",
         trust_remote_code=True,
         local_files_only=True,
@@ -472,6 +487,7 @@ def run_single_benchmark_with_phases(
     expandable_segments: bool,
     compile_mode: str | None,
     warmup_time: float,
+    attn_implementation: str = "flash_attention_2",
 ) -> BenchmarkResult:
     """Run benchmark WITH detailed prefill vs decode phase timing.
 
@@ -587,6 +603,7 @@ def run_single_benchmark_with_phases(
         oom_occurred=oom_occurred,
         expandable_segments=expandable_segments,
         compile_mode=compile_mode,
+        attn_implementation=attn_implementation,
         warmup_time_sec=warmup_time,
         # Phase breakdown
         prefill_time_sec=total_prefill_time,
@@ -608,6 +625,7 @@ def run_single_benchmark(
     expandable_segments: bool,
     compile_mode: str | None,
     warmup_time: float,
+    attn_implementation: str = "flash_attention_2",
 ) -> BenchmarkResult:
     """Run inference on mols_list with given batch_size, return metrics."""
 
@@ -666,6 +684,7 @@ def run_single_benchmark(
         oom_occurred=oom_occurred,
         expandable_segments=expandable_segments,
         compile_mode=compile_mode,
+        attn_implementation=attn_implementation,
         warmup_time_sec=warmup_time,
     )
 
@@ -700,11 +719,13 @@ def run_single_config_job(
         os.environ.pop("PYTORCH_CUDA_ALLOC_CONF", None)
 
     # Load model
+    attn_impl = config.get("attn_implementation", "flash_attention_2")
     model, tokenizer = load_model_tokenizer(
         model_path=get_ckpt(config["model_alias"], config["model_step"]),
         tokenizer_path=get_tokenizer_path("qwen3_0.6b_custom"),
         torch_dtype="bfloat16",
         compile_mode=config["compile_mode"],
+        attn_implementation=attn_impl,
     )
 
     eos_token_id = tokenizer.encode("<|endoftext|>", add_special_tokens=False)
@@ -716,7 +737,8 @@ def run_single_config_job(
     # Build config name
     expand_str = "expand" if config["expandable_segments"] else "no_expand"
     compile_str = config["compile_mode"] if config["compile_mode"] else "none"
-    config_name = f"{expand_str}_compile={compile_str}_bs={config['batch_size']}"
+    attn_str = attn_impl.replace("_", "")  # flash_attention_2 -> flashattention2
+    config_name = f"{expand_str}_{attn_str}_compile={compile_str}_bs={config['batch_size']}"
 
     # Run benchmark (use phase profiling if requested)
     profile_phases = config.get("profile_phases", False)
@@ -725,14 +747,14 @@ def run_single_config_job(
             model, tokenizer, mols_list, config["batch_size"],
             gen_config, eos_token_id, config_name,
             config["expandable_segments"], config["compile_mode"],
-            warmup_time,
+            warmup_time, attn_impl,
         )
     else:
         result = run_single_benchmark(
             model, tokenizer, mols_list, config["batch_size"],
             gen_config, eos_token_id, config_name,
             config["expandable_segments"], config["compile_mode"],
-            warmup_time,
+            warmup_time, attn_impl,
         )
 
     # Save result
@@ -824,9 +846,15 @@ def run_benchmark(args: argparse.Namespace) -> None:
     else:
         expandable_opts = [True]  # Default: only test with expandable_segments enabled
 
-    # Generate all configuration combinations
-    all_configs = list(itertools.product(expandable_opts, compile_modes, batch_sizes))
-    logger.info(f"Testing {len(all_configs)} configurations")
+    # Attention implementation (single value for now, could be extended to test multiple)
+    attn_impl = args.attn_impl
+
+    # Generate all configuration combinations: (expand, compile, batch_size, attn_impl)
+    all_configs = [
+        (expand, compile, bs, attn_impl)
+        for expand, compile, bs in itertools.product(expandable_opts, compile_modes, batch_sizes)
+    ]
+    logger.info(f"Testing {len(all_configs)} configurations (attn_impl={attn_impl})")
 
     # Slurm mode: submit to cluster when device is specified
     if args.device in ["a100", "h100"]:
@@ -880,17 +908,18 @@ def run_single_gpu_benchmark(
     """Run benchmark configurations sequentially on single GPU."""
     results = []
 
-    # Sort configs by (expandable, compile_mode) to minimize model reloads
-    sorted_configs = sorted(all_configs, key=lambda x: (x[0], x[1]))
+    # Sort configs by (expandable, compile_mode, attn_impl) to minimize model reloads
+    sorted_configs = sorted(all_configs, key=lambda x: (x[0], x[1], x[3]))
 
     current_expand = None
     current_compile = None
+    current_attn = None
     model = None
     tokenizer = None
 
-    for expand, compile_mode, bs in sorted_configs:
-        # Reload model if expandable_segments or compile_mode changed
-        if expand != current_expand or compile_mode != current_compile:
+    for expand, compile_mode, bs, attn_impl in sorted_configs:
+        # Reload model if expandable_segments, compile_mode, or attn_impl changed
+        if expand != current_expand or compile_mode != current_compile or attn_impl != current_attn:
             if model is not None:
                 del model
                 torch.cuda.empty_cache()
@@ -903,12 +932,13 @@ def run_single_gpu_benchmark(
                 os.environ.pop("PYTORCH_CUDA_ALLOC_CONF", None)
                 logger.info("expandable_segments: DISABLED")
 
-            logger.info(f"Loading model with compile_mode={compile_mode}")
+            logger.info(f"Loading model with compile_mode={compile_mode}, attn_impl={attn_impl}")
             model, tokenizer = load_model_tokenizer(
                 model_path=get_ckpt(args.model_alias, args.model_step),
                 tokenizer_path=get_tokenizer_path("qwen3_0.6b_custom"),
                 torch_dtype="bfloat16",
                 compile_mode=compile_mode,
+                attn_implementation=attn_impl,
             )
 
             eos_token_id = tokenizer.encode("<|endoftext|>", add_special_tokens=False)
@@ -921,11 +951,13 @@ def run_single_gpu_benchmark(
 
             current_expand = expand
             current_compile = compile_mode
+            current_attn = attn_impl
 
         # Run benchmark for this batch size
         expand_str = "expand" if expand else "no_expand"
         compile_str = compile_mode if compile_mode else "none"
-        config_name = f"{expand_str}_compile={compile_str}_bs={bs}"
+        attn_str = attn_impl.replace("_", "")
+        config_name = f"{expand_str}_{attn_str}_compile={compile_str}_bs={bs}"
         logger.info(f"Benchmarking: {config_name}")
 
         # Choose benchmark function based on --profile_phases flag
@@ -934,14 +966,14 @@ def run_single_gpu_benchmark(
                 model, tokenizer, mols_list, bs,
                 gen_config, eos_token_id, config_name,
                 expand, compile_mode,
-                warmup_time,
+                warmup_time, attn_impl,
             )
         else:
             result = run_single_benchmark(
                 model, tokenizer, mols_list, bs,
                 gen_config, eos_token_id, config_name,
                 expand, compile_mode,
-                warmup_time,
+                warmup_time, attn_impl,
             )
         results.append(result)
 
@@ -995,11 +1027,12 @@ def run_multi_gpu_benchmark(
 
     # Submit jobs and save metadata
     job_metadata = []
-    for i, (expand, compile_mode, bs) in enumerate(all_configs):
+    for i, (expand, compile_mode, bs, attn_impl) in enumerate(all_configs):
         config = {
             "batch_size": bs,
             "expandable_segments": expand,
             "compile_mode": compile_mode,
+            "attn_implementation": attn_impl,
             "model_alias": args.model_alias,
             "model_step": args.model_step,
             "profile_phases": args.profile_phases,
@@ -1012,7 +1045,7 @@ def run_multi_gpu_benchmark(
             "config": config,
             "result_file": str(result_file),
         })
-        logger.info(f"Submitted job {job.job_id} for config: expand={expand}, compile={compile_mode}, bs={bs}")
+        logger.info(f"Submitted job {job.job_id} for config: expand={expand}, attn={attn_impl}, compile={compile_mode}, bs={bs}")
 
     # Save job metadata for later collection
     metadata_file = output_dir / "jobs.json"
@@ -1271,6 +1304,9 @@ def main():
     parser.add_argument("--device", type=str, default="local",
                         choices=["local", "a100", "h100"],
                         help="Device/partition for Slurm jobs (default: local)")
+    parser.add_argument("--attn_impl", type=str, default="flash_attention_2",
+                        choices=["flash_attention_2", "sdpa", "eager"],
+                        help="Attention implementation (default: flash_attention_2)")
 
     args = parser.parse_args()
 
