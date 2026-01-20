@@ -1,8 +1,8 @@
-  expandable_segments:True - The Evidence
+# Expandable_segments:True - Evidence for why it allows bigger batch size and increases runtime ultimately
 
-  How It Works (answering your colleague's question)
+  How It Works:
 
-  The confusion is understandable because it's not about accommodating longer sequences - it's about reducing memory fragmentation:
+  Expandable segments reduce memory fragmentation:
 
   ★ Insight ─────────────────────────────────────
   • Traditional: Each allocation gets its own cudaMalloc block. Variable sizes
@@ -133,14 +133,21 @@
   Key Observations:
 
   1. **31% speedup** from expandable_segments (avg 54.7s vs 71.6s)
-  2. **No OOMs** at any batch size (up to 768)
+  2. **No OOMs in this sample** (see caveat below)
   3. **Nearly identical peak memory** (~17.8 GB in both cases)
   4. **Timing independent of batch_size** - 200 mols fits in 1 batch for all sizes
 
+  ⚠️ OOM Caveat:
+  The benchmark sorts molecules by length (ascending) and takes the first 200,
+  meaning we test **shorter molecules**. To properly stress-test for OOM, you'd
+  need to sort descending (longest first). In full inference runs on A100 40GB,
+  batch_size=512 and 768 DO cause OOM on longer molecules. For production on
+  A100 40GB, use batch_size ≤ 384.
+
   ★ Insight ─────────────────────────────────────
-  The benefit is NOT just "avoid OOM at large batch sizes" - it's **raw allocator
-  efficiency**. Even at the same batch size, expandable_segments reduces overhead
-  from fragmentation during the many allocate/free cycles in generation.
+  The speedup comes from raw allocator efficiency. At the same batch size,
+  expandable_segments reduces fragmentation overhead during the thousands of
+  allocate/free cycles in autoregressive generation.
   ─────────────────────────────────────────────────
 
   Why Timing Is Constant Across Batch Sizes:

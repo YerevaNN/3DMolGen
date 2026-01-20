@@ -780,8 +780,8 @@ def load_test_data(test_set: str, limit: int) -> list[tuple[str, str]]:
                 mols_list.append((geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]"))
 
     # Sort by length (like inference.py) and limit
-    mols_list.sort(key=lambda x: len(x[0]))
-    return mols_list[:limit]
+    mols_list.sort(key=lambda x: len(x[0])) 
+    return mols_list[:limit] 
 
 
 def load_unique_molecules_with_counts(test_set: str, limit: int) -> dict[str, int]:
