@@ -36,6 +36,7 @@ from molgen3D.training.grpo.utils import (
     save_config,
     get_torch_dtype
 )
+from molgen3D.config.paths import resolve_data_path
 from molgen3D.training.grpo.rewards import reward_function
 from molgen3D.training.grpo.numerical_validator import GRPONumericalValidator
 from molgen3D.training.grpo.numerical_validation_callback import NumericalValidationCallback
@@ -166,7 +167,8 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     )
 
     # Load dataset from text file and create prompt column
-    with open(config.dataset.dataset_path, 'r', encoding='utf-8', errors='replace') as f:
+    dataset_path = resolve_data_path(config.dataset.dataset_path)
+    with open(dataset_path, 'r', encoding='utf-8', errors='replace') as f:
         prompts = [
             line.strip()
             for line in f
@@ -174,7 +176,7 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         ]
     dataset = Dataset.from_dict({"prompt": prompts})
     dataset = dataset.shuffle(seed=config.grpo.seed)
-    logger.info(f"Loaded {len(dataset)} prompts from {config.dataset.dataset_path}")
+    logger.info(f"Loaded {len(dataset)} prompts from {dataset_path}")
 
     tokenizer.pad_token_id = tokenizer.convert_tokens_to_ids(config.model.pad_token)
     mol_end_token_id = tokenizer.convert_tokens_to_ids(config.model.mol_tags[1])
