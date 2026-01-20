@@ -135,6 +135,14 @@ models:
       "1e": "step-30000-hf"
       "2e": "step-60000-hf"
       "3e": "step-90000-hf"
+    
+  m600_qwen_pre_4seq_binned:
+    root: "qwen3_06b/260118-2206-3fb4-qwen3_06b_pre_5e_48effb_4kseq"
+    steps:
+      "1e": "step-4200-hf"
+      "2e": "step-8400-hf"
+      "3e": "step-12600-hf"
+      "4e": "step-16800-hf"
 
   m380_conf:
     root: "Llama-3.2-380M_conformers"

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Dict, Tuple, Optional, List
 import shutil
+import re
 
 import torch
 import torch.nn as nn
@@ -13,6 +14,7 @@ import tyro
 from transformers import Qwen3Config, Qwen3ForCausalLM
 
 from torchtitan.models.qwen3.model.state_dict_adapter import Qwen3StateDictAdapter
+from torchtitan.models.qwen3.model.args import Qwen3ModelArgs
 # from torchtitan.tools.logging import logger
 
 
@@ -183,6 +185,11 @@ def _collect_run_metadata(job_cfg: Dict) -> Dict[str, Optional[object]]:
     added_tokens = int(model_cfg.get("tokenizer_added_tokens", NUM_NEW_TOKENS))
     padded_vocab = int(model_cfg.get("padded_vocab_size", PADDED_VOCAB))
     seq_len = int(training_cfg.get("seq_len", 0))
+    num_layers = model_cfg.get("num_hidden_layers") or model_cfg.get("n_layers")
+    hidden_size = model_cfg.get("hidden_size") or model_cfg.get("dim")
+    intermediate_size = model_cfg.get("intermediate_size") or model_cfg.get("hidden_dim")
+    num_heads = model_cfg.get("num_attention_heads") or model_cfg.get("n_heads")
+    num_kv_heads = model_cfg.get("num_key_value_heads") or model_cfg.get("n_kv_heads")
 
     tokenizer_path = (
         model_cfg.get("tokenizer_override")
@@ -195,6 +202,11 @@ def _collect_run_metadata(job_cfg: Dict) -> Dict[str, Optional[object]]:
         "new_tokens": added_tokens,
         "padded_vocab": padded_vocab,
         "seq_len": seq_len,
+        "num_layers": num_layers,
+        "hidden_size": hidden_size,
+        "intermediate_size": intermediate_size,
+        "num_heads": num_heads,
+        "num_kv_heads": num_kv_heads,
         "tokenizer_path": tokenizer_path,
     }
 
@@ -311,6 +323,11 @@ def _build_hf_model_from_base_assets(
     *,
     expected_padded_vocab: int,
     expected_seq_len: int,
+    expected_num_layers: Optional[int],
+    expected_hidden_size: Optional[int],
+    expected_intermediate_size: Optional[int],
+    expected_num_heads: Optional[int],
+    expected_num_kv_heads: Optional[int],
     target_dtype: torch.dtype,
 ) -> Qwen3ForCausalLM:
     """
@@ -320,9 +337,26 @@ def _build_hf_model_from_base_assets(
     if not hf_assets_path.exists():
         raise FileNotFoundError(f"HF assets path does not exist: {hf_assets_path}")
 
-    config = Qwen3Config.from_pretrained(str(hf_assets_path))
+    try:
+        config = Qwen3Config.from_pretrained(str(hf_assets_path))
+    except Exception as e:
+        print(f"[WARN] Failed to load config from {hf_assets_path}: {e}. Using default Qwen3Config.")
+        config = Qwen3Config()
+
     config.vocab_size = expected_padded_vocab
-    config.dtype = target_dtype
+    config.torch_dtype = target_dtype
+    if expected_num_layers:
+        config.num_hidden_layers = expected_num_layers
+        if hasattr(config, "layer_types") and config.layer_types is not None:
+            config.layer_types = config.layer_types[:expected_num_layers]
+    if expected_hidden_size:
+        config.hidden_size = expected_hidden_size
+    if expected_intermediate_size:
+        config.intermediate_size = expected_intermediate_size
+    if expected_num_heads:
+        config.num_attention_heads = expected_num_heads
+    if expected_num_kv_heads:
+        config.num_key_value_heads = expected_num_kv_heads
     if expected_seq_len > 0:
         if hasattr(config, "max_position_embeddings"):
             config.max_position_embeddings = expected_seq_len
@@ -345,7 +379,18 @@ def _map_titan_to_hf_state(
     """
     Use Torchtitan's Qwen3StateDictAdapter to convert Titan layout -> HF layout.
     """
-    adapter = Qwen3StateDictAdapter(hf_model.config, str(hf_assets_path))  # tweak if your ctor differs
+    # Map HF config to Torchtitan model args
+    model_args = Qwen3ModelArgs(
+        dim=hf_model.config.hidden_size,
+        n_layers=hf_model.config.num_hidden_layers,
+        n_heads=hf_model.config.num_attention_heads,
+        n_kv_heads=hf_model.config.num_key_value_heads,
+        vocab_size=hf_model.config.vocab_size,
+        head_dim=hf_model.config.head_dim,
+        hidden_dim=hf_model.config.intermediate_size,
+        enable_weight_tying=hf_model.config.tie_word_embeddings,
+    )
+    adapter = Qwen3StateDictAdapter(model_args, str(hf_assets_path))
 
     if not hasattr(adapter, "to_hf"):
         raise RuntimeError(
@@ -664,6 +709,45 @@ def export_qwen3_dcp_step_to_hf(
     extra_tokens = int(expected_specs["new_tokens"])
     padded_vocab = int(expected_specs["padded_vocab"])
     seq_len = int(expected_specs.get("seq_len") or 0)
+    num_layers = expected_specs.get("num_layers")
+    hidden_size = expected_specs.get("hidden_size")
+    intermediate_size = expected_specs.get("intermediate_size")
+    num_heads = expected_specs.get("num_heads")
+    num_kv_heads = expected_specs.get("num_kv_heads")
+
+    # Detect specs from state dict if not in config
+    if not hidden_size:
+        hidden_size = titan_embed.shape[1]
+        print(f"[INFO] Detected hidden_size={hidden_size} from Titan embeddings")
+
+    if not num_layers:
+        layer_indices = []
+        for key in titan_state.keys():
+            match = re.search(r"layers\.(\d+)\.", key)
+            if match:
+                layer_indices.append(int(match.group(1)))
+        if layer_indices:
+            num_layers = max(layer_indices) + 1
+            print(f"[INFO] Detected {num_layers} layers from Titan state dict")
+
+    if not intermediate_size and num_layers:
+        w1_key = _find_tensor_key_from_metadata(titan_state, ("layers.0.feed_forward.w1.weight", "model.layers.0.mlp.gate_proj.weight"))
+        if w1_key:
+            intermediate_size = titan_state[w1_key].shape[0]
+            print(f"[INFO] Detected intermediate_size={intermediate_size} from Titan state dict")
+
+    if not num_heads and num_layers:
+        wq_key = _find_tensor_key_from_metadata(titan_state, ("layers.0.attention.wq.weight", "model.layers.0.self_attn.q_proj.weight"))
+        if wq_key:
+            # Qwen3 often has head_dim=128
+            num_heads = titan_state[wq_key].shape[0] // 128
+            print(f"[INFO] Detected num_heads={num_heads} from Titan state dict (assuming head_dim=128)")
+
+    if not num_kv_heads and num_layers:
+        wk_key = _find_tensor_key_from_metadata(titan_state, ("layers.0.attention.wk.weight", "model.layers.0.self_attn.k_proj.weight"))
+        if wk_key:
+            num_kv_heads = titan_state[wk_key].shape[0] // 128
+            print(f"[INFO] Detected num_kv_heads={num_kv_heads} from Titan state dict (assuming head_dim=128)")
 
     _sanity_check_qwen3_vocab_and_tie(
         titan_embed,
@@ -679,6 +763,11 @@ def export_qwen3_dcp_step_to_hf(
         hf_assets_path,
         expected_padded_vocab=padded_vocab,
         expected_seq_len=seq_len,
+        expected_num_layers=num_layers,
+        expected_hidden_size=hidden_size,
+        expected_intermediate_size=intermediate_size,
+        expected_num_heads=num_heads,
+        expected_num_kv_heads=num_kv_heads,
         target_dtype=target_dtype,
     )
     if job_cfg is not None:
@@ -688,11 +777,6 @@ def export_qwen3_dcp_step_to_hf(
     missing, unexpected = hf_model.load_state_dict(hf_state_dict, strict=True)
     if missing or unexpected:
         raise ValueError(f"HF load_state_dict issues; missing={missing}, unexpected={unexpected}")
-
-    # Enforce weight tying after load in case adapter didn't tie
-    hf_model.lm_head.weight = hf_model.model.embed_tokens.weight
-    if hf_model.lm_head.weight.data_ptr() != hf_model.model.embed_tokens.weight.data_ptr():
-        raise ValueError("HF LM head is not tied to embedding weights after load.")
 
     # Verify conversion
     print("[INFO] Verifying conversion quality...")

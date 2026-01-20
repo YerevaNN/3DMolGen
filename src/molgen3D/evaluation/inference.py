@@ -318,7 +318,7 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
     
     # Base configuration template
     base_inference_config = {
-        "model_path": get_ckpt("qw600_pre_binned_filtered", "4e"),
+        "model_path": get_ckpt("m600_qwen_pre_4seq_binned", "4e"),
         "tokenizer_path": get_tokenizer_path("qwen3_0.6b_binned"),
         "torch_dtype": "bfloat16",
         "batch_size": 128,
@@ -326,19 +326,12 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         "gen_config": sampling_configs["top_p_sampling1"],
         "device": "cuda",
         "results_path": get_base_path("gen_results_root"),
-        "run_name": "qwen_pre_binned",
+        "run_name": "qwen_pre_4seq_binned",
         "limit": limit,
         "binned": binned,
     }
 
     if grid_run_inference:
-        param_grid = {
-            # "model_path": [("m380_conf_v2", "4e")],
-            # "model_path": [("m600_qwen_pre", "4e"), ("m600_qwen_scr", "4e")],
-            "model_path": [("qw600_pre_binned_filtered", "1e"), ("qw600_pre_binned_filtered", "2e"), ("qw600_pre_binned_filtered", "3e"), ("qw600_pre_binned_filtered", "4e")],
-            # , ("qwen3_grpo_251224_1839", "2000"), ("qwen3_grpo_251228_1438", "4000"), ("qwen3_grpo_251228_1438", "2000")],
-            # "model_path": [("m380_conf_v2", "1e")],
-        }
         jobs = []
         if executor is not None:
             with executor.batch():
