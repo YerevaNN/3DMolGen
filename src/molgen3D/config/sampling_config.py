@@ -181,6 +181,64 @@ min_p_sampling_config12= GenerationConfig(
     temperature=0.8,
     min_p = 0.05,
 )
+
+# HP Sweep configs - top_p with temperature variations
+top_p_sweep1 = GenerationConfig(
+    do_sample=True,
+    temperature=0.8,
+    top_p=0.9,
+)
+
+top_p_sweep2 = GenerationConfig(
+    do_sample=True,
+    temperature=1.0,
+    top_p=0.9,
+)
+
+top_p_sweep3 = GenerationConfig(
+    do_sample=True,
+    temperature=1.2,
+    top_p=0.9,
+)
+
+# HP Sweep configs - min_p with temperature variations
+min_p_sweep1 = GenerationConfig(
+    do_sample=True,
+    temperature=0.8,
+    min_p=0.1,
+)
+
+min_p_sweep2 = GenerationConfig(
+    do_sample=True,
+    temperature=1.0,
+    min_p=0.1,
+)
+
+min_p_sweep3 = GenerationConfig(
+    do_sample=True,
+    temperature=1.2,
+    min_p=0.1,
+)
+
+# HP Sweep configs - top_k with temperature variations
+top_k_sweep1 = GenerationConfig(
+    do_sample=True,
+    temperature=0.8,
+    top_k=50,
+)
+
+top_k_sweep2 = GenerationConfig(
+    do_sample=True,
+    temperature=1.0,
+    top_k=50,
+)
+
+top_k_sweep3 = GenerationConfig(
+    do_sample=True,
+    temperature=1.2,
+    top_k=50,
+)
+
 sampling_configs = {
     "greedy": greedy_config,
     "top_p_low_temperature": top_p_low_temperature_config,
@@ -213,6 +271,16 @@ sampling_configs = {
     "min_p_sampling10": min_p_sampling_config10,
     "min_p_sampling11": min_p_sampling_config11,
     "min_p_sampling12": min_p_sampling_config12,
+    # HP Sweep configs
+    "top_p_sweep1": top_p_sweep1,
+    "top_p_sweep2": top_p_sweep2,
+    "top_p_sweep3": top_p_sweep3,
+    "min_p_sweep1": min_p_sweep1,
+    "min_p_sweep2": min_p_sweep2,
+    "min_p_sweep3": min_p_sweep3,
+    "top_k_sweep1": top_k_sweep1,
+    "top_k_sweep2": top_k_sweep2,
+    "top_k_sweep3": top_k_sweep3,
 }
 
 gen_num_codes = {

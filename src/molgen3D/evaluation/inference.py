@@ -41,6 +41,19 @@ RDLogger.DisableLog("rdApp.error")
 rdBase.DisableLog("rdApp.warning")
 rdBase.DisableLog("rdApp.error")
 
+# Reduce CUDA memory fragmentation for large batch inference
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
+# HP Sweep grid for sampling config experiments
+HP_SWEEP_GRID = {
+    "model_path": [("qw600_pre_binned_filtered", "4e")],
+    "gen_config": [
+        "top_p_sweep1", "top_p_sweep2", "top_p_sweep3",
+        "min_p_sweep1", "min_p_sweep2", "min_p_sweep3",
+        "top_k_sweep1", "top_k_sweep2", "top_k_sweep3",
+    ],
+}
+
 
 def set_seed(seed=42):
     random.seed(seed)  # Python random module
@@ -335,31 +348,36 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         jobs = []
         if executor is not None:
             with executor.batch():
-                for model_key in param_grid["model_path"]:
-                    for test_set_name in test_sets_to_run:
-                        grid_config = dict(base_inference_config)
-                        if isinstance(model_key, tuple):
-                            grid_config["model_path"] = get_ckpt(model_key[0], model_key[1])
-                            model_key_str = f"{model_key[0]}_{model_key[1]}"
-                        else:
-                            grid_config["model_path"] = get_ckpt(model_key)
-                            model_key_str = model_key
-                        
-                        if test_set_name == "xl":
-                            grid_config["batch_size"] = 100
-                        
-                        if test_set_name == "qm9":
-                            grid_config["batch_size"] = 100
-                        
-                        if test_set_name == "icl":
-                            grid_config["batch_size"] = 64
+                for model_key in HP_SWEEP_GRID["model_path"]:
+                    for gen_config_name in HP_SWEEP_GRID["gen_config"]:
+                        for test_set_name in test_sets_to_run:
+                            grid_config = dict(base_inference_config)
 
-                        grid_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
-                        grid_config["test_set"] = test_set_name
-                        grid_config["run_name"] = f"{model_key_str}_{test_set_name}"
-                        
-                        job = executor.submit(run_inference, inference_config=grid_config)
-                        jobs.append(job)
+                            # Model path
+                            if isinstance(model_key, tuple):
+                                grid_config["model_path"] = get_ckpt(model_key[0], model_key[1])
+                                model_key_str = f"{model_key[0]}_{model_key[1]}"
+                            else:
+                                grid_config["model_path"] = get_ckpt(model_key)
+                                model_key_str = model_key
+
+                            # Gen config
+                            grid_config["gen_config"] = sampling_configs[gen_config_name]
+
+                            # Batch size adjustments
+                            if test_set_name == "xl":
+                                grid_config["batch_size"] = 100
+                            if test_set_name == "qm9":
+                                grid_config["batch_size"] = 100
+                            if test_set_name == "icl":
+                                grid_config["batch_size"] = 64
+
+                            grid_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
+                            grid_config["test_set"] = test_set_name
+                            grid_config["run_name"] = f"{model_key_str}_{gen_config_name}_{test_set_name}"
+
+                            job = executor.submit(run_inference, inference_config=grid_config)
+                            jobs.append(job)
     else:
         if executor is not None:
             with executor.batch():
