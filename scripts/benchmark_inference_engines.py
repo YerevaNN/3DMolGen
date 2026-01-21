@@ -61,6 +61,7 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
 
+import cloudpickle
 import torch
 import submitit
 
@@ -134,16 +135,21 @@ def benchmark_huggingface(
     tokenizer_path: str,
     max_new_tokens: int,
     batch_size: int,
-) -> EngineResult:
-    """Benchmark HuggingFace transformers (baseline)."""
+) -> tuple[EngineResult, list[str]]:
+    """Benchmark HuggingFace transformers (baseline).
+
+    Returns:
+        Tuple of (EngineResult, list of generated text strings)
+    """
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     print(f"[HuggingFace] Loading model from {model_path}")
 
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+    tokenizer.padding_side = "left"  # Required for decoder-only batched generation
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         device_map="cuda",
         attn_implementation="flash_attention_2",
     )
@@ -163,6 +169,7 @@ def benchmark_huggingface(
     # Benchmark
     print(f"[HuggingFace] Running {len(prompts)} prompts in batches of {batch_size}...")
     total_tokens = 0
+    all_generated_texts = []
     start = time.perf_counter()
 
     for i in range(0, len(prompts), batch_size):
@@ -179,9 +186,13 @@ def benchmark_huggingface(
             pad_token_id=tokenizer.pad_token_id,
         )
 
+        # Decode and collect generated texts
+        decoded_texts = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+        all_generated_texts.extend(decoded_texts)
+
         # Count generated tokens (exclude prompt)
         for j, output in enumerate(outputs):
-            prompt_len = inputs.input_ids[j].ne(tokenizer.pad_token_id).sum()
+            prompt_len = inputs.input_ids[j].ne(tokenizer.pad_token_id).sum().item()
             total_tokens += len(output) - prompt_len
 
     torch.cuda.synchronize()
@@ -192,7 +203,7 @@ def benchmark_huggingface(
     gc.collect()
     torch.cuda.empty_cache()
 
-    return EngineResult(
+    result = EngineResult(
         backend="huggingface",
         num_prompts=len(prompts),
         total_tokens=total_tokens,
@@ -200,6 +211,7 @@ def benchmark_huggingface(
         tokens_per_sec=total_tokens / elapsed,
         peak_memory_gb=peak_mem,
     )
+    return result, all_generated_texts
 
 
 def benchmark_vllm(
@@ -207,8 +219,12 @@ def benchmark_vllm(
     model_path: str,
     tokenizer_path: str,
     max_new_tokens: int,
-) -> EngineResult:
-    """Benchmark vLLM with prefix caching enabled."""
+) -> tuple[EngineResult, list[str]]:
+    """Benchmark vLLM with prefix caching enabled.
+
+    Returns:
+        Tuple of (EngineResult, list of generated text strings)
+    """
     try:
         from vllm import LLM, SamplingParams
     except ImportError:
@@ -220,7 +236,7 @@ def benchmark_vllm(
             tokens_per_sec=0,
             peak_memory_gb=0,
             error="vllm not installed. Run: pip install vllm",
-        )
+        ), []
 
     print(f"[vLLM] Loading model from {model_path}")
     print(f"[vLLM] Using tokenizer from {tokenizer_path}")
@@ -243,7 +259,7 @@ def benchmark_vllm(
             tokens_per_sec=0,
             peak_memory_gb=0,
             error=f"Failed to load model: {e}",
-        )
+        ), []
 
     sampling_params = SamplingParams(
         temperature=0.8,
@@ -264,6 +280,9 @@ def benchmark_vllm(
     torch.cuda.synchronize()
     elapsed = time.perf_counter() - start
 
+    # Extract generated texts (prompt + generated)
+    all_generated_texts = [o.prompt + o.outputs[0].text for o in outputs]
+
     total_tokens = sum(len(o.outputs[0].token_ids) for o in outputs)
     peak_mem = torch.cuda.max_memory_allocated() / 1e9
 
@@ -271,7 +290,7 @@ def benchmark_vllm(
     gc.collect()
     torch.cuda.empty_cache()
 
-    return EngineResult(
+    result = EngineResult(
         backend="vllm",
         num_prompts=len(prompts),
         total_tokens=total_tokens,
@@ -279,6 +298,7 @@ def benchmark_vllm(
         tokens_per_sec=total_tokens / elapsed,
         peak_memory_gb=peak_mem,
     )
+    return result, all_generated_texts
 
 
 def benchmark_sglang(
@@ -286,10 +306,15 @@ def benchmark_sglang(
     model_path: str,
     tokenizer_path: str,
     max_new_tokens: int,
-) -> EngineResult:
-    """Benchmark SGLang with RadixAttention (automatic prefix caching)."""
+) -> tuple[EngineResult, list[str]]:
+    """Benchmark SGLang with RadixAttention (automatic prefix caching).
+
+    Returns:
+        Tuple of (EngineResult, list of generated text strings)
+    """
     try:
         import sglang as sgl
+        from transformers import AutoTokenizer
     except ImportError:
         return EngineResult(
             backend="sglang",
@@ -299,19 +324,23 @@ def benchmark_sglang(
             tokens_per_sec=0,
             peak_memory_gb=0,
             error="sglang not installed. Run: pip install 'sglang[all]'",
-        )
+        ), []
 
     print(f"[SGLang] Loading model from {model_path}")
 
+    # Load tokenizer for accurate token counting
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+
     try:
-        # SGLang Runtime with RadixAttention enabled by default
-        runtime = sgl.Runtime(
+        # Use sgl.Engine for batch inference (not Runtime)
+        # Engine provides proper batch generation with RadixAttention
+        llm = sgl.Engine(
             model_path=model_path,
             tokenizer_path=tokenizer_path,
             tp_size=1,
             dtype="bfloat16",
+            attention_backend="triton",  # Avoid flashinfer JIT compile issues on A100
         )
-        sgl.set_default_backend(runtime)
     except Exception as e:
         return EngineResult(
             backend="sglang",
@@ -321,14 +350,17 @@ def benchmark_sglang(
             tokens_per_sec=0,
             peak_memory_gb=0,
             error=f"Failed to load model: {e}",
-        )
+        ), []
+
+    sampling_params = {
+        "temperature": 0.8,
+        "top_p": 0.95,
+        "max_new_tokens": max_new_tokens,
+    }
 
     # Warmup
     print("[SGLang] Warmup...")
-    _ = runtime.generate(
-        prompts[0],
-        sampling_params={"temperature": 0.8, "top_p": 0.95, "max_new_tokens": 50},
-    )
+    _ = llm.generate([prompts[0]], {"temperature": 0.8, "top_p": 0.95, "max_new_tokens": 50})
     torch.cuda.synchronize()
     torch.cuda.reset_peak_memory_stats()
 
@@ -336,27 +368,40 @@ def benchmark_sglang(
     print(f"[SGLang] Running {len(prompts)} prompts...")
     start = time.perf_counter()
 
-    outputs = runtime.generate(
-        prompts,
-        sampling_params={
-            "temperature": 0.8,
-            "top_p": 0.95,
-            "max_new_tokens": max_new_tokens,
-        },
-    )
+    outputs = llm.generate(prompts, sampling_params)
 
     torch.cuda.synchronize()
     elapsed = time.perf_counter() - start
 
-    # Count tokens
-    total_tokens = sum(len(o["meta_info"]["completion_tokens"]) for o in outputs)
+    # Count GENERATED tokens only (SGLang returns full text including prompt)
+    # Pre-compute prompt token lengths for subtraction
+    prompt_token_lens = [len(tokenizer.encode(p, add_special_tokens=False)) for p in prompts]
+
+    if len(outputs) != len(prompts):
+        print(f"[SGLang] WARNING: outputs ({len(outputs)}) != prompts ({len(prompts)})")
+
+    total_tokens = 0
+    all_generated_texts = []
+    for o, prompt_len in zip(outputs, prompt_token_lens):
+        if isinstance(o, str):
+            text = o
+        elif isinstance(o, dict) and "text" in o:
+            text = o["text"]
+        else:
+            text = str(o)
+        all_generated_texts.append(text)
+        output_tokens = len(tokenizer.encode(text, add_special_tokens=False))
+        # Subtract prompt tokens to get only generated tokens
+        generated_tokens = max(0, output_tokens - prompt_len)
+        total_tokens += generated_tokens
+
     peak_mem = torch.cuda.max_memory_allocated() / 1e9
 
-    runtime.shutdown()
+    llm.shutdown()
     gc.collect()
     torch.cuda.empty_cache()
 
-    return EngineResult(
+    result = EngineResult(
         backend="sglang",
         num_prompts=len(prompts),
         total_tokens=total_tokens,
@@ -364,6 +409,7 @@ def benchmark_sglang(
         tokens_per_sec=total_tokens / elapsed,
         peak_memory_gb=peak_mem,
     )
+    return result, all_generated_texts
 
 
 def print_results(results: list[EngineResult]) -> None:
@@ -431,18 +477,19 @@ def run_single_backend_job(
     else:
         os.environ.pop("PYTORCH_CUDA_ALLOC_CONF", None)
 
+    generations = []
     if backend == "huggingface":
-        result = benchmark_huggingface(
+        result, generations = benchmark_huggingface(
             prompts, model_path, tokenizer_path,
             max_new_tokens, batch_size,
         )
     elif backend == "vllm":
-        result = benchmark_vllm(
+        result, generations = benchmark_vllm(
             prompts, model_path, tokenizer_path,
             max_new_tokens,
         )
     elif backend == "sglang":
-        result = benchmark_sglang(
+        result, generations = benchmark_sglang(
             prompts, model_path, tokenizer_path,
             max_new_tokens,
         )
@@ -464,6 +511,13 @@ def run_single_backend_job(
     result_file.parent.mkdir(parents=True, exist_ok=True)
     with open(result_file, 'w') as f:
         json.dump(asdict(result), f, indent=2)
+
+    # Save generations to pickle file (same naming as inference.py)
+    if generations:
+        generations_file = result_file.with_suffix(".pickle")
+        with open(generations_file, 'wb') as f:
+            cloudpickle.dump(generations, f, protocol=4)
+        print(f"[{backend}] Saved {len(generations)} generations to {generations_file}")
 
     return result
 
@@ -585,8 +639,8 @@ def main():
     parser.add_argument("--test_set", default="distinct",
                         choices=["distinct", "clean", "xl", "qm9"],
                         help="Test set to use")
-    parser.add_argument("--model_alias", default="qw600_conf",
-                        help="Model alias from paths.yaml (e.g., qw600_conf, qw600_pre)")
+    parser.add_argument("--model_alias", default="qw600_conf_latest",
+                        help="Model alias from paths.yaml (e.g., qw600_conf_latest, qw600_conf, qw600_pre)")
     parser.add_argument("--model_step", default="1e",
                         help="Model checkpoint step key (e.g., 1e, 2e, 3e, 4e)")
     parser.add_argument("--device", default="local",
@@ -658,18 +712,19 @@ def main():
             print(f"Testing: {backend.upper()} | {expand_str}")
             print(f"{'=' * 60}")
 
+            generations = []
             if backend == "huggingface":
-                result = benchmark_huggingface(
+                result, generations = benchmark_huggingface(
                     prompts, model_path, tokenizer_path,
                     args.max_new_tokens, args.batch_size,
                 )
             elif backend == "vllm":
-                result = benchmark_vllm(
+                result, generations = benchmark_vllm(
                     prompts, model_path, tokenizer_path,
                     args.max_new_tokens,
                 )
             elif backend == "sglang":
-                result = benchmark_sglang(
+                result, generations = benchmark_sglang(
                     prompts, model_path, tokenizer_path,
                     args.max_new_tokens,
                 )
@@ -683,6 +738,13 @@ def main():
             result_file = output_dir / f"result_{backend}_{expand_suffix}.json"
             with open(result_file, 'w') as f:
                 json.dump(asdict(result), f, indent=2)
+
+            # Save generations to pickle file
+            if generations:
+                generations_file = output_dir / f"result_{backend}_{expand_suffix}.pickle"
+                with open(generations_file, 'wb') as f:
+                    cloudpickle.dump(generations, f, protocol=4)
+                print(f"[{backend}] Saved {len(generations)} generations to {generations_file}")
 
             if result.error:
                 print(f"[{backend}] Error: {result.error}")
