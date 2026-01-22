@@ -134,6 +134,23 @@ def _generate_run_name(description: str) -> str:
     return f"{stamp}-{run_hash}-{_sanitize_description(description) or 'run'}"
 
 
+def _resolve_shared_run_name(description: str) -> str:
+    override = os.environ.get("MOLGEN_RUN_NAME")
+    if override:
+        return override
+    run_id = (
+        os.environ.get("TORCHELASTIC_RUN_ID")
+        or os.environ.get("SLURM_JOB_ID")
+        or os.environ.get("JOB_ID")
+        or os.environ.get("RUN_ID")
+    )
+    if run_id:
+        stamp = datetime.now().strftime("%y%m%d-%H%M")
+        return f"{stamp}-{run_id}-{_sanitize_description(description) or 'run'}"
+    # Fallback: stable (but not unique) name across ranks.
+    return _sanitize_description(description) or "run"
+
+
 def _plan_run_layout(
     description: str,
     run_settings: MolGenRunConfig,
@@ -169,7 +186,7 @@ def _plan_run_layout(
     if run_settings.run_name:
         run_name = run_settings.run_name
     else:
-        run_name = _generate_run_name(description)
+        run_name = _resolve_shared_run_name(description)
         run_settings.run_name = run_name
 
     run_hash = _extract_run_hash_from_name(run_name) or "0000"

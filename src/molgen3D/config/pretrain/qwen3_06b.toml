@@ -1,13 +1,13 @@
 [job]
-description = "qwen3_06b_pre_5e_48effb_4kseq"
+description = "qwen3_06b_pre_4e_8e-4_paired"
 dump_folder = "pretrain_runs"
 print_config = true
 custom_config_module = "molgen3D.training.pretraining.config.custom_job_config"
 
 [molgen_run]
-init_mode = "scratch" # scratch | hf_pretrain | resume
+init_mode = "hf_pretrain" # scratch | hf_pretrain | resume
 tokenizer_tag = "tokenizers:qwen3_0.6b_custom"
-# base_model_tag = "base_paths:qwen3_0.6b_base_model"
+base_model_tag = "base_paths:qwen3_0.6b_base_model"
 # resume_run_path_tag = "ckpts:qwen3_06b/251230-1352-da5b-qwen3_06b_pre_5e_48effb_4kseq/step-90000"
 
 [model]
@@ -19,19 +19,22 @@ hf_assets_path = "src/molgen3D/training/tokenizers/Qwen3_tokenizer_custom"
 custom_import = "molgen3D.training.pretraining.torchtitan_model.qwen3_custom"
 
 [training]
+gc_freq = 1000
 seq_len = 4096
 local_batch_size = 6
 global_batch_size = 48
-steps = 150000
+steps = 80000
 max_norm = 1.0
 dtype = "bfloat16"
 dataset = "molgen_jsonl"
-dataset_path = "data:conformers_train"
+# dataset_path = "/home/chem-project/data/geom_cartesian_v4_grouped/processed_strings/train"
+dataset_path = "/home/chem-project/data/geom_cartesian_v3/processed_strings/train"
 
 [validation]
 enable = true
 dataset = "molgen_jsonl"
-dataset_path = "data:conformers_valid"
+# dataset_path = "/home/chem-project/data/geom_cartesian_v4_grouped/processed_strings/valid"
+dataset_path = "/home/chem-project/data/geom_cartesian_v3/processed_strings/valid"
 local_batch_size = 4
 seq_len = 4096
 freq = 500
@@ -41,18 +44,23 @@ num_val_molecules = 10
 numerical_validation_freq = 10000
 
 [molgen_data]
-train_path_key = "conformers_train"
-tokenizer_key = "qwen3_0.6b_origin"
+# train_path_key = "conformers_train"
+# train_path = "/home/chem-project/data/geom_cartesian_v4_grouped/processed_strings/train"
+train_path = "/home/chem-project/data/geom_cartesian_v3/processed_strings/train"
+tokenizer_key = "qwen3_0.6b_custom"
 min_emb_len = 0
 shuffle_lines = true
 infinite = true
 seed = 2025
-num_workers = 8
+num_workers = 24
 pin_memory = true
 drop_last = true
 persistent_workers = true
-prefetch_factor = 2
+prefetch_factor = 8
 lookahead_limit = 100
+shuffle_buffer_size = 128
+serialization_mode = "pairs"
+# serialization_mode = "isomer_units"
 
 [optimizer]
 name = "AdamW"
@@ -69,13 +77,13 @@ weight_decay = 0.1
 [wsds_scheduler]
 enable = true
 warmup_steps = 500
-checkpoints = [2000, 60000, 90000, 120000, 150000]
+checkpoints = [20000, 40000, 60000, 80000]
 lr_min = 0
 decay_frac = 0.1
 
 [checkpoint]
 enable = true
-interval = 200
+interval = 20000
 keep_latest_k = 4
 folder = "checkpoint"
 create_seed_checkpoint = false

@@ -76,6 +76,8 @@ class MolGenDataConfig:
     persistent_workers: Optional[bool] = None
     prefetch_factor: Optional[int] = None
     lookahead_limit: Optional[int] = None
+    shuffle_buffer_size: Optional[int] = None
+    serialization_mode: Literal["pairs", "isomer_units"] = "pairs"
 
     def __post_init__(self) -> None:
         """
@@ -100,6 +102,8 @@ class MolGenDataConfig:
         self.tokenizer_override = tokenizer_override
         if self.lookahead_limit is None:
             self.lookahead_limit = 100
+        if self.shuffle_buffer_size is None:
+            self.shuffle_buffer_size = 4096
 
 
 @dataclass
