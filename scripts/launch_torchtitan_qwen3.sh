@@ -22,8 +22,40 @@ export WANDB_CONFIG=${WANDB_CONFIG:-'{"run_type": "pretrain"}'}
 # export TORCH_FSDP_USE_DTENSOR=${TORCH_FSDP_USE_DTENSOR:-0}
 export TORCH_COMPILE=${TORCH_COMPILE:-0}
 export TOKENIZERS_PARALLELISM=${TOKENIZERS_PARALLELISM:-false}
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-2}
 
 TRAIN_TOML=${TRAIN_TOML:-src/molgen3D/config/pretrain/qwen3_06b.toml}
+
+# Prebuild validation .idx files to avoid stalls when validation starts.
+if [[ "${PREBUILD_VALIDATION_IDX:-1}" == "1" ]]; then
+  python3 - <<'PY' "$TRAIN_TOML"
+import pathlib
+import sys
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:
+    import tomli as tomllib  # Python <3.11
+
+toml_path = pathlib.Path(sys.argv[1]).resolve()
+repo_root = toml_path.parent.parent.parent
+sys.path.insert(0, str(repo_root))
+
+from molgen3D.config.paths import resolve_tag  # type: ignore
+from molgen3D.training.pretraining.dataprocessing.utils import expand_paths, build_line_index  # type: ignore
+
+cfg = toml_path.read_text()
+data = tomllib.loads(cfg)
+validation = data.get("validation", {}) or {}
+dataset_path = validation.get("dataset_path") or ""
+if not dataset_path:
+    raise SystemExit(0)
+if ":" in dataset_path:
+    dataset_path = str(resolve_tag(dataset_path))
+paths = expand_paths([dataset_path])
+for path in paths:
+    build_line_index(path)
+PY
+fi
 
 _DEFAULT_DESCRIPTION=$(python3 - <<'PY' "$TRAIN_TOML"
 import pathlib, re, sys
@@ -116,7 +148,18 @@ if not description_set:
 dst.write_text("\n".join(out_lines) + "\n")
 PY
 
-exec torchrun \
+# Optional CPU pinning for non-Slurm runs.
+CPU_PIN_CMD=()
+if [[ -z "${SLURM_JOB_ID:-}" ]]; then
+  if command -v taskset >/dev/null 2>&1; then
+    CPU_PIN_CPUS=${CPU_PIN_CPUS:-"0-63"}
+    CPU_PIN_CMD=(taskset -c "${CPU_PIN_CPUS}")
+  elif command -v numactl >/dev/null 2>&1; then
+    CPU_PIN_CMD=(numactl --cpunodebind=0 --membind=0)
+  fi
+fi
+
+exec "${CPU_PIN_CMD[@]}" torchrun \
   --nproc_per_node="${NGPU_PER_NODE}" \
   --master_port="${MASTER_PORT}" \
   --nnodes="${NNODES}" \
