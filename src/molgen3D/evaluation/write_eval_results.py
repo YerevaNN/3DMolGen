@@ -179,10 +179,10 @@ def save_evaluation_results(cov_df: pd.DataFrame, matching: Dict[str, float], ag
                             posebusters_full_results: Optional[pd.DataFrame], posebusters_summary: Optional[pd.DataFrame], pass_rate: Optional[float],
                             durations: Dict[str, float], rmsd_results: Dict[str, Dict[str, object]], missing: List[str], 
                             all_nan_keys: List[str], results_path: str, gen_stats: Dict[str, int], gt_stats: Dict[str, int],
-                            args) -> None:
+                            args, loqi_metrics: Optional[Dict] = None) -> None:
 
     os.makedirs(results_path, exist_ok=True)
-    save_covmat_results_txt(cov_df, matching, posebusters_summary, pass_rate, durations, missing, all_nan_keys, results_path, gen_stats, gt_stats)
+    save_covmat_results_txt(cov_df, matching, posebusters_summary, pass_rate, durations, missing, all_nan_keys, results_path, gen_stats, gt_stats, loqi_metrics)
      
      # Save aggregated metrics (Coverage/Precision/Matching statistics) as pickle file
     rmsd_pickle_path = os.path.join(results_path, "rmsd_matrix.pickle")
@@ -246,9 +246,25 @@ def save_evaluation_results(cov_df: pd.DataFrame, matching: Dict[str, float], ag
             pickle.dump(posebusters_full_results, f)
         print(f"Saved full PoseBusters results to: {posebusters_pickle_path}")
 
+def write_loqi_section(f, loqi_metrics: Optional[Dict]) -> None:
+    """Write LoQI evaluation section."""
+    if loqi_metrics is None:
+        return
+
+    write_section_header(f, "LOQI (AIMNET2) EVALUATION")
+    for k, v in loqi_metrics.items():
+        if k == "energies":
+            continue
+        if isinstance(v, float):
+            f.write(f"{k}: {format_float(v, 4)}\n")
+        else:
+            f.write(f"{k}: {v}\n")
+    f.write("\n")
+
 def save_covmat_results_txt(cov_df: pd.DataFrame, matching: Dict[str, float], posebusters_summary: Optional[pd.DataFrame],
                             pass_rate: Optional[float], durations: Dict[str, float], missing: List[str],
-                            all_nan_keys: List[str], results_path: str, gen_stats: Dict[str, int], gt_stats: Dict[str, int]) -> None:
+                            all_nan_keys: List[str], results_path: str, gen_stats: Dict[str, int], gt_stats: Dict[str, int],
+                            loqi_metrics: Optional[Dict] = None) -> None:
     """Save comprehensive evaluation results to text file."""
     idx075 = int(np.argmin(np.abs(DEFAULT_THRESHOLDS - THRESHOLD_075)))
     cov_row_075 = cov_df.iloc[idx075]
@@ -262,4 +278,5 @@ def save_covmat_results_txt(cov_df: pd.DataFrame, matching: Dict[str, float], po
         write_all_nan_section(f, all_nan_keys)
         write_generation_info(f, gen_stats)
         write_posebusters_section(f, posebusters_summary, pass_rate)
+        write_loqi_section(f, loqi_metrics)
         write_detailed_logging(f, durations, missing, all_nan_keys, gen_stats)

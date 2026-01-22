@@ -213,6 +213,11 @@ def run_inference(inference_config: dict):
         for geom_smiles, data in test_data.items():
             for sub_smiles, count in data["sub_smiles_counts"].items():
                 mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * count * 2)
+    elif test_set == "loqi":
+        logger.info("Processing as loqi dataset")
+        for geom_smiles, data in test_data.items():
+            for sub_smiles, count in data["sub_smiles_counts"].items():
+                mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")])
     logger.info(f"mols_list length: {len(mols_list)}, mols_list_distinct: {len(set(mols_list))}, mols_list: {mols_list[:10]}")
 
     mols_list.sort(key=lambda x: len(x[0]))
@@ -287,7 +292,7 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         param_grid = {
             # "model_path": [("m380_conf_v2", "4e")],
             # "model_path": [("m600_qwen_pre", "4e"), ("m600_qwen_scr", "4e")],
-            "model_path": [("qwen3_grpo_251226_1635", "4000")],
+            "model_path": [("m600_qwen_pre_4seq_binned", "3e")],
             # , ("qwen3_grpo_251224_1839", "2000"), ("qwen3_grpo_251228_1438", "4000"), ("qwen3_grpo_251228_1438", "2000")],
             # "model_path": [("m380_conf_v2", "1e")],
         }

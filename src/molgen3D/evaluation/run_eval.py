@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+import torch
 from tqdm import tqdm
 
 from molgen3D.config.paths import get_base_path, get_data_path
@@ -20,6 +21,7 @@ from molgen3D.evaluation.utils import (
     find_generation_pickles_path,
 )
 from molgen3D.evaluation.write_eval_results import save_evaluation_results
+from molgen3D.evaluation.aimnet2_metrics import MoleculeAIMNet2Metrics
 
 def _compute_key_matrix(key: str, true_confs: List, gen_mols: List, use_alignmol: bool) -> Tuple[str, Dict[str, object], bool]:
     n_true = len(true_confs)
@@ -207,6 +209,55 @@ def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
     agg = aggregate_metrics(rmsd_results, DEFAULT_THRESHOLDS)
     cov_df, matching = summarize_metrics(agg)
     
+    # LoQI type evaluations with energy calculation
+    loqi_metrics = None
+    if args.test_set == "loqi":
+        print("\nStarting LoQI type evaluations (AIMNet2 energy and geometry)...")
+        t_loqi_start = time.time()
+        
+        aimnet2_model_path = get_data_path("aimnet2_model")
+        print(f"Using AIMNet2 model: {aimnet2_model_path}")
+        
+        calculator = MoleculeAIMNet2Metrics(
+            model_path=str(aimnet2_model_path),
+            device="cuda" if torch.cuda.is_available() else "cpu",
+            opt_metrics=True,
+            batchsize=args.batch_size
+        )
+        
+        # Collect all generated molecules for AIMNet2
+        all_gen_mols = []
+        for smi in gt_dict.keys():
+            mols = processed_gen_data.get(smi, [])
+            all_gen_mols.extend(mols)
+            
+        if all_gen_mols:
+            print(f"Calculating energy and optimizing {len(all_gen_mols)} molecules...")
+            # For loqi, we don't necessarily have reference molecules in the same order
+            # but we can pass them if they exist in gt_dict
+            ref_mols = []
+            for smi in gt_dict.keys():
+                if smi in processed_gen_data and processed_gen_data[smi]:
+                    # Assuming 1:1 mapping for loqi as requested
+                    if gt_dict[smi]["confs"]:
+                        ref_mols.append(gt_dict[smi]["confs"][0])
+            
+            if len(ref_mols) == len(all_gen_mols):
+                loqi_metrics, valid_mols, opt_mols, res_energy = calculator(
+                    all_gen_mols, reference_molecules=ref_mols, return_molecules=True
+                )
+            else:
+                loqi_metrics, valid_mols, opt_mols, res_energy = calculator(
+                    all_gen_mols, return_molecules=True
+                )
+            
+            print(f"LoQI evaluations completed in {time.time() - t_loqi_start:.2f} seconds")
+            if loqi_metrics:
+                print(f"Mean relative energy: {loqi_metrics.get('mean_relative_energy', 'N/A')}")
+                print(f"Preserved topology: {loqi_metrics.get('preserved_topology', 'N/A')}")
+        else:
+            print("No generated molecules found for LoQI evaluation")
+
     posebusters_duration = 0.0
     posebusters_summary = None 
     posebusters_by_smiles = None
@@ -240,7 +291,8 @@ def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
         results_path=results_path,
         gen_stats=gen_stats,
         gt_stats=gt_stats,
-        args=args
+        args=args,
+        loqi_metrics=loqi_metrics
     )
     return True
 
@@ -315,7 +367,7 @@ def main() -> None:
     parser.add_argument("--num-workers", type=int, default=10, help="Number of workers for evaluation")
     parser.add_argument("--max-recent", type=int, default=3, help="Max recent missing directories to evaluate")
     parser.add_argument("--specific-dir", type=str, default=None, help="Specific directory to evaluate")
-    parser.add_argument("--test_set", type=str, default="distinct", choices=["clean", "distinct", "xl", "qm9"], help="Test set to evaluate")
+    parser.add_argument("--test_set", type=str, default="distinct", choices=["clean", "distinct", "xl", "qm9", "loqi"], help="Test set to evaluate")
     args = parser.parse_args()
     
     run_directory_mode(args)
