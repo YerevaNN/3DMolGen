@@ -491,7 +491,7 @@ def coords_rmsd(mol_a, mol_b):
     rmsd_rdkit = AllChem.GetBestRMS(mol_a, mol_b)
     return min(math.sqrt(sse / n), rmsd_rdkit)
 
-def get_bins_for_coords(ranges, bin_size=0.05):
+def get_bins_for_coords(ranges, bin_size=0.104):
     """Get bins for coordinates based on the ranges and bin size."""
     bins = []
     for start, end in ranges:
@@ -537,7 +537,7 @@ def bins_to_coords(bin_indices, bins, use_bin_center=False):
 
 
 
-def encode_cartesian_binned(mol, bin_size=0.05, ranges=None):
+def encode_cartesian_binned(mol, bin_size, ranges=None):
     """
     Serialize a 3D RDKit Mol into an enriched text representation where
     the Cartesian coordinates are replaced by bin indices.
@@ -572,9 +572,8 @@ def encode_cartesian_binned(mol, bin_size=0.05, ranges=None):
 
     tokens = tokenize_smiles(smiles, expected_atom_tokens=expected_atom_tokens)
 
-    # Build bins per axis: use fixed global range [-9, 9] unless explicitly provided.
     if ranges is None:
-        ranges = [(-21.0, 21.0), (-21.0, 21.0), (-21.0, 21.0)]
+        ranges = [(-13.0, 13.0), (-13.0, 13.0), (-13.0, 13.0)]
     if len(ranges) != 3:
         raise ValueError("ranges must be a sequence of three (start, end) tuples.")
     bins = get_bins_for_coords(ranges, bin_size=bin_size)
@@ -622,7 +621,7 @@ def encode_cartesian_binned(mol, bin_size=0.05, ranges=None):
         )
 
     enriched_string = "".join(out_parts)
-    return enriched_string, smiles, bins, ranges
+    return enriched_string, smiles
 
 
 def decode_cartesian_binned(enriched_string, bins, use_bin_center=True):

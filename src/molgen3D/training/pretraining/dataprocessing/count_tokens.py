@@ -943,6 +943,36 @@ def _tokenizer_signature(path: Path) -> Optional[str]:
     return hasher.hexdigest()
 
 
+    for batch in loader:
+        inputs = _extract_inputs(batch)
+        sample = inputs[0]
+        token_ids = sample.tolist()
+        non_pad_ids = [tid for tid in token_ids if pad_id is None or tid != pad_id][:limit]
+        token_strs = tokenizer.convert_ids_to_tokens(non_pad_ids)
+        token_chars = [
+            tokenizer.convert_tokens_to_string([tok]) if tok is not None else ""
+            for tok in token_strs
+        ]
+        decoded = tokenizer.decode(non_pad_ids, skip_special_tokens=False)
+
+        lines: List[str] = []
+        lines.append("\nONE-TIME SAMPLE (post-previews, pads removed, limit 1000)")
+        lines.append(f"  tokenizer: {target_alias}")
+        lines.append(f"  file: {first_file}")
+        lines.append(f"  decoded: {decoded}")
+        lines.append(f"encoded: {token_ids}")
+        lines.append("  index  id      token -> chars")
+        for i, (tid, tok, chars) in enumerate(zip(non_pad_ids, token_strs, token_chars)):
+            lines.append(f"  {i:04d}  {tid:>6}  {repr(tok):>20} -> {repr(chars)}")
+
+        # Print to stdout and append to summary file for later inspection.
+        print("\n".join(lines))
+        try:
+            with SUMMARY_PATH.open("a", encoding="utf-8") as fh:
+                fh.write("\n".join(lines) + "\n")
+        except Exception as exc:
+            print(f"Failed to write summary to {SUMMARY_PATH}: {exc}")
+        break
 
 
 def summarize_dataset(
@@ -1694,10 +1724,11 @@ def dump_json_summary(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Simplified MolGen3D token counting tool")
+    parser.add_argument("--dataset", type=str, default="conformers_train")
     parser.add_argument("--seq-len", type=int, default=2048)
     parser.add_argument("--sample-lines", type=int, default=1000)
     parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--tokenizers", nargs="+", default=["qwen3_0.6b_origin", "qwen3_0.6b_custom"])
+    parser.add_argument("--tokenizers", nargs="+", default=["qwen3_0.6b_origin", "qwen3_0.6b_custom", "qwen3_0.6b_binned"])
     parser.add_argument("--skip-validation", action="store_true")
     parser.add_argument("--shuffle", action="store_true", help="Sample random lines via dataloader shuffle")
     parser.add_argument("--seed", type=int, default=0)
@@ -1766,6 +1797,8 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    train_path = str(get_data_path(args.dataset))
+    valid_path = str(get_data_path(args.dataset.replace("train", "valid")))
     train_path = (
         args.train_path.strip()
         if args.train_path.strip()

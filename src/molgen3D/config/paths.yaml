@@ -49,9 +49,13 @@ ckpts:
 
 data:
   clean_smi: "clean_smi.pickle"
-  distinct_smi: "distinct_smi.pickle"
+  distinct_smi: "tmp/distinct_smi_filtered_13.pickle"
   xl_smi: "xl_smi.pickle"
   qm9_smi: "qm9_smi.pickle"
+  icl_5_smi: "icl_5_smi.pickle"
+  icl_10_smi: "icl_10_smi.pickle"
+  icl_20_smi: "icl_20_smi.pickle"
+
 
   pretokenized_prompts: "3DMolGen_data/pretokenized_prompts.json"
   validation_pickle: "3DMolGen_data/valid_set.pickle"
@@ -79,11 +83,33 @@ data:
   conformers_test:
     - "geom_cartesian_v3/processed_strings/test"
     - "geom_processed/geom_cartesian_v3/processed_strings/test"
+
+
+  binned_conformers_train:
+    - "3DMolGen_data/binned_all/processed_strings/train"
+    - "binned_all/processed_strings/train"
+  binned_conformers_valid:
+    - "3DMolGen_data/binned_all/processed_strings/valid"
+    - "binned_all/processed_strings/valid"
+  binned_conformers_test:
+    - "3DMolGen_data/binned_all/processed_strings/test"
+    - "binned_all/processed_strings/test"
+
+  filtered_conformers_train: 
+    - "3DMolGen_data/binned_filtered/processed_strings/train"
+    - "binned_filtered/processed_strings/train"
+  filtered_conformers_valid:
+    - "3DMolGen_data/binned_filtered/processed_strings/valid"
+    - "binned_filtered/processed_strings/valid"
+  filtered_conformers_test:
+    - "3DMolGen_data/binned_filtered/processed_strings/test"
+    - "binned_filtered/processed_strings/test"
+
 tokenizers:
   llama3_chem_v1: "src/molgen3D/training/tokenizers/Llama-3.2-chem-1B-v1"
   qwen3_0.6b_custom: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_custom"
   qwen3_0.6b_origin: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_original"
-  
+  qwen3_0.6b_binned: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_binned"
 
 models:
   # ---------- BASE MODELS ----------
@@ -109,6 +135,14 @@ models:
       "1e": "step-30000-hf"
       "2e": "step-60000-hf"
       "3e": "step-90000-hf"
+    
+  m600_qwen_pre_4seq_binned:
+    root: "qwen3_06b/260118-2206-3fb4-qwen3_06b_pre_5e_48effb_4kseq"
+    steps:
+      "1e": "step-4200-hf"
+      "2e": "step-8400-hf"
+      "3e": "step-12600-hf"
+      "4e": "step-16800-hf"
 
   m380_conf:
     root: "Llama-3.2-380M_conformers"
@@ -186,6 +220,31 @@ models:
     root: "Qwen3-0.6B/823a61f69f184d1d888785e4"
     steps:
       "1e": "step-13000"
+
+  qw600_pre_binned:
+    root: "qwen3_06b/260105-1245-46b0-qwen3_06b_pre_4e_96effb_4kseq_binned"
+    steps:
+      "1e": "step-7300-hf"
+      "2e": "step-14600-hf"
+      "3e": "step-21900-hf"
+      "4e": "step-29200-hf"
+  
+  qw600_pre_binned_filtered:
+    root: "qwen3_06b/260110-0215-04c0-qwen3_06b_pre_5e_48effb_4kseq"
+    steps:
+      "1e": "step-4200-hf"
+      "2e": "step-8400-hf"
+      "3e": "step-12600-hf"
+      "4e": "step-16800-hf"
+
+  qw600_pre_binned_filtered_v2:
+    root: "qwen3_06b/260112-1912-1a69-qwen3_06b_pre_5e_48effb_4kseq"
+    steps:
+      "1e": "step-8100-hf"
+      "2e": "step-16200-hf"
+      "3e": "step-24300-hf"
+      "4e": "step-32400-hf"
+      "5e": "step-40500-hf"
 
   # ---------- GRPO / FINETUNED MODELS (same structure) ----------
 
