@@ -2,35 +2,29 @@
 """
 Inspect a TorchTitan Qwen3-0.6B DCP checkpoint on CPU.
 
-Assumptions (hard-coded for your setup):
-
-  BASE_VOCAB    = 151_669  # original Qwen3 tokenizer vocab size
-  PADDED_VOCAB  = 151_936  # embedding rows (multiple of 128)
-  NUM_NEW_TOKENS= 4        # custom tokens
-
 Usage:
   python scripts/inspect_qwen3_dcp.py /path/to/step-200
+  python scripts/inspect_qwen3_dcp.py --ckpt_path /path/to/step-200
   python scripts/inspect_qwen3_dcp.py /path/to/step-200/__0_0.distcp
+  python scripts/inspect_qwen3_dcp.py /path/to/step-200 --tokenizer-path /path/to/tokenizer
+
+Example (this project):
+  python scripts/inspect_qwen3_dcp.py \
+    --ckpt_path /home/chem-project/checkpoints/qwen3_06b/260122-0843-3a41-qwen3_06b_pre_4e_8e-4_binned_grouped/step-34000 \
+    --tokenizer-path /home/chem-project/mb-3dmolgen/3DMolGen/src/molgen3D/training/tokenizers/Qwen3_tokenizer_binned
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Dict, Tuple, Optional
 
 import torch
 import torch.nn as nn
 import torch.distributed.checkpoint as dcp
-
-# ---- Qwen3 vocab constants (hard-coded for your setup) ----
-
-BASE_VOCAB: int = 151_669
-PADDED_VOCAB: int = 151_936
-NUM_NEW_TOKENS: int = 4
-
-EXTRA_START: int = BASE_VOCAB
-EXTRA_END: int = BASE_VOCAB + NUM_NEW_TOKENS  # 151673
+from transformers import AutoTokenizer
 
 # ---- Candidate tensor keys ----
 
@@ -126,7 +120,104 @@ def load_embed_and_head_from_dcp(
     return state_dict[embed_key], state_dict[head_key], embed_key, head_key
 
 
-def sanity_check_embeddings(embed: torch.Tensor, head: torch.Tensor) -> None:
+def _maybe_get_config_json(ckpt_dir: Path) -> Optional[Dict[str, object]]:
+    candidates = [ckpt_dir / "config.json", ckpt_dir.parent / "config.json"]
+    for path in candidates:
+        if path.is_file():
+            try:
+                with path.open("r", encoding="utf-8") as f:
+                    return json.load(f)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"Failed to parse config.json at {path}: {exc}") from exc
+    return None
+
+
+def _nested_get(config: Dict[str, object], *keys: str) -> Optional[object]:
+    cursor: object = config
+    for key in keys:
+        if not isinstance(cursor, dict):
+            return None
+        cursor = cursor.get(key)
+    return cursor
+
+
+def _looks_like_tokenizer_dir(path: Path) -> bool:
+    if not path.exists():
+        return False
+    expected_files = [
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.json",
+        "merges.txt",
+        "sentencepiece.bpe.model",
+    ]
+    return any((path / name).exists() for name in expected_files)
+
+
+def resolve_tokenizer_path(ckpt_dir: Path, tokenizer_path: Optional[str]) -> Path:
+    if tokenizer_path:
+        resolved = Path(tokenizer_path)
+        if not _looks_like_tokenizer_dir(resolved):
+            raise FileNotFoundError(f"Tokenizer path does not look valid: {resolved}")
+        return resolved
+
+    config = _maybe_get_config_json(ckpt_dir)
+    if config is None:
+        raise RuntimeError(
+            "No tokenizer path provided and config.json was not found in the "
+            "checkpoint directory or its parent."
+        )
+
+    candidate_values = [
+        _nested_get(config, "model", "tokenizer_path"),
+        _nested_get(config, "model", "hf_assets_path"),
+        _nested_get(config, "molgen_data", "tokenizer_override"),
+    ]
+    for value in candidate_values:
+        if isinstance(value, str):
+            candidate = Path(value)
+            if _looks_like_tokenizer_dir(candidate):
+                return candidate
+
+    raise RuntimeError(
+        "Unable to infer tokenizer path from config.json. "
+        "Pass --tokenizer-path explicitly."
+    )
+
+
+def load_tokenizer(tokenizer_path: Path):
+    return AutoTokenizer.from_pretrained(
+        str(tokenizer_path),
+        trust_remote_code=True,
+        local_files_only=True,
+    )
+
+
+def get_tokenizer_vocab_info(tokenizer) -> Tuple[int, int, int]:
+    total_vocab = len(tokenizer)
+    base_vocab = getattr(tokenizer, "vocab_size", None)
+    added_vocab_count = None
+    if hasattr(tokenizer, "get_added_vocab"):
+        added_vocab_count = len(tokenizer.get_added_vocab())
+
+    if base_vocab is None:
+        base_vocab = total_vocab - (added_vocab_count or 0)
+
+    if base_vocab > total_vocab:
+        base_vocab = total_vocab
+
+    num_new_tokens = added_vocab_count if added_vocab_count is not None else max(total_vocab - base_vocab, 0)
+    return base_vocab, num_new_tokens, total_vocab
+
+
+def sanity_check_embeddings(
+    embed: torch.Tensor,
+    head: torch.Tensor,
+    base_vocab: int,
+    num_new_tokens: int,
+    total_vocab: int,
+    tokenizer_path: Path,
+) -> None:
     """
     Sanity checks for a "normal" Qwen3 checkpoint with padded vocab + 4 custom tokens.
 
@@ -142,14 +233,23 @@ def sanity_check_embeddings(embed: torch.Tensor, head: torch.Tensor) -> None:
     emb_vocab, emb_dim = embed.shape
     head_vocab, head_dim = head.shape
 
-    # Shape checks
-    if emb_vocab != PADDED_VOCAB:
+    print("\n=== Tokenizer info ===")
+    print(f"Tokenizer path      : {tokenizer_path}")
+    print(f"Tokenizer base vocab: {base_vocab}")
+    print(f"Tokenizer new tokens: {num_new_tokens}")
+    print(f"Tokenizer total     : {total_vocab}")
+
+    extra_start = base_vocab
+    extra_end = base_vocab + num_new_tokens
+    tag_token_count = min(4, num_new_tokens)
+
+    if total_vocab > emb_vocab:
         print(
-            f"[ERROR] emb_vocab ({emb_vocab}) != PADDED_VOCAB ({PADDED_VOCAB}); "
-            "this violates the Qwen3 padded vocab assumption."
+            f"[ERROR] Tokenizer total vocab ({total_vocab}) exceeds embedding rows "
+            f"({emb_vocab})."
         )
     else:
-        print(f"[CHECK] emb_vocab matches padded vocab: {emb_vocab}")
+        print(f"[CHECK] Embedding rows cover tokenizer vocab: {emb_vocab} >= {total_vocab}")
 
     if emb_vocab != head_vocab or emb_dim != head_dim:
         print(
@@ -173,19 +273,33 @@ def sanity_check_embeddings(embed: torch.Tensor, head: torch.Tensor) -> None:
         print("[CHECK] All embedding weights are finite.")
 
     # Slice blocks
-    base_slice = embed[0:BASE_VOCAB]
-    extra_slice = embed[EXTRA_START:EXTRA_END]
-    tail_slice = embed[EXTRA_END:PADDED_VOCAB]
+    base_end = min(base_vocab, emb_vocab)
+    extra_end = min(extra_end, emb_vocab)
+    base_slice = embed[0:base_end]
+    extra_slice = embed[base_end:extra_end]
+    tag_end = min(base_end + tag_token_count, extra_end)
+    tag_slice = embed[base_end:tag_end]
+    new_extra_slice = embed[tag_end:extra_end]
+    tail_slice = embed[extra_end:emb_vocab]
 
-    print("\n=== Vocab layout (hard-coded expectations) ===")
-    print(f"Base vocab rows      : [0, {BASE_VOCAB})  -> shape {tuple(base_slice.shape)}")
-    print(f"Custom token rows    : [{EXTRA_START}, {EXTRA_END}) -> shape {tuple(extra_slice.shape)}")
-    print(f"Tail padded rows     : [{EXTRA_END}, {PADDED_VOCAB}) -> shape {tuple(tail_slice.shape)}")
+    print("\n=== Vocab layout (tokenizer-based) ===")
+    print(f"Base vocab rows      : [0, {base_vocab})  -> shape {tuple(base_slice.shape)}")
+    print(
+        "Tag token rows       : "
+        f"[{base_vocab}, {base_vocab + tag_token_count}) -> shape {tuple(tag_slice.shape)}"
+    )
+    print(
+        "Other new token rows : "
+        f"[{base_vocab + tag_token_count}, {base_vocab + num_new_tokens}) -> shape {tuple(new_extra_slice.shape)}"
+    )
+    print(f"Tail padded rows     : [{extra_end}, {emb_vocab}) -> shape {tuple(tail_slice.shape)}")
 
     # Extra rows finiteness & nonzero check
     print("\n=== Extra-row sanity checks ===")
-    if extra_slice.numel() == 0:
-        print("[ERROR] Extra slice is empty; NUM_NEW_TOKENS or BASE_VOCAB is wrong.")
+    if num_new_tokens == 0:
+        print("[INFO] No added tokens detected; skipping extra-row checks.")
+    elif extra_slice.numel() == 0:
+        print("[ERROR] Extra slice is empty; check tokenizer vocab alignment.")
     else:
         if not torch.isfinite(extra_slice).all():
             print("[ERROR] Extra embedding rows contain non-finite values (NaN / Inf).")
@@ -209,6 +323,8 @@ def sanity_check_embeddings(embed: torch.Tensor, head: torch.Tensor) -> None:
     print("\n=== Row-usage snapshot (L2 norms) ===")
     with torch.no_grad():
         base_norms = base_slice.norm(dim=1)
+        tag_norms = tag_slice.norm(dim=1) if tag_slice.numel() > 0 else torch.tensor([])
+        new_extra_norms = new_extra_slice.norm(dim=1) if new_extra_slice.numel() > 0 else torch.tensor([])
         extra_norms = extra_slice.norm(dim=1) if extra_slice.numel() > 0 else torch.tensor([])
         tail_norms = tail_slice.norm(dim=1) if tail_slice.numel() > 0 else torch.tensor([])
 
@@ -229,8 +345,10 @@ def sanity_check_embeddings(embed: torch.Tensor, head: torch.Tensor) -> None:
         )
 
     summarize_block("Base block   ", base_norms)
-    summarize_block("Extra block  ", extra_norms)
-    summarize_block("Tail padded  ", tail_norms)
+    summarize_block("Tag tokens  ", tag_norms)
+    summarize_block("Other new   ", new_extra_norms)
+    summarize_block("Extra total ", extra_norms)
+    summarize_block("Tail padded ", tail_norms)
 
 
 def run_tiny_forward(
@@ -281,27 +399,57 @@ def main():
     )
     parser.add_argument(
         "ckpt_path",
+        nargs="?",
         type=str,
         help=(
             "Path to step directory (e.g. .../step-200) or a __0_0.distcp shard; "
             "the script will normalize to the step directory."
         ),
     )
+    parser.add_argument(
+        "--ckpt_path",
+        dest="ckpt_path_flag",
+        type=str,
+        default=None,
+        help="Same as positional ckpt_path; provided for convenience.",
+    )
+    parser.add_argument(
+        "--tokenizer-path",
+        "--tokenizer_path",
+        dest="tokenizer_path",
+        type=str,
+        default=None,
+        help="Path to the tokenizer directory; if omitted, inferred from config.json.",
+    )
     args = parser.parse_args()
 
-    p = Path(args.ckpt_path)
+    ckpt_path = args.ckpt_path_flag or args.ckpt_path
+    if ckpt_path is None:
+        raise SystemExit("Missing ckpt_path. Provide a positional path or --ckpt_path.")
+
+    p = Path(ckpt_path)
     if p.is_file() and p.name.endswith(".distcp"):
         ckpt_dir = p.parent
     else:
         ckpt_dir = p
 
     embed, head, embed_key, head_key = load_embed_and_head_from_dcp(ckpt_dir)
+    tokenizer_path = resolve_tokenizer_path(ckpt_dir, args.tokenizer_path)
+    tokenizer = load_tokenizer(tokenizer_path)
+    base_vocab, num_new_tokens, total_vocab = get_tokenizer_vocab_info(tokenizer)
 
     print("\n=== Keys used ===")
     print(f"Embedding key: {embed_key}")
     print(f"LM head key : {head_key}")
 
-    sanity_check_embeddings(embed, head)
+    sanity_check_embeddings(
+        embed,
+        head,
+        base_vocab=base_vocab,
+        num_new_tokens=num_new_tokens,
+        total_vocab=total_vocab,
+        tokenizer_path=tokenizer_path,
+    )
     run_tiny_forward(embed, head, vocab_limit=1024)
 
 
