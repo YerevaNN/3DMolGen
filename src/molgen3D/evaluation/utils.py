@@ -48,6 +48,7 @@ def create_slurm_executor(
     job_name: str = "test_run",
     memory_gb: int = 80,
     timeout_min: int = 3 * 24 * 60, # 3 days
+    slurm_additional_parameters: Optional[Dict] = None,
 ) -> submitit.AutoExecutor:
     if submitit is None:
         raise RuntimeError("submitit is not available")
@@ -66,8 +67,14 @@ def create_slurm_executor(
         gpus_per_node=num_gpus,
         mem_gb=memory_gb,
         nodes=1,
-        slurm_additional_parameters={"partition": device},
     )
+
+    # Set partition
+    slurm_params = {"partition": device}
+    if slurm_additional_parameters:
+        slurm_params.update(slurm_additional_parameters)
+
+    params["slurm_additional_parameters"] = slurm_params
 
     executor.update_parameters(**params)
     return executor

@@ -56,7 +56,7 @@ def load_model_tokenizer(
     model_path,
     tokenizer_path,
     torch_dtype="bfloat16",
-    attention_imp="flash_attention_2",
+    attention_imp="sdpa",
     device="auto",
 ):
     tokenizer = AutoTokenizer.from_pretrained(
@@ -279,7 +279,7 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         "model_path": get_ckpt("qw600_pre","4e"),
         "tokenizer_path": get_tokenizer_path("qwen3_0.6b_custom"),
         "torch_dtype": "bfloat16",
-        "batch_size": 256,
+        "batch_size": 128,
         "num_gens": gen_num_codes["2k_per_conf"],
         "gen_config": sampling_configs["top_p_sampling1"],
         "device": "cuda",
@@ -292,7 +292,7 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         param_grid = {
             # "model_path": [("m380_conf_v2", "4e")],
             # "model_path": [("m600_qwen_pre", "4e"), ("m600_qwen_scr", "4e")],
-            "model_path": [("m600_qwen_pre_4seq_binned", "3e")],
+            "model_path": [("m600_qwen_pre", "4e")],
             # , ("qwen3_grpo_251224_1839", "2000"), ("qwen3_grpo_251228_1438", "4000"), ("qwen3_grpo_251228_1438", "2000")],
             # "model_path": [("m380_conf_v2", "1e")],
         }

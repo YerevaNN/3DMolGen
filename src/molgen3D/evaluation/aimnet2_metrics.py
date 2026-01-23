@@ -340,11 +340,17 @@ class MoleculeAIMNet2Metrics:
                 ref_energy[idxs] = e
 
             ev2kcalpermol = 23.060547830619026
-            metrics = {
-                "energies": energy.cpu().numpy().tolist(),
-                "mean_relative_energy": ((energy - ref_energy) * ev2kcalpermol).mean().item(),
-                "median_relative_energy": torch.median((energy - ref_energy) * ev2kcalpermol).item(),
-            }
+            rel_energy = (energy - ref_energy) * ev2kcalpermol
+            
+            # Filter NaNs for initial metrics
+            rel_energy_valid = rel_energy[~torch.isnan(rel_energy)]
+            
+            metrics.update({
+                "mean_relative_energy": rel_energy_valid.mean().item() if rel_energy_valid.numel() > 0 else 0.0,
+                "median_relative_energy": torch.median(rel_energy_valid).item() if rel_energy_valid.numel() > 0 else 0.0,
+                "within_01kcal_gt": (rel_energy_valid < 0.1).float().mean().item() if rel_energy_valid.numel() > 0 else 0.0,
+                "better_than_gt": (rel_energy_valid < 0.0).float().mean().item() if rel_energy_valid.numel() > 0 else 0.0,
+            })
 
         if self.opt_metrics:
             start_time = time.time()
@@ -430,26 +436,35 @@ class MoleculeAIMNet2Metrics:
         angle_diff = compute_distance(pairs, 2, compute_bond_angles_diff)
         torsion_diff = compute_distance(pairs, 3, compute_torsion_angles_diff)
 
-        topology_mask = torch.tensor([check_topology_wrapper(mol) for mol in opt_molecules], dtype=torch.bool)
+        topology_mask = torch.tensor([check_topology_wrapper(mol) for mol in opt_molecules], dtype=torch.bool, device=self.device)
         energy_drop = (energy - opt_energy)[topology_mask] * ev2kcalpermol
+        
+        # Filter NaNs for optimization metrics
+        energy_drop_valid = energy_drop[~torch.isnan(energy_drop)]
 
         metrics.update({
             "opt_converged": opt_converged.float().mean().item(),
-            "opt_steps": opt_n_steps[converged].float().mean().item(),
+            "opt_steps": opt_n_steps[opt_converged.bool()].float().mean().item() if opt_converged.any() else 0.0,
             "preserved_topology": topology_mask.float().mean().item(),
-            "opt_avg_energy_drop": energy_drop.mean().item(),
-            "opt_median_energy_drop": torch.median(energy_drop).item(),
+            "topology_mask": topology_mask,
+            "opt_avg_energy_drop": energy_drop_valid.mean().item() if energy_drop_valid.numel() > 0 else 0.0,
+            "opt_median_energy_drop": torch.median(energy_drop_valid).item() if energy_drop_valid.numel() > 0 else 0.0,
             "opt_bond_lengths_diff": bond_diff,
             "opt_bond_angles_diff": angle_diff,
             "opt_dihedrals_diff": torsion_diff,
         })
 
         if ref_energy is not None:
-            metrics["opt_median_relative_energy"] = torch.median(
-                (opt_energy - ref_energy)[topology_mask] * ev2kcalpermol).item()
-
-            metrics["opt_min_conformers"] = ((opt_energy - ref_energy)[topology_mask] * ev2kcalpermol < 0.1).sum().item() / len(valid_molecules)
-            metrics["opt_better_min_conformers"] = ((opt_energy - ref_energy)[topology_mask] * ev2kcalpermol < -0.1).sum().item() / len(valid_molecules)
+            opt_rel_energy = (opt_energy - ref_energy)[topology_mask] * ev2kcalpermol
+            opt_rel_energy_valid = opt_rel_energy[~torch.isnan(opt_rel_energy)]
+            
+            metrics["opt_median_relative_energy"] = torch.median(opt_rel_energy_valid).item() if opt_rel_energy_valid.numel() > 0 else 0.0
+            metrics["opt_within_01kcal_gt"] = (opt_rel_energy_valid < 0.1).float().mean().item() if opt_rel_energy_valid.numel() > 0 else 0.0
+            metrics["opt_better_than_gt"] = (opt_rel_energy_valid < 0.0).float().mean().item() if opt_rel_energy_valid.numel() > 0 else 0.0
+            
+            # Keep legacy names for backward compatibility if needed, but the user requested new ones
+            metrics["opt_min_conformers"] = metrics["opt_within_01kcal_gt"]
+            metrics["opt_better_min_conformers"] = metrics["opt_better_than_gt"]
 
         return valid_molecules, opt_molecules, opt_energy
 

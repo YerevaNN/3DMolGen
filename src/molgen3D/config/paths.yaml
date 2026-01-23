@@ -57,6 +57,7 @@ data:
   icl_10_smi: "icl_10_smi.pickle"
   icl_20_smi: "icl_20_smi.pickle"
   loqi_smi: "loqi_smi.pickle"
+  aimnet2_model: "/nfs/ap/mnt/sxtn2/chem/GEOM_data/wb97m_cpcms_v2_0.jpt"
 
 
   pretokenized_prompts: "3DMolGen_data/pretokenized_prompts.json"

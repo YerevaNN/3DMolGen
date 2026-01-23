@@ -107,7 +107,7 @@ def group_opt(model, coord, numbers, charge, batchsize=None, fmax=2e-3, max_nste
     unconverged_coord = []
     unconverged_idx = []
     unconverged_energy = []
-    idx = torch.arange(coord.shape[0]).cuda()
+    idx = torch.arange(coord.shape[0], device=device)
     runtime = torch.zeros_like(idx, dtype=torch.float32)
     nstep = torch.zeros_like(idx)
 
@@ -118,8 +118,8 @@ def group_opt(model, coord, numbers, charge, batchsize=None, fmax=2e-3, max_nste
     act_coord = coord[act_idx]
     act_numbers = numbers[act_idx]
     act_charge = charge[act_idx]
-    act_runtime = torch.zeros(act_idx.shape[0]).cuda()
-    act_nstep = torch.zeros(act_idx.shape[0]).cuda()
+    act_runtime = torch.zeros(act_idx.shape[0], device=device)
+    act_nstep = torch.zeros(act_idx.shape[0], device=device)
 
     istep = 0
     opt = FIRE(act_coord.shape[0], act_coord.shape[1], device)
@@ -203,8 +203,8 @@ def group_opt(model, coord, numbers, charge, batchsize=None, fmax=2e-3, max_nste
             act_coord = torch.cat([act_coord, coord[act_i:act_i+_n_add]], dim=0)
             act_numbers = torch.cat([act_numbers, numbers[act_i:act_i+_n_add]], dim=0)
             act_charge = torch.cat([act_charge, charge[act_i:act_i+_n_add]], dim=0)
-            act_runtime = torch.cat([act_runtime, torch.zeros(act_charge.shape[0]-act_runtime.shape[0], device='cuda')], dim=0)
-            act_nstep = torch.cat([act_nstep, torch.zeros(act_charge.shape[0]-act_nstep.shape[0], device='cuda')])
+            act_runtime = torch.cat([act_runtime, torch.zeros(act_charge.shape[0]-act_runtime.shape[0], device=device)], dim=0)
+            act_nstep = torch.cat([act_nstep, torch.zeros(act_charge.shape[0]-act_nstep.shape[0], device=device)])
 
             act_i += _n_add
             opt.extend(act_coord.shape[0] - _n1)
