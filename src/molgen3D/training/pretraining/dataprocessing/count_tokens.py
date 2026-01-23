@@ -1725,6 +1725,11 @@ def dump_json_summary(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Simplified MolGen3D token counting tool")
     parser.add_argument("--dataset", type=str, default="conformers_train")
+    parser.add_argument(
+        "--binned",
+        action="store_true",
+        help="Use grouped binned dataset defaults (binned_conformers_* and isomer_units).",
+    )
     parser.add_argument("--seq-len", type=int, default=2048)
     parser.add_argument("--sample-lines", type=int, default=1000)
     parser.add_argument("--batch-size", type=int, default=4)
@@ -1797,18 +1802,23 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    train_path = str(get_data_path(args.dataset))
-    valid_path = str(get_data_path(args.dataset.replace("train", "valid")))
-    train_path = (
-        args.train_path.strip()
-        if args.train_path.strip()
-        else str(get_data_path("conformers_train"))
-    )
-    valid_path = (
-        args.validation_path.strip()
-        if args.validation_path.strip()
-        else str(get_data_path("conformers_valid"))
-    )
+    if args.train_path.strip():
+        train_path = args.train_path.strip()
+    elif args.binned:
+        train_path = str(get_data_path("binned_conformers_train"))
+    else:
+        train_path = str(get_data_path(args.dataset))
+
+    if args.validation_path.strip():
+        valid_path = args.validation_path.strip()
+    elif args.binned:
+        valid_path = str(get_data_path("binned_conformers_valid"))
+    else:
+        valid_path = str(get_data_path(args.dataset.replace("train", "valid")))
+
+    serialization_mode = args.serialization_mode
+    if args.binned and serialization_mode == "pairs":
+        serialization_mode = "isomer_units"
 
     tokenizer_map: Dict[str, Tuple[str, AutoTokenizer]] = {}
     tokenizer_info_map: Dict[str, Dict[str, object]] = {}
@@ -1856,7 +1866,7 @@ def main() -> None:
         batch_size=args.batch_size,
         shuffle=args.shuffle,
         seed=args.seed,
-        serialization_mode=args.serialization_mode,
+        serialization_mode=serialization_mode,
         unit_batch_size=max(1, int(args.unit_batch_size)),
         fast_estimate=bool(args.fast_estimate)
         if args.fast_estimate is not None
@@ -1876,7 +1886,7 @@ def main() -> None:
             seq_len=args.seq_len,
             batch_size=args.validation_batch_size,
             num_workers=args.validation_num_workers,
-            serialization_mode=args.serialization_mode,
+        serialization_mode=serialization_mode,
         )
 
     print_train_report(train_summary)

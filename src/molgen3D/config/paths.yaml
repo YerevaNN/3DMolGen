@@ -1,19 +1,15 @@
 base_paths:
   project_root: "."
   data_root:
-    - "/home/chem-project/data"
+    - "/data/molgen"
     - "data"
   geom_data_root:
-    - "/home/chem-project/data"
-    - "/home/chem-project/data/GEOM_data"
-    - "/nfs/ap/mnt/sxtn2/chem/GEOM_data"
+    - "/data/molgen"
+    - "/data/molgen/GEOM_data"
   geom_dataset_root:
-    - "/nfs/ap/mnt/sxtn2/chem/GEOM_data/torsional_diff_gdrive/extracted"
-    - "/home/chem-project/data/GEOM_data/torsional_diff_gdrive/extracted"
+    - "/data/molgen/GEOM_data/torsional_diff_gdrive/extracted"
   ckpts_root:
     - "/home/chem-project/checkpoints"
-    - "/nfs/h100/raid/chem/checkpoints/yerevann"
-    - "/home/chem-project/checkpoints/yerevann"
   hf_yerevann_root:
     - "/nfs/h100/raid/chem/checkpoints/hf/yerevann"
     - "/home/chem-project/checkpoints/hf/yerevann"
@@ -75,13 +71,13 @@ data:
     xl: "XL"
 
   conformers_train:
-    - "geom_cartesian_v3/processed_strings/train"
+    - "cartesian_v5_binned_grouped/grouped_binned_run1/processed_strings/train"
     - "geom_processed/geom_cartesian_v3/processed_strings/train"
   conformers_valid:
-    - "geom_cartesian_v3/processed_strings/valid"
+    - "cartesian_v5_binned_grouped/grouped_binned_run1/processed_strings/valid"
     - "geom_processed/geom_cartesian_v3/processed_strings/valid"
   conformers_test:
-    - "geom_cartesian_v3/processed_strings/test"
+    - "cartesian_v5_binned_grouped/grouped_binned_run1/processed_strings/test"
     - "geom_processed/geom_cartesian_v3/processed_strings/test"
 
 
