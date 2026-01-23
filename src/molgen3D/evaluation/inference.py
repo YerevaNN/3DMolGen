@@ -3,6 +3,34 @@ import argparse
 from datetime import datetime
 import time
 import random
+import fcntl
+from collections import defaultdict, Counter
+
+import torch
+import cloudpickle
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from tqdm import tqdm
+from loguru import logger
+import submitit
+
+from molgen3D.data_processing.smiles_encoder_decoder import (
+    decode_cartesian_v2,
+    strip_smiles,
+    decode_cartesian_binned,
+    get_bins_for_coords
+)
+from molgen3D.evaluation.utils import (
+    same_molecular_graph,
+    log_cuda_memory,
+    log_cuda_summary,
+    estimate_decoder_flops_per_token,
+    detect_peak_flops,
+    log_mfu,
+)
+from molgen3D.config.paths import get_ckpt, get_tokenizer_path, get_data_path, get_base_path
+from molgen3D.config.sampling_config import sampling_configs, gen_num_codes
+
+torch.set_grad_enabled(False)
 
 # Global for NVML state
 NVML_AVAILABLE = None
@@ -24,9 +52,6 @@ def init_nvml():
 
 def set_seed(seed=42):
     """Set random seed for reproducibility."""
-    import random
-    import torch
-    
     random.seed(seed)  # Python random module
     torch.manual_seed(seed)  # PyTorch CPU
     
@@ -44,8 +69,6 @@ def set_seed(seed=42):
 
 def get_gpu_status():
     """Get status of all available GPUs including memory usage."""
-    from loguru import logger
-    
     if not init_nvml():
         logger.warning("pynvml not available, cannot get GPU status")
         return []
@@ -86,13 +109,10 @@ def find_free_gpu(min_memory_gb=1.0, max_memory_usage_percent=20.0):
     
     Returns the GPU index if found and locked, None otherwise.
     """
-    from loguru import logger
     global _GPU_LOCK_FILE
     
     if not init_nvml():
         return None
-    
-    import fcntl
     
     try:
         gpu_status = get_gpu_status()
@@ -135,16 +155,6 @@ def load_model_tokenizer(
     device="auto",
 ):
     """Load model and tokenizer with appropriate configurations."""
-    import torch
-    from transformers import AutoTokenizer, AutoModelForCausalLM
-    from loguru import logger
-    from molgen3D.evaluation.utils import (
-        log_cuda_memory,
-        log_cuda_summary,
-        estimate_decoder_flops_per_token,
-        detect_peak_flops,
-    )
-    
     # Configure CUDA settings if available
     if torch.cuda.is_available():
         torch.set_float32_matmul_precision("high")
@@ -194,8 +204,6 @@ def load_model_tokenizer(
 
 def save_results(results_path, generations, stats):
     """Save generation results to pickle and text files."""
-    import cloudpickle
-    
     with open(os.path.join(results_path, "generation_results.pickle"), 'wb') as results_file_pickle:
         cloudpickle.dump(generations, results_file_pickle, protocol=4)
     
@@ -205,18 +213,6 @@ def save_results(results_path, generations, stats):
 
 def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id, binned: bool):
     """Process a batch of molecules and generate conformers."""
-    import torch
-    import time
-    from collections import defaultdict
-    from loguru import logger
-    from molgen3D.data_processing.smiles_encoder_decoder import (
-        strip_smiles,
-        decode_cartesian_v2,
-        decode_cartesian_binned,
-        get_bins_for_coords
-    )
-    from molgen3D.evaluation.utils import same_molecular_graph, log_cuda_memory, log_mfu
-    
     # Create bins for binned decoding (must match encoding bins)
     bins = None
     if binned:
@@ -329,14 +325,6 @@ def split_batch_on_geom_size(batch: list[list], max_geom_len: int = 80) -> list[
 
 def run_inference(inference_config: dict):
     """Main inference function that handles GPU assignment and model execution."""
-    import torch
-    import cloudpickle
-    from tqdm import tqdm
-    from collections import defaultdict, Counter
-    from loguru import logger
-    
-    torch.set_grad_enabled(False)
-    
     # Handle GPU assignment if using CUDA
     device_arg = inference_config.get("device", "cuda")
     target_device = device_arg
@@ -353,7 +341,6 @@ def run_inference(inference_config: dict):
             os.environ["CUDA_VISIBLE_DEVICES"] = str(free_gpu)
             target_device = "cuda:0"
             try:
-                import torch.cuda
                 # After setting CUDA_VISIBLE_DEVICES, we must use index 0.
                 torch.cuda.set_device(0)
             except Exception:
@@ -465,11 +452,6 @@ def launch_inference_from_cli(
     icl_n: int = 5
 ) -> None:
     """Launch inference jobs via CLI arguments."""
-    from loguru import logger
-    import submitit
-    from molgen3D.config.paths import get_ckpt, get_tokenizer_path, get_data_path, get_base_path
-    from molgen3D.config.sampling_config import sampling_configs, gen_num_codes
-    
     # Determine which test sets to run
     test_sets_to_run = []
     if test_set:
