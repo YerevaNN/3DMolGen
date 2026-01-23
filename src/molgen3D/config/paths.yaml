@@ -2,6 +2,7 @@ base_paths:
   project_root: "."
   data_root:
     - "/home/chem-project/data"
+    - "/nfs/ap/mnt/sxtn2/chem/GEOM_data"
     - "data"
   geom_data_root:
     - "/home/chem-project/data"
@@ -49,7 +50,8 @@ ckpts:
 
 data:
   clean_smi: "clean_smi.pickle"
-  distinct_smi: "tmp/distinct_smi_filtered_13.pickle"
+  distinct_smi:
+    - "distinct_smi.pickle"
   xl_smi: "xl_smi.pickle"
   qm9_smi: "qm9_smi.pickle"
   icl_5_smi: "icl_5_smi.pickle"

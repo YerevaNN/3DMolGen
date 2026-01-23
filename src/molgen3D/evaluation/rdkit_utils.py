@@ -3,6 +3,20 @@
 from rdkit import Chem
 from rdkit.Chem.rdmolops import RemoveHs
 
+import numpy as np
+from typing import List, Dict, Tuple
+
+
+def compute_key_matrix(key: str, true_confs: List, gen_mols: List, use_alignmol: bool) -> Tuple[str, Dict[str, object], bool]:
+    n_true = len(true_confs)
+    n_gen = len(gen_mols)
+    mat = np.full((n_true, n_gen), np.nan, dtype=float)
+    for i_true, ref_mol in enumerate(true_confs):
+        row = np.array([_best_rmsd(gen_mol, ref_mol, use_alignmol) for gen_mol in gen_mols], dtype=float)
+        if row.shape == (n_gen,):
+            mat[i_true] = row
+    all_nan = bool(np.isnan(mat).all())
+    return key, {"n_true": n_true, "n_model": n_gen, "rmsd": mat}, all_nan
 
 def clean_confs(smi, confs):
     """Clean conformers by checking SMILES consistency."""

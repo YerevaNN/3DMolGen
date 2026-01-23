@@ -45,12 +45,13 @@ rdBase.DisableLog("rdApp.error")
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 # HP Sweep grid for sampling config experiments
+# Round 2: Fixed temperature (1.0), vary parameters
 HP_SWEEP_GRID = {
     "model_path": [("qw600_pre_binned_filtered", "4e")],
     "gen_config": [
-        "top_p_sweep1", "top_p_sweep2", "top_p_sweep3",
-        "min_p_sweep1", "min_p_sweep2", "min_p_sweep3",
-        "top_k_sweep1", "top_k_sweep2", "top_k_sweep3",
+        "top_p_r2_1", "top_p_r2_2", "top_p_r2_3",
+        "min_p_r2_1", "min_p_r2_2", "min_p_r2_3",
+        "top_k_r2_1", "top_k_r2_2", "top_k_r2_3",
     ],
 }
 
@@ -324,8 +325,8 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         timeout_min=24 * 24 * 60,
         gpus_per_node=n_gpus,
         nodes=1,
-        mem_gb=80,
-        cpus_per_task=n_gpus * 12,
+        mem_gb=40,
+        cpus_per_task=n_gpus * 4,  # Reduced from n_gpus * 12 due to CPU availability
         slurm_additional_parameters={"partition": node},
     )
     
@@ -334,7 +335,7 @@ def launch_inference_from_cli(device: str, grid_run_inference: bool, test_set:st
         "model_path": get_ckpt("m600_qwen_pre_4seq_binned", "4e"),
         "tokenizer_path": get_tokenizer_path("qwen3_0.6b_binned"),
         "torch_dtype": "bfloat16",
-        "batch_size": 128,
+        "batch_size": 256,
         "num_gens": gen_num_codes["2k_per_conf"],
         "gen_config": sampling_configs["top_p_sampling1"],
         "device": "cuda",
