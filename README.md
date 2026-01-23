@@ -334,7 +334,9 @@ mypy .
 ### Diagnostic Tools
 
 - `smoke_test_dataloader.py`: Validate dataloader with sample batches
-- `count_tokens.py`: Estimate dataset token counts and packing efficiency
+- `count_tokens.py`: Estimate dataset token counts and packing efficiency (supports `pairs` and `isomer_units`)
+  - Example: `python -m molgen3D.training.pretraining.dataprocessing.count_tokens --serialization-mode pairs`
+  - Example: `python -m molgen3D.training.pretraining.dataprocessing.count_tokens --serialization-mode isomer_units --fast-estimate`
 
 ## Key Components
 
