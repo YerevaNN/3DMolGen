@@ -3,8 +3,13 @@ from contextlib import contextmanager
 from molgen3D.config.paths import resolve_data_path
 from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2
 from molgen3D.utils.utils import get_best_rmsd, load_json, load_pkl
+from molgen3D.evaluation.utils import same_molecular_graph
 from pathlib import Path
 from rdkit import Chem, RDLogger
+try:  # Optional: handle environments without MolStandardize
+    from rdkit.Chem.MolStandardize import rdMolStandardize
+except Exception:  # pragma: no cover - defensive import
+    rdMolStandardize = None
 import os
 from loguru import logger
 import numpy as np
@@ -63,6 +68,17 @@ def remove_chiral_info(mol):
                 atom.ClearProp("_CIPCode")
     return mol
 
+def _neutralized_canon_smiles(smiles: str) -> str | None:
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return None
+    if rdMolStandardize is not None:
+        try:
+            mol = rdMolStandardize.Uncharger().uncharge(mol)
+        except Exception:
+            pass
+    return Chem.MolToSmiles(Chem.RemoveHs(mol), canonical=True, isomericSmiles=False)
+
 def load_ground_truths(key_mol_smiles, num_gt: int = 16):
     """Load ground truth conformers for a given canonical SMILES.
 
@@ -77,8 +93,24 @@ def load_ground_truths(key_mol_smiles, num_gt: int = 16):
     # Get the original GEOM SMILES from the mapping
     filepath = _smiles_mapping.get(key_mol_smiles)
     if filepath is None:
-        logger.error("Missing SMILES mapping for pad key {}", key_mol_smiles)
-        return None
+        alt_key = None
+        mol = Chem.MolFromSmiles(key_mol_smiles)
+        if mol is not None:
+            alt_candidates = [
+                Chem.MolToSmiles(mol, isomericSmiles=False),
+                Chem.MolToSmiles(remove_chiral_info(Chem.Mol(mol)), isomericSmiles=False),
+                Chem.MolToSmiles(mol, isomericSmiles=True),
+            ]
+            for candidate in alt_candidates:
+                if candidate in _smiles_mapping:
+                    alt_key = candidate
+                    break
+        if alt_key:
+            filepath = _smiles_mapping.get(alt_key)
+            logger.info("Resolved SMILES mapping via alternate key: {} -> {}", key_mol_smiles, alt_key)
+        else:
+            logger.error("Missing SMILES mapping for pad key {}", key_mol_smiles)
+            return None
 
     conformers = None
     try:
@@ -100,8 +132,36 @@ def load_ground_truths(key_mol_smiles, num_gt: int = 16):
                         if candidate in conformers:
                             alt_key = candidate
                             break
+                match_kind = None
+                if not alt_key:
+                    for candidate in conformers.keys():
+                        if same_molecular_graph(key_mol_smiles, candidate):
+                            alt_key = candidate
+                            match_kind = "graph"
+                            break
+                if not alt_key:
+                    target_neutral = _neutralized_canon_smiles(key_mol_smiles)
+                    if target_neutral is not None:
+                        for candidate in conformers.keys():
+                            candidate_neutral = _neutralized_canon_smiles(candidate)
+                            if candidate_neutral == target_neutral:
+                                alt_key = candidate
+                                match_kind = "neutralized"
+                                break
                 if alt_key:
                     conformers = conformers[alt_key]
+                    if match_kind == "neutralized":
+                        logger.info(
+                            "Resolved ground-truth key via neutralized graph match: {} -> {}",
+                            key_mol_smiles,
+                            alt_key,
+                        )
+                    else:
+                        logger.info(
+                            "Resolved ground-truth key via graph match: {} -> {}",
+                            key_mol_smiles,
+                            alt_key,
+                        )
                 else:
                     logger.error(
                         "Ground-truth pickle for {} did not contain matching key. Available keys: {}",
