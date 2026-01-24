@@ -124,6 +124,31 @@ class ConformerControlLogitsProcessor(LogitsProcessor):
         for token_id in self.banned_token_ids:
             if 0 <= token_id < scores.shape[-1]:
                 scores[:, token_id] = float("-inf")
+
+        for row in range(int(scores.shape[0])):
+            row_scores = scores[row]
+            nan_mask = torch.isnan(row_scores)
+            if nan_mask.any():
+                row_scores[nan_mask] = float("-inf")
+            if torch.all(torch.isneginf(row_scores)):
+                fallback = None
+                candidates = []
+                if self.conformer_start_ids:
+                    candidates.append(self.conformer_start_ids[0])
+                if self.conformer_end_ids:
+                    candidates.append(self.conformer_end_ids[0])
+                for cand in candidates:
+                    if (
+                        cand is not None
+                        and 0 <= cand < row_scores.shape[-1]
+                        and cand not in self.banned_token_ids
+                    ):
+                        fallback = cand
+                        break
+                if fallback is None:
+                    fallback = 0
+                row_scores.fill_(float("-inf"))
+                row_scores[fallback] = 0.0
         return scores
 
 
@@ -164,6 +189,10 @@ def attach_conformer_controls(model, tokenizer, config) -> None:
     banned_ids = set(smiles_start_ids)
     if pad_id is not None:
         banned_ids.add(int(pad_id))
+    for tok in conformer_start_ids:
+        banned_ids.discard(int(tok))
+    for tok in conformer_end_ids:
+        banned_ids.discard(int(tok))
 
     if not conformer_start_ids or not conformer_end_ids:
         logger.warning("Conformer tags missing; skipping conformer logits processor.")

@@ -167,6 +167,7 @@ class ValidationConfig:
     save_failed_generations: bool = True
     validation_batch_size: int = 64
     eval_steps: Optional[int] = None
+    use_dataset_prompts: bool = False
 
 @dataclass
 class TrainerConfig:
