@@ -84,6 +84,41 @@ def load_ground_truths(key_mol_smiles, num_gt: int = 16):
     try:
         with _suppress_rdkit_pickle_warnings():
             conformers = load_pkl(Path(filepath))
+        if isinstance(conformers, dict):
+            if key_mol_smiles in conformers:
+                conformers = conformers[key_mol_smiles]
+            else:
+                alt_key = None
+                mol = Chem.MolFromSmiles(key_mol_smiles)
+                if mol is not None:
+                    alt_candidates = [
+                        Chem.MolToSmiles(mol, isomericSmiles=False),
+                        Chem.MolToSmiles(remove_chiral_info(Chem.Mol(mol)), isomericSmiles=False),
+                        Chem.MolToSmiles(mol, isomericSmiles=True),
+                    ]
+                    for candidate in alt_candidates:
+                        if candidate in conformers:
+                            alt_key = candidate
+                            break
+                if alt_key:
+                    conformers = conformers[alt_key]
+                else:
+                    logger.error(
+                        "Ground-truth pickle for {} did not contain matching key. Available keys: {}",
+                        key_mol_smiles,
+                        list(conformers.keys())[:3],
+                    )
+                    return None
+        if conformers is None:
+            return None
+        if not isinstance(conformers, list):
+            conformers = list(conformers)
+        # Handle pickles that store dict entries with mol payloads.
+        if conformers and isinstance(conformers[0], dict):
+            mols = [entry.get("mol") for entry in conformers if isinstance(entry, dict)]
+            conformers = [mol for mol in mols if mol is not None]
+        if num_gt and num_gt > 0:
+            conformers = conformers[:num_gt]
         return conformers
     except FileNotFoundError as e:
         logger.error(

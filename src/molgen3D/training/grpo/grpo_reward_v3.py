@@ -11,6 +11,7 @@ from loguru import logger
 import wandb
 
 from molgen3D.evaluation.utils import extract_between
+from molgen3D.data_processing.smiles_encoder_decoder import strip_smiles
 
 from .reward_utils import (
     EMPTY_FLOAT32,
@@ -85,6 +86,8 @@ class GroupMetrics:
     matched_dists: np.ndarray
     pairwise_dists: np.ndarray
     reward_total_values: np.ndarray
+    sample_completion: Optional[str]
+    sample_generated_smiles: Optional[str]
 
 
 METRIC_KEYS: List[str] = [
@@ -343,6 +346,8 @@ def compute_group_reward(
             matched_dists=overrides.get("matched_dists", EMPTY_FLOAT32),
             pairwise_dists=overrides.get("pairwise_dists", EMPTY_FLOAT32),
             reward_total_values=overrides.get("reward_total_values", EMPTY_FLOAT32),
+            sample_completion=overrides.get("sample_completion", None),
+            sample_generated_smiles=overrides.get("sample_generated_smiles", None),
         )
         return GroupMetrics(**values)
 
@@ -539,6 +544,14 @@ def compute_group_reward(
     reward_total_values = (
         rewards[valid_mask].astype(np.float32, copy=False) if valid_rollouts > 0 else EMPTY_FLOAT32
     )
+    sample_completion = None
+    sample_generated_smiles = None
+    if valid_rollouts > 0:
+        first_valid_idx = int(np.where(valid_mask)[0][0])
+        sample_completion = completions[first_valid_idx]
+        sample_conformer = extract_between(sample_completion, "[CONFORMER]", "[/CONFORMER]")
+        if sample_conformer:
+            sample_generated_smiles = strip_smiles(sample_conformer)
     comp_qual_values = (
         (lambda_qual * r_qual)[valid_mask].astype(np.float32, copy=False) if valid_rollouts > 0 else EMPTY_FLOAT32
     )
@@ -619,6 +632,8 @@ def compute_group_reward(
         matched_dists=matched_dists,
         pairwise_dists=pairwise_dists,
         reward_total_values=reward_total_values,
+        sample_completion=sample_completion,
+        sample_generated_smiles=sample_generated_smiles,
     )
 
     return rewards, metrics
@@ -644,6 +659,8 @@ def reward_function(
     total_start = time.perf_counter() if profile_enabled else None
     reward_rng = make_reward_rng(config, stats)
     log_every_steps = max(int(getattr(config.grpo, "log_every_steps", 1)), 1)
+    log_success_every = max(int(getattr(config.grpo, "log_success_sample_every", 0) or 0), 0)
+    log_success_chars = max(int(getattr(config.grpo, "log_success_sample_chars", 400) or 0), 0)
     pairwise_freq = max(int(getattr(config.grpo, "pairwise_rmsd_log_every", 50)), 1)
     pairwise_flag = bool(getattr(config.grpo, "enable_pairwise_rmsd_logging", False))
     initial_processed = getattr(stats, "processed_prompts", 0)
@@ -730,6 +747,21 @@ def reward_function(
             reward_mean,
             div_p50,
         )
+
+        if log_success_every > 0 and (step_index % log_success_every == 0):
+            sample_metric = next(
+                (m for m in metrics_list if m.sample_completion),
+                None,
+            )
+            if sample_metric and sample_metric.sample_completion:
+                sample_text = sample_metric.sample_completion
+                if log_success_chars:
+                    sample_text = sample_text[:log_success_chars]
+                logger.info(
+                    "[reward_v3] sample_success: smiles=%s, completion_snippet=%s",
+                    sample_metric.sample_generated_smiles,
+                    sample_text,
+                )
 
         if profile_enabled and total_start is not None:
             profiling_metrics = {

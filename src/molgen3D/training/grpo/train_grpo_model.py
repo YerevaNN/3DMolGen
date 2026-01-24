@@ -41,6 +41,8 @@ from molgen3D.training.grpo.rewards import reward_function
 from molgen3D.training.grpo.numerical_validator import GRPONumericalValidator
 from molgen3D.training.grpo.numerical_validation_callback import NumericalValidationCallback
 from molgen3D.training.grpo.grpo_reward_v3 import reward_function as reward_function_v3
+from molgen3D.training.grpo.grpo_reward_fbeta import reward_function as reward_function_fbeta
+from molgen3D.training.grpo.logits_constraints import attach_conformer_controls
 
 
 def initialize_random_seed(seed: int) -> None:
@@ -202,11 +204,26 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
                 completion_lengths=completion_lengths,
             )
 
+    elif reward_strategy == "fbeta":
+        logger.info("Using GRPO reward function fbeta (multi-conformer coverage)")
+
+        def reward_func(prompts, completions, **kwargs):
+            completion_entropies = kwargs.get("mean_token_entropy")
+            completion_lengths = kwargs.get("completion_lengths")
+            return reward_function_fbeta(
+                prompts,
+                completions,
+                stats,
+                tokenizer,
+                config,
+                completion_entropies=completion_entropies,
+                completion_lengths=completion_lengths,
+            )
     else:
         if reward_strategy != "legacy":
             raise ValueError(
                 f"Unsupported reward_strategy '{reward_strategy}'. "
-                "Supported values: 'v3', 'legacy'."
+                "Supported values: 'v3', 'fbeta', 'legacy'."
             )
 
         logger.info("Using legacy reward function")
@@ -215,6 +232,21 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
             return reward_function(prompts, completions, stats, tokenizer, config)
 
     ensure_completion_length_tracking()
+
+    # Generation constraints: top-k sampling + conformer tag control.
+    top_k = int(getattr(config.grpo, "sampling_top_k", 50))
+    top_p = getattr(config.grpo, "sampling_top_p", None)
+    model.generation_config.do_sample = True
+    model.generation_config.top_k = top_k
+    if top_p is not None:
+        model.generation_config.top_p = float(top_p)
+    else:
+        model.generation_config.top_p = 1.0
+    logger.info("Set generation config: do_sample=True, top_k=%d, top_p=%s", top_k, model.generation_config.top_p)
+
+    if getattr(config.grpo, "enable_conformer_logits_processor", True):
+        attach_conformer_controls(model, tokenizer, config)
+        logger.info("Attached conformer logits processor and stopping criterion.")
 
     # Set DataLoader parameters from YAML config
     training_args.dataloader_num_workers = config.dataloader.num_workers

@@ -230,7 +230,9 @@ def setup_job_executor(device_type, num_gpus, run_name):
 def run_command_locally(cmd: list[str], work_dir: Path | str):
     """Execute the launch command locally when submitit is unavailable."""
     logger.info("Running training command directly via subprocess for local device.")
-    subprocess.run(cmd, cwd=str(work_dir), check=True)
+    env = os.environ.copy()
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    subprocess.run(cmd, cwd=str(work_dir), check=True, env=env)
 
 def save_updated_config(config, config_file_path):
     """Save the updated configuration to file."""
