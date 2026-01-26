@@ -297,6 +297,82 @@ top_k_r2_3 = GenerationConfig(
     top_k=100,
 )
 
+# HP Sweep Round 3 - Extended temperature range with top_k variations
+# top_k=30 variations
+top_k_r3_30_t06 = GenerationConfig(
+    do_sample=True,
+    temperature=0.6,
+    top_k=30,
+)
+
+top_k_r3_30_t07 = GenerationConfig(
+    do_sample=True,
+    temperature=0.7,
+    top_k=30,
+)
+
+top_k_r3_30_t13 = GenerationConfig(
+    do_sample=True,
+    temperature=1.3,
+    top_k=30,
+)
+
+top_k_r3_30_t15 = GenerationConfig(
+    do_sample=True,
+    temperature=1.5,
+    top_k=30,
+)
+
+# top_k=50 variations
+top_k_r3_50_t06 = GenerationConfig(
+    do_sample=True,
+    temperature=0.6,
+    top_k=50,
+)
+
+top_k_r3_50_t07 = GenerationConfig(
+    do_sample=True,
+    temperature=0.7,
+    top_k=50,
+)
+
+top_k_r3_50_t13 = GenerationConfig(
+    do_sample=True,
+    temperature=1.3,
+    top_k=50,
+)
+
+top_k_r3_50_t15 = GenerationConfig(
+    do_sample=True,
+    temperature=1.5,
+    top_k=50,
+)
+
+# top_k=70 variations
+top_k_r3_70_t06 = GenerationConfig(
+    do_sample=True,
+    temperature=0.6,
+    top_k=70,
+)
+
+top_k_r3_70_t07 = GenerationConfig(
+    do_sample=True,
+    temperature=0.7,
+    top_k=70,
+)
+
+top_k_r3_70_t13 = GenerationConfig(
+    do_sample=True,
+    temperature=1.3,
+    top_k=70,
+)
+
+top_k_r3_70_t15 = GenerationConfig(
+    do_sample=True,
+    temperature=1.5,
+    top_k=70,
+)
+
 sampling_configs = {
     "greedy": greedy_config,
     "top_p_low_temperature": top_p_low_temperature_config,
@@ -349,6 +425,19 @@ sampling_configs = {
     "top_k_r2_1": top_k_r2_1,
     "top_k_r2_2": top_k_r2_2,
     "top_k_r2_3": top_k_r2_3,
+    # HP Sweep Round 3 configs - extended temperature range
+    "top_k_r3_30_t06": top_k_r3_30_t06,
+    "top_k_r3_30_t07": top_k_r3_30_t07,
+    "top_k_r3_30_t13": top_k_r3_30_t13,
+    "top_k_r3_30_t15": top_k_r3_30_t15,
+    "top_k_r3_50_t06": top_k_r3_50_t06,
+    "top_k_r3_50_t07": top_k_r3_50_t07,
+    "top_k_r3_50_t13": top_k_r3_50_t13,
+    "top_k_r3_50_t15": top_k_r3_50_t15,
+    "top_k_r3_70_t06": top_k_r3_70_t06,
+    "top_k_r3_70_t07": top_k_r3_70_t07,
+    "top_k_r3_70_t13": top_k_r3_70_t13,
+    "top_k_r3_70_t15": top_k_r3_70_t15,
 }
 
 gen_num_codes = {

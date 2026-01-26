@@ -45,13 +45,13 @@ rdBase.DisableLog("rdApp.error")
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 # HP Sweep grid for sampling config experiments
-# Round 2: Fixed temperature (1.0), vary parameters
+# Round 3: Extended temperature range [0.6, 0.7, 1.3, 1.5] with top_k=[30, 50, 70]
 HP_SWEEP_GRID = {
     "model_path": [("qw600_pre_binned_filtered", "4e")],
     "gen_config": [
-        "top_p_r2_1", "top_p_r2_2", "top_p_r2_3",
-        "min_p_r2_1", "min_p_r2_2", "min_p_r2_3",
-        "top_k_r2_1", "top_k_r2_2", "top_k_r2_3",
+        "top_k_r3_30_t06", "top_k_r3_30_t07", "top_k_r3_30_t13", "top_k_r3_30_t15",
+        "top_k_r3_50_t06", "top_k_r3_50_t07", "top_k_r3_50_t13", "top_k_r3_50_t15",
+        "top_k_r3_70_t06", "top_k_r3_70_t07", "top_k_r3_70_t13", "top_k_r3_70_t15",
     ],
 }
 

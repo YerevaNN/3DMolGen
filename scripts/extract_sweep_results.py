@@ -37,7 +37,23 @@ ROUND2_CONFIGS = {
     "top_k_r2_3": {"temperature": 1.0, "top_p": None, "min_p": None, "top_k": 100},
 }
 
-ALL_CONFIGS = {**ROUND1_CONFIGS, **ROUND2_CONFIGS}
+# Round 3: Extended temperature range [0.6, 0.7, 1.3, 1.5] with top_k=[30, 50, 70]
+ROUND3_CONFIGS = {
+    "top_k_r3_30_t06": {"temperature": 0.6, "top_p": None, "min_p": None, "top_k": 30},
+    "top_k_r3_30_t07": {"temperature": 0.7, "top_p": None, "min_p": None, "top_k": 30},
+    "top_k_r3_30_t13": {"temperature": 1.3, "top_p": None, "min_p": None, "top_k": 30},
+    "top_k_r3_30_t15": {"temperature": 1.5, "top_p": None, "min_p": None, "top_k": 30},
+    "top_k_r3_50_t06": {"temperature": 0.6, "top_p": None, "min_p": None, "top_k": 50},
+    "top_k_r3_50_t07": {"temperature": 0.7, "top_p": None, "min_p": None, "top_k": 50},
+    "top_k_r3_50_t13": {"temperature": 1.3, "top_p": None, "min_p": None, "top_k": 50},
+    "top_k_r3_50_t15": {"temperature": 1.5, "top_p": None, "min_p": None, "top_k": 50},
+    "top_k_r3_70_t06": {"temperature": 0.6, "top_p": None, "min_p": None, "top_k": 70},
+    "top_k_r3_70_t07": {"temperature": 0.7, "top_p": None, "min_p": None, "top_k": 70},
+    "top_k_r3_70_t13": {"temperature": 1.3, "top_p": None, "min_p": None, "top_k": 70},
+    "top_k_r3_70_t15": {"temperature": 1.5, "top_p": None, "min_p": None, "top_k": 70},
+}
+
+ALL_CONFIGS = {**ROUND1_CONFIGS, **ROUND2_CONFIGS, **ROUND3_CONFIGS}
 
 
 def extract_config_from_dirname(dirname: str) -> tuple[str | None, int | None]:
@@ -55,6 +71,11 @@ def extract_config_from_dirname(dirname: str) -> tuple[str | None, int | None]:
     r2_match = re.search(r"(top_p_r2_\d|min_p_r2_\d|top_k_r2_\d)", dirname)
     if r2_match:
         return r2_match.group(1), 2
+
+    # Round 3 pattern: *_top_k_r3_<k>_t<temp>_*
+    r3_match = re.search(r"(top_k_r3_\d+_t\d+)", dirname)
+    if r3_match:
+        return r3_match.group(1), 3
 
     return None, None
 
