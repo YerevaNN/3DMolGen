@@ -1,9 +1,11 @@
 base_paths:
   project_root: "."
   data_root:
+    - "/data/molgen"
     - "/home/chem-project/data"
     - "data"
   geom_data_root:
+    - "/data/molgen"
     - "/home/chem-project/data"
     - "/home/chem-project/data/GEOM_data"
     - "/nfs/ap/mnt/sxtn2/chem/GEOM_data"
@@ -96,11 +98,11 @@ data:
     - "binned_all/processed_strings/test"
 
   binned_stripped_conformers_train:
-    - "binned_grouped_v2/processed_strings/train
+    - "binned_groped_v3/processed_strings/train"
   binned_stripped_conformers_valid:
-    - "binned_grouped_v2/processed_strings/valid"
+    - "binned_groped_v3/processed_strings/valid"
   binned_stripped_conformers_test:
-    - "binned_grouped_v2/processed_strings/test"
+    - "binned_groped_v3/processed_strings/test"
 
   filtered_conformers_train: 
     - "3DMolGen_data/binned_filtered/processed_strings/train"

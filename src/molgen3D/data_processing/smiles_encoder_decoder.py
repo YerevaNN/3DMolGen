@@ -394,16 +394,15 @@ def tokenize_enriched(enriched):
     return tokens
 
 
-_ENRICHED_V2_TOKEN_PATTERN = re.compile(
-    r"(\[[^\]]+\])(\d+);|(%\d{2,})|(=|#|:|\/|\\|-)|(\()|(\))|(\d)|(\.)"
-)
-
-
-def tokenize_enriched_v2(enriched):
-    """Tokenize the v2 binned enriched representation (no commas, terminated by ;)."""
+def tokenize_enriched_v2(enriched, digit_width):
+    """Tokenize the v2 binned enriched representation (no commas, no terminator)."""
+    # Use dynamic length based on digit_width to avoid ambiguity with ring closures
+    pattern = re.compile(
+        fr"(\[[^\]]+\])(\d{{{3 * digit_width}}})|(%\d{{2,}})|(=|#|:|\/|\\|-)|(\()|(\))|(\d)|(\.)"
+    )
     tokens = []
     pos = 0
-    for match in _ENRICHED_V2_TOKEN_PATTERN.finditer(enriched):
+    for match in pattern.finditer(enriched):
         if match.start() != pos:
             raise ValueError(
                 f"Unrecognized enriched fragment: {enriched[pos:match.start()]} in {enriched}"
@@ -411,9 +410,7 @@ def tokenize_enriched_v2(enriched):
 
         if match.group(1):
             coord_str = match.group(2)
-            if len(coord_str) % 3 != 0:
-                raise ValueError(f"Bad coord string length (must be multiple of 3): {coord_str}")
-            n = len(coord_str) // 3
+            n = digit_width
             parts = [coord_str[i : i + n] for i in range(0, len(coord_str), n)]
             coords = tuple(_parse_float_token(p) for p in parts)
             tokens.append(
@@ -547,6 +544,12 @@ def get_bins_for_coords(ranges, bin_size=0.104):
     for start, end in ranges:
         bins.append(np.arange(start, end, bin_size))
     return bins
+
+
+def get_digit_width(bins):
+    """Determine the zero-padding width based on the maximum number of bins."""
+    max_bin_len = max(len(b) for b in bins)
+    return max(3, len(str(max_bin_len)))
 
 def coords_to_bins(coords, bins):
     """Convert coordinates to bins."""
@@ -717,8 +720,7 @@ def encode_cartesian_binned_v2(mol, bin_size, ranges=None):
     if len(bins) != 3:
         raise ValueError("get_bins_for_coords must return three bin arrays (x, y, z).")
     # Determine zero-padding width; always at least 3 digits, same for all axes
-    max_bin_len = max(len(b) for b in bins)
-    digit_width = max(3, len(str(max_bin_len)))
+    digit_width = get_digit_width(bins)
 
     out_parts = []
     atom_idx_in_smiles = 0
@@ -748,7 +750,7 @@ def encode_cartesian_binned_v2(mol, bin_size, ranges=None):
             iy_txt = f"{iy:0{digit_width}d}"
             iz_txt = f"{iz:0{digit_width}d}"
 
-            out_parts.append(f"{atom_descriptor}{ix_txt}{iy_txt}{iz_txt};")
+            out_parts.append(f"{atom_descriptor}{ix_txt}{iy_txt}{iz_txt}")
             atom_idx_in_smiles += 1
         else:
             out_parts.append(token["text"])
@@ -772,7 +774,8 @@ def decode_cartesian_binned_v2(enriched_string, bins, use_bin_center=True):
     if len(bins) != 3:
         raise ValueError("bins must be a sequence of three bin arrays (x, y, z).")
 
-    tokens = tokenize_enriched_v2(enriched_string)
+    digit_width = get_digit_width(bins)
+    tokens = tokenize_enriched_v2(enriched_string, digit_width)
 
     smiles_parts = []
     coords = []

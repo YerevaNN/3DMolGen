@@ -24,11 +24,11 @@ def test_v2_roundtrip_basic():
     # 1. Encode
     enriched, canon_smiles = encode_cartesian_binned_v2(mol, bin_size=bin_size, ranges=ranges)
     
-    # Verify format: [C]000000000; (no angle brackets, no commas)
+    # Verify format: [C]000000000 (no angle brackets, no commas, no semicolon)
     assert "<" not in enriched
     assert ">" not in enriched
     assert "," not in enriched
-    assert ";" in enriched
+    assert ";" not in enriched
     
     # 2. Decode
     bins = get_bins_for_coords(ranges, bin_size=bin_size)
@@ -64,8 +64,8 @@ def test_v2_format_details():
     
     # bins are [0,1,2,3,4], length 5. digit_width = max(3, len(str(5))) = 3.
     # indices for (1.0, 2.0, 3.0) with bins [0,1,2,3,4] are (2, 3, 4)
-    # So we expect [C]002003004;
-    assert enriched == "[C]002003004;"
+    # So we expect [C]002003004
+    assert enriched == "[C]002003004"
 
 def test_v2_complex_molecule():
     """Test with a more complex molecule and ring closures."""
@@ -89,14 +89,10 @@ def test_v2_tokenizer_error():
     """Test that the v2 tokenizer raises error on malformed strings."""
     from molgen3D.data_processing.smiles_encoder_decoder import tokenize_enriched_v2
     
-    # Missing semicolon
-    with pytest.raises(ValueError):
-        tokenize_enriched_v2("[C]001002003")
-    
     # Unrecognized character
     with pytest.raises(ValueError):
-        tokenize_enriched_v2("[C]001002003;?")
+        tokenize_enriched_v2("[C]001002003?", 3)
     
-    # Bad length (not multiple of 3)
+    # Bad length (not multiple of 3 * digit_width)
     with pytest.raises(ValueError):
-        tokenize_enriched_v2("[C]00100200;")
+        tokenize_enriched_v2("[C]00100200", 3)

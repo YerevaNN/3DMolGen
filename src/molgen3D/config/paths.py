@@ -38,6 +38,9 @@ GEOM_DATA_KEYS = {
     "filtered_conformers_train",
     "filtered_conformers_valid",
     "filtered_conformers_test",
+    "binned_stripped_conformers_train",
+    "binned_stripped_conformers_valid",
+    "binned_stripped_conformers_test",
 }
 
 
