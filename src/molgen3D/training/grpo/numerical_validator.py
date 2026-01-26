@@ -23,7 +23,9 @@ import torch.distributed as dist
 from loguru import logger
 
 from molgen3D.data_processing.smiles_encoder_decoder import (
+    decode_cartesian_binned,
     decode_cartesian_v2,
+    get_bins_for_coords,
     strip_smiles,
 )
 from molgen3D.evaluation.utils import (
@@ -34,7 +36,8 @@ from molgen3D.evaluation.utils import (
 )
 from molgen3D.utils.utils import get_best_rmsd
 from molgen3D.config.sampling_config import sampling_configs
-from molgen3D.config.paths import get_data_path
+from molgen3D.config.paths import get_data_path, resolve_data_path
+from molgen3D.training.grpo.utils import load_smiles_mapping, load_ground_truths
 
 # Failure type constants
 FAIL_NO_CLOSING_TAG = "no_closing_tag"
@@ -42,6 +45,9 @@ FAIL_EMPTY_CONFORMER = "empty_conformer"
 FAIL_PARSING_ERROR = "parsing_error"
 FAIL_SMILES_MISMATCH = "smiles_mismatch"
 FAIL_RMSD_NAN = "rmsd_nan"
+
+DEFAULT_BINNED_RANGES = [(-13.0, 13.0), (-13.0, 13.0), (-13.0, 13.0)]
+DEFAULT_BIN_SIZE = 0.104
 
 
 class GRPONumericalValidator:
@@ -82,6 +88,28 @@ class GRPONumericalValidator:
 
         self._pad_id = self.tokenizer.pad_token_id or self._eos_id or 0
 
+        self._use_binned_decoder = bool(
+            getattr(getattr(self.config, "grpo", self.config), "fbeta_use_binned_decoder", False)
+        )
+        self._binned_bins = None
+        if self._use_binned_decoder:
+            ranges = getattr(
+                getattr(self.config, "grpo", self.config),
+                "fbeta_binned_ranges",
+                DEFAULT_BINNED_RANGES,
+            )
+            if ranges is None:
+                ranges = DEFAULT_BINNED_RANGES
+            bin_size = getattr(
+                getattr(self.config, "grpo", self.config),
+                "fbeta_binned_bin_size",
+                DEFAULT_BIN_SIZE,
+            )
+            self._binned_bins = get_bins_for_coords(ranges, bin_size)
+            logger.info(
+                f"[numerical_validation] binned decode enabled: ranges={ranges}, bin_size={bin_size}"
+            )
+
         if self._conformer_start_id is None or self._conformer_end_id is None:
             raise ValueError("Tokenizer must define [CONFORMER] and [/CONFORMER] tokens.")
 
@@ -93,6 +121,36 @@ class GRPONumericalValidator:
         from `validation_pickle` (valid_set.pickle) defined in paths.yaml.
         We simply sample SMILES keys from that pickle.
         """
+        if getattr(self.config.validation, "use_dataset_prompts", False):
+            dataset_path = resolve_data_path(self.config.dataset.dataset_path)
+            load_smiles_mapping(self.config.dataset.smiles_mapping_path)
+            logger.info(f"Loading numerical validation prompts from {dataset_path}")
+            with open(dataset_path, "r", encoding="utf-8", errors="replace") as fh:
+                raw_lines = [line.strip() for line in fh if line.strip()]
+            rng = np.random.default_rng(self._get_validation_seed())
+            rng.shuffle(raw_lines)
+
+            prompts: List[str] = []
+            ground_truths: Dict[str, List] = {}
+            for line in raw_lines:
+                smiles = extract_between(line, "[SMILES]", "[/SMILES]") or line
+                if not smiles:
+                    continue
+                gts = load_ground_truths(
+                    smiles, num_gt=getattr(self.config.grpo, "max_ground_truths", 16)
+                )
+                if not gts:
+                    continue
+                prompts.append(smiles)
+                ground_truths[smiles] = gts
+                if len(prompts) >= self.config.validation.num_val_molecules:
+                    break
+
+            logger.info(
+                f"Loaded {len(prompts)} validation SMILES keys from dataset prompts"
+            )
+            return prompts, ground_truths
+
         gt_path = get_data_path("validation_pickle")
         logger.info(f"Loading numerical validation keys from {gt_path}")
 
@@ -113,14 +171,6 @@ class GRPONumericalValidator:
 
         logger.info(f"Loaded {len(prompts)} validation SMILES keys from validation_pickle")
         return prompts, ground_truths
-
-    def _build_prompt_tensor(
-        self, smiles: str, device: torch.device
-    ) -> torch.Tensor:
-        """Build a prompt tensor for conformer generation."""
-        prompt_text = f"[SMILES]{smiles}[/SMILES][CONFORMER]"
-        tokens = self.tokenizer.encode(prompt_text, add_special_tokens=False)
-        return torch.tensor(tokens, device=device, dtype=torch.long).unsqueeze(0)
 
     def _get_validation_seed(self) -> int | None:
         """Return the seed to use for deterministic numerical validation."""
@@ -510,9 +560,34 @@ class GRPONumericalValidator:
                         return_tensors="pt",
                     )
 
+                    input_ids = encodings["input_ids"]
+                    attention_mask = encodings["attention_mask"]
+                    vocab_size = getattr(model.config, "vocab_size", None)
+                    if vocab_size is not None:
+                        invalid_rows = (input_ids < 0) | (input_ids >= vocab_size)
+                        if invalid_rows.any():
+                            bad_mask = invalid_rows.any(dim=1)
+                            bad_count = int(bad_mask.sum().item())
+                            if bad_count == input_ids.shape[0]:
+                                logger.error(
+                                    f"[rank {rank}] All prompts in batch have invalid token ids; "
+                                    f"skipping batch of size {bad_count}."
+                                )
+                                continue
+                            logger.warning(
+                                f"[rank {rank}] Dropping {bad_count}/{input_ids.shape[0]} prompts "
+                                "with invalid token ids during numerical validation."
+                            )
+                            keep_mask = ~bad_mask
+                            keep_list = keep_mask.tolist()
+                            input_ids = input_ids[keep_mask]
+                            attention_mask = attention_mask[keep_mask]
+                            batch_texts = [t for t, keep in zip(batch_texts, keep_list) if keep]
+                            batch_smiles = [s for s, keep in zip(batch_smiles, keep_list) if keep]
+
                     # Move to device and ensure proper types
-                    input_ids = encodings['input_ids'].to(device)
-                    attention_mask = encodings['attention_mask'].to(device)
+                    input_ids = input_ids.to(device)
+                    attention_mask = attention_mask.to(device)
 
                     # Calculate max new tokens based on padded prompt length
                     max_prompt_len = input_ids.shape[1]
@@ -538,20 +613,14 @@ class GRPONumericalValidator:
                         "pad_token_id": self._pad_id,
                         "eos_token_id": self._conformer_end_id,
                     }
-                    seed_context = nullcontext()
+                    seed_value = None
                     if per_rank_seed is not None:
                         seed_value = per_rank_seed + batch_start
-                        fork_devices = [device] if device.type == "cuda" else []
-                        seed_context = torch.random.fork_rng(devices=fork_devices)
-                    else:
-                        seed_value = None
+                        torch.manual_seed(seed_value)
+                        if device.type == "cuda":
+                            torch.cuda.manual_seed_all(seed_value)
 
-                    with seed_context:
-                        if seed_value is not None:
-                            torch.manual_seed(seed_value)
-                            if device.type == "cuda":
-                                torch.cuda.manual_seed_all(seed_value)
-                        generated_outputs = model.generate(**generate_kwargs)
+                    generated_outputs = model.generate(**generate_kwargs)
                     if rank == 0:
                         logger.info(f"Generated outputs shape: {generated_outputs.shape}")
 
@@ -610,7 +679,12 @@ class GRPONumericalValidator:
 
                         # Try to parse the conformer
                         try:
-                            generated_mol = decode_cartesian_v2(conformer_text)
+                            if self._use_binned_decoder:
+                                generated_mol = decode_cartesian_binned(
+                                    conformer_text, self._binned_bins
+                                )
+                            else:
+                                generated_mol = decode_cartesian_v2(conformer_text)
                         except Exception as e:
                             failure_counts[FAIL_PARSING_ERROR] += 1
                             all_failed_generations.append(

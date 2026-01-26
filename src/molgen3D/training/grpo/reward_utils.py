@@ -307,7 +307,7 @@ def compute_rmsd_safe(probe: Optional[Chem.Mol], ref: Optional[Chem.Mol]) -> flo
             return float("inf")
         return float(rmsd)
     except Exception as exc:
-        logger.debug(f"RMSD computation failed: {exc}")
+        # Suppress noisy RDKit debug output for invalid mols; return inf instead.
         return float("inf")
 
 
