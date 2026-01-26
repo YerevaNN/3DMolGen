@@ -5,6 +5,7 @@ import time
 import random
 import fcntl
 from collections import defaultdict, Counter
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import torch
 import cloudpickle
@@ -449,7 +450,8 @@ def launch_inference_from_cli(
     limit: int = None,
     binned: bool = False,
     icl: bool = False,
-    icl_n: int = 5
+    icl_n: int = 5,
+    parallel_jobs: int = 1
 ) -> None:
     """Launch inference jobs via CLI arguments."""
     # Determine which test sets to run
@@ -473,30 +475,27 @@ def launch_inference_from_cli(
     
     if device in ["a100", "h100"]:
         executor = submitit.AutoExecutor(folder="outputs/slurm_jobs/conf_gen/job_%j")
-    elif device == "local":
-        executor = submitit.LocalExecutor(folder="outputs/slurm_jobs/conf_gen/job_%j")
-    
-    executor.update_parameters(
-        name="conf_gen",
-        timeout_min=24 * 24 * 60,
-        gpus_per_node=n_gpus,
-        nodes=1,
-        mem_gb=80,
-        cpus_per_task=n_gpus * 12,
-        slurm_additional_parameters={"partition": node},
-    )
+        executor.update_parameters(
+            name="conf_gen",
+            timeout_min=24 * 24 * 60,
+            gpus_per_node=n_gpus,
+            nodes=1,
+            mem_gb=80,
+            cpus_per_task=n_gpus * 12,
+            slurm_additional_parameters={"partition": node},
+        )
     
     # Base configuration template
     base_inference_config = {
         "model_path": get_ckpt("m600_qwen_pre_4seq_binned", "4e"),
-        "tokenizer_path": get_tokenizer_path("qwen3_0.6b_binned"),
+        "tokenizer_path": get_tokenizer_path("qwen3_0.6b_custom"),
         "torch_dtype": "bfloat16",
         "batch_size": 128,
         "num_gens": gen_num_codes["2k_per_conf"],
         "gen_config": sampling_configs["top_p_sampling1"],
         "device": "cuda",
         "results_path": get_base_path("gen_results_root"),
-        "run_name": "qwen_pre_4seq_binned",
+        "run_name": "qwen_pre_4e_grouped",
         "limit": limit,
         "binned": binned,
     }
@@ -504,10 +503,11 @@ def launch_inference_from_cli(
     if grid_run_inference:
         jobs = []
         param_grid = [
-            ("m600_qwen_pre_4seq_binned", "1e"),
-            ("m600_qwen_pre_4seq_binned", "2e"),
-            ("m600_qwen_pre_4seq_binned", "3e"),
-            ("m600_qwen_pre_4seq_binned", "4e")
+            ("m600_qwen_pre_4e_grouped", "1e"),
+            ("m600_qwen_pre_4e_grouped", "2e"),
+            ("m600_qwen_pre_4e_grouped", "3e"),
+            ("m600_qwen_pre_4e_grouped", "4e"),
+            ("m600_qwen_pre", "4e"),
         ]
         
         if executor is not None:
@@ -539,6 +539,61 @@ def launch_inference_from_cli(
                         logger.info(f"Submitting job for {grid_config['run_name']}...")
                         job = executor.submit(run_inference, inference_config=grid_config)
                         jobs.append(job)
+        else:
+            # Run grid search locally - either sequential or parallel
+            # Build all configs first
+            all_configs = []
+            for model_key in param_grid:
+                for test_set_name in test_sets_to_run:
+                    grid_config = dict(base_inference_config)
+                    
+                    if isinstance(model_key, tuple):
+                        grid_config["model_path"] = get_ckpt(model_key[0], model_key[1])
+                        model_key_str = f"{model_key[0]}_{model_key[1]}"
+                    else:
+                        grid_config["model_path"] = get_ckpt(model_key)
+                        model_key_str = model_key
+                    
+                    if test_set_name == "xl":
+                        grid_config["batch_size"] = 100
+                    
+                    if test_set_name == "qm9":
+                        grid_config["batch_size"] = 100
+                    
+                    if test_set_name == "icl":
+                        grid_config["batch_size"] = 64
+                    
+                    grid_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
+                    grid_config["test_set"] = test_set_name
+                    grid_config["run_name"] = f"{model_key_str}_{test_set_name}"
+                    all_configs.append((grid_config, grid_config["run_name"]))
+            
+            if parallel_jobs <= 1:
+                # Sequential execution
+                logger.info(f"Running {len(all_configs)} grid inference jobs locally (sequential)")
+                for grid_config, run_name in all_configs:
+                    logger.info(f"Running grid inference for {run_name}...")
+                    run_inference(inference_config=grid_config)
+            else:
+                # Parallel execution
+                max_workers = min(parallel_jobs, len(all_configs))
+                logger.info(f"Running {len(all_configs)} grid inference jobs locally in parallel (max workers: {max_workers})")
+                
+                with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                    future_to_name = {
+                        executor.submit(run_inference, inference_config=config): name
+                        for config, name in all_configs
+                    }
+                    
+                    for future in as_completed(future_to_name):
+                        run_name = future_to_name[future]
+                        try:
+                            result = future.result()
+                            logger.info(f"✓ Completed: {run_name}")
+                        except Exception as e:
+                            logger.error(f"✗ Exception in {run_name}: {e}")
+                            import traceback
+                            traceback.print_exc()
     else:
         if executor is not None:
             with executor.batch():
@@ -559,6 +614,8 @@ def launch_inference_from_cli(
                     logger.info(f"Running inference for {test_set_name} with config: {inference_config}")
                     job = executor.submit(run_inference, inference_config=inference_config)
         else:
+            # Build all configs first
+            all_configs = []
             for test_set_name in test_sets_to_run:
                 inference_config = dict(base_inference_config)
                 
@@ -566,13 +623,40 @@ def launch_inference_from_cli(
                     inference_config["batch_size"] = 100
                 if test_set_name == "qm9":
                     inference_config["batch_size"] = 100
+                if test_set_name == "icl":
+                    inference_config["batch_size"] = 64
                 
                 inference_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
                 inference_config["test_set"] = test_set_name
                 inference_config["run_name"] = f"new_data_p1_{test_set_name}"
+                all_configs.append((inference_config, inference_config["run_name"]))
+            
+            if parallel_jobs <= 1:
+                # Sequential execution
+                logger.info(f"Running {len(all_configs)} inference jobs locally (sequential)")
+                for inference_config, run_name in all_configs:
+                    logger.info(f"Running inference for {run_name}")
+                    run_inference(inference_config=inference_config)
+            else:
+                # Parallel execution
+                max_workers = min(parallel_jobs, len(all_configs))
+                logger.info(f"Running {len(all_configs)} inference jobs locally in parallel (max workers: {max_workers})")
                 
-                logger.info(f"Running inference for {test_set_name} with config: {inference_config}")
-                run_inference(inference_config=inference_config)
+                with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                    future_to_name = {
+                        executor.submit(run_inference, inference_config=config): name
+                        for config, name in all_configs
+                    }
+                    
+                    for future in as_completed(future_to_name):
+                        run_name = future_to_name[future]
+                        try:
+                            result = future.result()
+                            logger.info(f"✓ Completed: {run_name}")
+                        except Exception as e:
+                            logger.error(f"✗ Exception in {run_name}: {e}")
+                            import traceback
+                            traceback.print_exc()
 
 
 if __name__ == "__main__":
@@ -586,6 +670,7 @@ if __name__ == "__main__":
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--icl", action="store_true")
     parser.add_argument("--icl_n", type=int, default=5)
+    parser.add_argument("--parallel_jobs", type=int, default=1, help="Number of parallel inference jobs for local execution")
     args = parser.parse_args()
     launch_inference_from_cli(
         device=args.device,
@@ -596,5 +681,6 @@ if __name__ == "__main__":
         limit=args.limit,
         binned=args.binned,
         icl=args.icl,
-        icl_n=args.icl_n
+        icl_n=args.icl_n,
+        parallel_jobs=args.parallel_jobs
     )
