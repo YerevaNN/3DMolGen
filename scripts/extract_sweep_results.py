@@ -53,7 +53,19 @@ ROUND3_CONFIGS = {
     "top_k_r3_70_t15": {"temperature": 1.5, "top_p": None, "min_p": None, "top_k": 70},
 }
 
-ALL_CONFIGS = {**ROUND1_CONFIGS, **ROUND2_CONFIGS, **ROUND3_CONFIGS}
+# Round 4: Fill gaps for top_p and min_p temperature coverage
+ROUND4_CONFIGS = {
+    "top_p_r4_08_t08": {"temperature": 0.8, "top_p": 0.8, "min_p": None, "top_k": None},
+    "top_p_r4_08_t12": {"temperature": 1.2, "top_p": 0.8, "min_p": None, "top_k": None},
+    "top_p_r4_95_t08": {"temperature": 0.8, "top_p": 0.95, "min_p": None, "top_k": None},
+    "top_p_r4_95_t12": {"temperature": 1.2, "top_p": 0.95, "min_p": None, "top_k": None},
+    "min_p_r4_05_t08": {"temperature": 0.8, "top_p": None, "min_p": 0.05, "top_k": None},
+    "min_p_r4_05_t12": {"temperature": 1.2, "top_p": None, "min_p": 0.05, "top_k": None},
+    "min_p_r4_15_t08": {"temperature": 0.8, "top_p": None, "min_p": 0.15, "top_k": None},
+    "min_p_r4_15_t12": {"temperature": 1.2, "top_p": None, "min_p": 0.15, "top_k": None},
+}
+
+ALL_CONFIGS = {**ROUND1_CONFIGS, **ROUND2_CONFIGS, **ROUND3_CONFIGS, **ROUND4_CONFIGS}
 
 
 def extract_config_from_dirname(dirname: str) -> tuple[str | None, int | None]:
@@ -76,6 +88,11 @@ def extract_config_from_dirname(dirname: str) -> tuple[str | None, int | None]:
     r3_match = re.search(r"(top_k_r3_\d+_t\d+)", dirname)
     if r3_match:
         return r3_match.group(1), 3
+
+    # Round 4 pattern: *_top_p_r4_<p>_t<temp>_* or *_min_p_r4_<p>_t<temp>_*
+    r4_match = re.search(r"(top_p_r4_\d+_t\d+|min_p_r4_\d+_t\d+)", dirname)
+    if r4_match:
+        return r4_match.group(1), 4
 
     return None, None
 

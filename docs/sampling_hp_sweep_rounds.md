@@ -312,3 +312,50 @@ python -m molgen3D.evaluation.inference \
    - **Best balanced**: k=30, temp=0.6 (COV-R=0.6296, COV-P=0.5942, 159 errors)
    - **Low error + good diversity**: k=50, temp=1.0 (COV-R=0.6781, ~291 errors)
 
+---
+
+# Sampling HP Sweep - Round 4 (Fill Gaps)
+
+## Design Rationale
+
+Rounds 1-3 left gaps in top_p and min_p temperature coverage:
+- **top_p**: p=0.9 has temps [0.8, 1.0, 1.2], but p=0.8 and p=0.95 only have temp=1.0
+- **min_p**: min_p=0.1 has temps [0.8, 1.0, 1.2], but min_p=0.05 and min_p=0.15 only have temp=1.0
+
+Round 4 fills these gaps to enable complete temperature curves for all parameter values.
+
+## Sweep Matrix
+
+| Config | Temperature | Main Param | Rationale |
+|--------|-------------|------------|-----------|
+| top_p_r4_08_t08 | 0.8 | top_p=0.8 | Fill gap: p=0.8 low temp |
+| top_p_r4_08_t12 | 1.2 | top_p=0.8 | Fill gap: p=0.8 high temp |
+| top_p_r4_95_t08 | 0.8 | top_p=0.95 | Fill gap: p=0.95 low temp |
+| top_p_r4_95_t12 | 1.2 | top_p=0.95 | Fill gap: p=0.95 high temp |
+| min_p_r4_05_t08 | 0.8 | min_p=0.05 | Fill gap: min_p=0.05 low temp |
+| min_p_r4_05_t12 | 1.2 | min_p=0.05 | Fill gap: min_p=0.05 high temp |
+| min_p_r4_15_t08 | 0.8 | min_p=0.15 | Fill gap: min_p=0.15 low temp |
+| min_p_r4_15_t12 | 1.2 | min_p=0.15 | Fill gap: min_p=0.15 high temp |
+
+**Total: 8 jobs per test set**
+
+## Summary
+
+- **top_p sweep**: p=[0.8, 0.95] at temps=[0.8, 1.2]
+- **min_p sweep**: min_p=[0.05, 0.15] at temps=[0.8, 1.2]
+- **Model**: `qw600_pre_binned_filtered` at step `4e`
+
+## Inference Command
+
+```bash
+./scripts/run_hp_sweep_round4.sh
+```
+
+## After Inference Completes
+
+Create eval script with the generated directory names, then run extraction script.
+
+## Round 4 Results
+
+*Pending - run inference first*
+

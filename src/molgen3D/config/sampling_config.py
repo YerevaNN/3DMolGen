@@ -373,6 +373,59 @@ top_k_r3_70_t15 = GenerationConfig(
     top_k=70,
 )
 
+# HP Sweep Round 4 - Fill gaps for top_p and min_p temperature coverage
+# top_p=0.8 variations (currently only have temp=1.0)
+top_p_r4_08_t08 = GenerationConfig(
+    do_sample=True,
+    temperature=0.8,
+    top_p=0.8,
+)
+
+top_p_r4_08_t12 = GenerationConfig(
+    do_sample=True,
+    temperature=1.2,
+    top_p=0.8,
+)
+
+# top_p=0.95 variations (currently only have temp=1.0)
+top_p_r4_95_t08 = GenerationConfig(
+    do_sample=True,
+    temperature=0.8,
+    top_p=0.95,
+)
+
+top_p_r4_95_t12 = GenerationConfig(
+    do_sample=True,
+    temperature=1.2,
+    top_p=0.95,
+)
+
+# min_p=0.05 variations (currently only have temp=1.0)
+min_p_r4_05_t08 = GenerationConfig(
+    do_sample=True,
+    temperature=0.8,
+    min_p=0.05,
+)
+
+min_p_r4_05_t12 = GenerationConfig(
+    do_sample=True,
+    temperature=1.2,
+    min_p=0.05,
+)
+
+# min_p=0.15 variations (currently only have temp=1.0)
+min_p_r4_15_t08 = GenerationConfig(
+    do_sample=True,
+    temperature=0.8,
+    min_p=0.15,
+)
+
+min_p_r4_15_t12 = GenerationConfig(
+    do_sample=True,
+    temperature=1.2,
+    min_p=0.15,
+)
+
 sampling_configs = {
     "greedy": greedy_config,
     "top_p_low_temperature": top_p_low_temperature_config,
@@ -438,6 +491,15 @@ sampling_configs = {
     "top_k_r3_70_t07": top_k_r3_70_t07,
     "top_k_r3_70_t13": top_k_r3_70_t13,
     "top_k_r3_70_t15": top_k_r3_70_t15,
+    # HP Sweep Round 4 configs - fill gaps for top_p and min_p
+    "top_p_r4_08_t08": top_p_r4_08_t08,
+    "top_p_r4_08_t12": top_p_r4_08_t12,
+    "top_p_r4_95_t08": top_p_r4_95_t08,
+    "top_p_r4_95_t12": top_p_r4_95_t12,
+    "min_p_r4_05_t08": min_p_r4_05_t08,
+    "min_p_r4_05_t12": min_p_r4_05_t12,
+    "min_p_r4_15_t08": min_p_r4_15_t08,
+    "min_p_r4_15_t12": min_p_r4_15_t12,
 }
 
 gen_num_codes = {
