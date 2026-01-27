@@ -12,16 +12,16 @@ base_paths:
     - "/home/chem-project/checkpoints"
   hf_yerevann_root:
     - "/nfs/h100/raid/chem/checkpoints/hf/yerevann"
-    - "/home/chem-project/checkpoints/hf/yerevann"
+    - "/data/chem-project/checkpoints/hf/yerevann"
   qwen_yerevann_root:
-    - "/home/chem-project/checkpoints"
-    - "/home/chem-project/checkpoints/yerevann"
+    - "/data/chem-project/checkpoints"
+    - "/data/chem-project/checkpoints/yerevann"
     - "/nfs/h100/raid/chem/checkpoints/yerevann"
   grpo_root:
-    - "/home/chem-project/checkpoints/conf_grpo"
+    - "/data/chem-project/checkpoints/conf_grpo"
     - "/nfs/h100/raid/chem/checkpoints/conf_grpo"
   qwen3_grpo_root:
-    - "/home/chem-project/checkpoints/conf_grpo"
+    - "/data/chem-project/checkpoints/conf_grpo"
     - "/nfs/h100/raid/chem/checkpoints/conf_grpo"
   gen_results_root: "outputs/gen_results"
   eval_results_root: "outputs/eval_results"
@@ -29,18 +29,18 @@ base_paths:
   pretrain_logs_root: "outputs/pretrain_logs"
   wandb_root: "wandb_runs"
   qwen3_0.6b_base_model:
-    - "/home/chem-project/checkpoints/Qwen3-0.6B-Base"
+    - "/data/chem-project/checkpoints/Qwen3-0.6B-Base"
     - "/nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b/Qwen3-0.6B-Base"
-    - "/home/chem-project/checkpoints/yerevann/qwen3_06b/Qwen3-0.6B-Base"
+    - "/data/chem-project/checkpoints/yerevann/qwen3_06b/Qwen3-0.6B-Base"
   tokenizers_root: "src/molgen3D/training/tokenizers"
 
 ckpts:
   qwen3_06b:
-    - "/home/chem-project/checkpoints/qwen3_06b"
+    - "/data/chem-project/checkpoints/qwen3_06b"
     - "/nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b"
-    - "/home/chem-project/checkpoints/yerevann/qwen3_06b"
+    - "/data/chem-project/checkpoints/yerevann/qwen3_06b"
   qwen3_grpo:
-    - "/home/chem-project/checkpoints/conf_grpo"
+    - "/data/chem-project/checkpoints/conf_grpo"
     - "/nfs/h100/raid/chem/checkpoints/conf_grpo"
 
 data:
@@ -91,12 +91,19 @@ data:
     - "3DMolGen_data/binned_all/processed_strings/test"
     - "binned_all/processed_strings/test"
 
-  binned_stripped_conformers_train:
-    - "binned_groped_v3/processed_strings/train"
-  binned_stripped_conformers_valid:
-    - "binned_groped_v3/processed_strings/valid"
-  binned_stripped_conformers_test:
-    - "binned_groped_v3/processed_strings/test"
+  binned_grouped_conformers_train:
+    - "binned_grouped_v4/processed_strings/train"
+  binned_grouped_conformers_valid:
+    - "binned_grouped_v4/processed_strings/valid"
+  binned_grouped_conformers_test:
+    - "binned_grouped_v4/processed_strings/test"
+
+  binned_paired_conformers_train:
+    - "binned_groped_v2/processed_strings/train"
+  binned_paired_conformers_valid:
+    - "binned_groped_v2/processed_strings/valid"
+  binned_paired_conformers_test:
+    - "binned_groped_v2/processed_strings/test"
 
   filtered_conformers_train: 
     - "3DMolGen_data/binned_filtered/processed_strings/train"
@@ -257,6 +264,24 @@ models:
       "3e": "step-24300-hf"
       "4e": "step-32400-hf"
       "5e": "step-40500-hf"
+
+  qw600_pre_binned_paired:
+    root: "qwen3_06b/260126-0653-7cf8-qwen3_06b_pre_5e_8e-4_binned_grouped"
+    steps:
+      "1e": "step-5500"
+      "2e": "step-11000"
+      "3e": "step-16500"
+      "4e": "step-22000"
+      "5e": "step-27500"
+
+  qw600_pre_binned_grouped:
+    root: "qwen3_06b/260126-1354-3b2e-qwen3_06b_pre_5e_8e-4_binned_grouped"
+    steps:
+      "1e": "step-5500"
+      "2e": "step-11000"
+      "3e": "step-16500"
+      "4e": "step-22000"
+      "5e": "step-27500"
 
   # ---------- GRPO / FINETUNED MODELS (same structure) ----------
 
