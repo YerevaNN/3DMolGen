@@ -1,7 +1,7 @@
 validation:
   enable_numerical_validation: true
   use_dataset_prompts: false
-  validation_batch_size: 2048
+  validation_batch_size: 4096
   max_conformer_tokens: 1500
   max_ground_truths: 30
   stop_after_first_conformer: true
@@ -28,6 +28,7 @@ grpo:
   grad_acc_steps: 1
   per_device_batch_size: 2
   scheduler: cosine
+  scale_rewards: none
   importance_sampling_level: sequence
   epsilon_high: 0.0012
   epsilon_low: 5e-4
