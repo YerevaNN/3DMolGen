@@ -1,7 +1,10 @@
 validation:
   enable_numerical_validation: true
-  use_dataset_prompts: true
+  use_dataset_prompts: false
   validation_batch_size: 2048
+  max_conformer_tokens: 1500
+  max_ground_truths: 30
+  stop_after_first_conformer: true
   eval_steps: 200
 dataset:
   dataset_path: /data/molgen/cartesian_v5_binned_grouped/grouped_binned_run1/train_smiles.jsonl
@@ -26,36 +29,45 @@ grpo:
   per_device_batch_size: 2
   scheduler: cosine
   importance_sampling_level: sequence
+  epsilon_high: 0.0012
+  epsilon_low: 5e-4
   adam_beta1: 0.9
   adam_beta2: 0.95
   weight_decay: 0.0
+  num_iterations: 1
   warmup_ratio: 0.03
   max_grad_norm: 1.0
   beta: 0
   seed: 1
   max_ground_truths: 30
   max_steps: 2000
+  posebusters:
+    chunk_size: 16
+    energy_num_threads: 1
+    max_workers: 4
+    mode: geometry
   sampling_top_k: 50
+  steps_per_generation: 8
   enable_conformer_logits_processor: true
   target_conformers: 8
   fbeta_use_binned_decoder: true
   fbeta_beta: 1.5
-  fbeta_gamma: 1.5
+  fbeta_gamma: 0.0
   fbeta_delta: 0.75
-  fbeta_dup_rmsd_tau: 0.3
+  fbeta_dup_rmsd_tau: 0.0
   fbeta_recall_ref_sample: 12
   fbeta_min_valid_to_score: 0
-  fbeta_drop_if_valid_lt: 3
-  fbeta_warmup_lambda: 0.1
-  fbeta_warmup_sigma: 0.75
+  fbeta_drop_if_valid_lt: 0
+  fbeta_warmup_lambda: 0.0
+  fbeta_warmup_sigma: 0.0
   log_success_sample_every: 10
   log_success_sample_chars: 400
   log_debug_sample_every: 10
   log_debug_sample_chars: 400
   log_full_sample_every: 10
 model:
-  checkpoint_path: /home/chem-project/checkpoints/qwen3_06b/260123-0058-1aea-qwen3_06b_pre_4e_8e-4_binned_grouped/step-34000-hf
-  tokenizer_path: src/molgen3D/training/tokenizers/Qwen3_tokenizer_custom
+  checkpoint_path: /data/chem-project/checkpoints/qwen3_06b/260123-0058-1aea-qwen3_06b_pre_4e_8e-4_binned_grouped/step-34000-hf
+  tokenizer_path: src/molgen3D/training/tokenizers/Qwen3_tokenizer_binned
   mol_tags:
   - '[SMILES]'
   - '[/SMILES]'
@@ -67,6 +79,6 @@ model:
 processing:
   eos_token_id: 151672
 run:
-  name: qwen3_fbeta_binned
+  name: qwen3_fscore_d075_b1.5_g0_w0_warmup0_tau0
 trainer:
   attn_implementation: sdpa

@@ -9,19 +9,19 @@ base_paths:
   geom_dataset_root:
     - "/data/molgen/GEOM_data/torsional_diff_gdrive/extracted"
   ckpts_root:
-    - "/home/chem-project/checkpoints"
+    - "/data/chem-project/checkpoints"
   hf_yerevann_root:
     - "/nfs/h100/raid/chem/checkpoints/hf/yerevann"
-    - "/home/chem-project/checkpoints/hf/yerevann"
+    - "/data/chem-project/checkpoints/hf/yerevann"
   qwen_yerevann_root:
-    - "/home/chem-project/checkpoints"
-    - "/home/chem-project/checkpoints/yerevann"
+    - "/data/chem-project/checkpoints"
+    - "/data/chem-project/checkpoints/yerevann"
     - "/nfs/h100/raid/chem/checkpoints/yerevann"
   grpo_root:
-    - "/home/chem-project/checkpoints/conf_grpo"
+    - "/data/chem-project/checkpoints/conf_grpo"
     - "/nfs/h100/raid/chem/checkpoints/conf_grpo"
   qwen3_grpo_root:
-    - "/home/chem-project/checkpoints/conf_grpo"
+    - "/data/chem-project/checkpoints/conf_grpo"
     - "/nfs/h100/raid/chem/checkpoints/conf_grpo"
   gen_results_root: "outputs/gen_results"
   eval_results_root: "outputs/eval_results"
@@ -29,18 +29,18 @@ base_paths:
   pretrain_logs_root: "outputs/pretrain_logs"
   wandb_root: "wandb_runs"
   qwen3_0.6b_base_model:
-    - "/home/chem-project/checkpoints/Qwen3-0.6B-Base"
+    - "/data/chem-project/checkpoints/Qwen3-0.6B-Base"
     - "/nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b/Qwen3-0.6B-Base"
-    - "/home/chem-project/checkpoints/yerevann/qwen3_06b/Qwen3-0.6B-Base"
+    - "/data/chem-project/checkpoints/yerevann/qwen3_06b/Qwen3-0.6B-Base"
   tokenizers_root: "src/molgen3D/training/tokenizers"
 
 ckpts:
   qwen3_06b:
-    - "/home/chem-project/checkpoints/qwen3_06b"
+    - "/data/chem-project/checkpoints/qwen3_06b"
     - "/nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b"
-    - "/home/chem-project/checkpoints/yerevann/qwen3_06b"
+    - "/data/chem-project/checkpoints/yerevann/qwen3_06b"
   qwen3_grpo:
-    - "/home/chem-project/checkpoints/conf_grpo"
+    - "/data/chem-project/checkpoints/conf_grpo"
     - "/nfs/h100/raid/chem/checkpoints/conf_grpo"
 
 data:
@@ -54,7 +54,9 @@ data:
 
 
   pretokenized_prompts: "3DMolGen_data/pretokenized_prompts.json"
-  validation_pickle: "3DMolGen_data/valid_set.pickle"
+  validation_pickle:
+    - "/home/chem-project/mb-3dmolgen/3DMolGen/data/valid_set.pickle"
+    - "3DMolGen_data/valid_set.pickle"
 
   rdkit_folder: "rdkit_folder"
   test_mols: "geom_processed/test_smiles_corrected.csv"
@@ -338,3 +340,12 @@ models:
     steps:
       "2000": "checkpoint-2000"
     run_id: "grpo-20260105-1309-qwen3-v3-125-rec-div-scale50-rho0.3-2000"
+
+  qwen3-1aea-binned_grouped:
+    root: "260123-0058-1aea-qwen3_06b_pre_4e_8e-4_binned_grouped"
+    steps:
+      "1e": "step-8500-hf"
+      "2e": "step-17000-hf"
+      "3e": "step-25500-hf"
+      "4e": "step-34000-hf"
+    run_id: "grpo-20260123-0058-qwen3-06b-pre-4e-8e-4-binned-grouped"

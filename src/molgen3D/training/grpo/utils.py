@@ -284,6 +284,63 @@ def create_code_snapshot(project_root: str, snapshot_dir: str):
             dirs_exist_ok=True,
             ignore=ignore_patterns,
         )
+    _sanitize_snapshot_numerical_validator(destination_root)
+
+
+def _sanitize_snapshot_numerical_validator(destination_root: Path) -> None:
+    """Normalize indentation in numerical_validator.py within a snapshot."""
+    target_file = destination_root / "training" / "grpo" / "numerical_validator.py"
+    if not target_file.exists():
+        return
+
+    try:
+        lines = target_file.read_text().splitlines()
+    except Exception:
+        return
+
+    changed = False
+    seed_value_indent = None
+
+    for idx, line in enumerate(lines):
+        stripped = line.lstrip()
+
+        if stripped == "seed_value = None":
+            seed_value_indent = line[:len(line) - len(stripped)]
+
+        if stripped == "if per_rank_seed is not None:" and seed_value_indent is not None:
+            base_indent = line[:len(line) - len(stripped)]
+            child_indent = base_indent + "    "
+
+            # Ensure the seed_value assignment is indented as a child.
+            if idx + 1 < len(lines) and lines[idx + 1].lstrip().startswith(
+                "seed_value = per_rank_seed + batch_start"
+            ):
+                lines[idx + 1] = child_indent + lines[idx + 1].lstrip()
+                changed = True
+
+            # Ensure manual_seed calls are indented as children.
+            if idx + 2 < len(lines) and lines[idx + 2].lstrip().startswith("torch.manual_seed("):
+                lines[idx + 2] = child_indent + lines[idx + 2].lstrip()
+                changed = True
+            if idx + 3 < len(lines) and lines[idx + 3].lstrip().startswith('if device.type == "cuda"'):
+                lines[idx + 3] = child_indent + lines[idx + 3].lstrip()
+                changed = True
+            if idx + 4 < len(lines) and lines[idx + 4].lstrip().startswith("torch.cuda.manual_seed_all("):
+                lines[idx + 4] = child_indent + "    " + lines[idx + 4].lstrip()
+                changed = True
+
+        if stripped == "else:" and idx >= 1:
+            recent_window = "\n".join(lines[max(0, idx - 5):idx])
+            if "decode_cartesian_binned" in recent_window:
+                if idx + 1 < len(lines) and lines[idx + 1].lstrip().startswith(
+                    "generated_mol = decode_cartesian_v2("
+                ):
+                    indent = line[:len(line) - len(stripped)] + "    "
+                    lines[idx + 1] = indent + lines[idx + 1].lstrip()
+                    changed = True
+
+    if changed:
+        target_file.write_text("\n".join(lines) + "\n")
 
 def dataclass_to_dict(obj):
     """Convert dataclass objects to dictionary recursively."""

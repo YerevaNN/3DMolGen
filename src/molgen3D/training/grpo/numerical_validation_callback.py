@@ -4,10 +4,8 @@ Callback for numerical validation during GRPO training.
 
 from typing import Optional
 
+from loguru import logger
 from transformers import TrainerCallback, TrainingArguments, TrainerState, TrainerControl
-from transformers.utils import logging
-
-logger = logging.get_logger(__name__)
 
 
 class NumericalValidationCallback(TrainerCallback):
