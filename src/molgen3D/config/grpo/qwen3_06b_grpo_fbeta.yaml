@@ -22,7 +22,7 @@ grpo:
   output_base_dir: ./grpo_outputs
   checkpoint_base_dir: /home/chem-project/checkpoints/conf_grpo
   reward_strategy: fbeta
-  learning_rate: 6.0e-05
+  learning_rate: 8.0e-05
   temperature: 1.0
   num_generations: 8
   grad_acc_steps: 1
@@ -47,18 +47,18 @@ grpo:
     energy_num_threads: 1
     max_workers: 4
     mode: geometry
-  sampling_top_k: 50
+  sampling_top_k: 100
   steps_per_generation: 8
   enable_conformer_logits_processor: true
-  target_conformers: 8
+  target_conformers: 12
   fbeta_use_binned_decoder: true
-  fbeta_beta: 1.5
-  fbeta_gamma: 0.0
+  fbeta_beta: 2.0
+  fbeta_gamma: 1.0
   fbeta_delta: 0.75
   fbeta_dup_rmsd_tau: 0.0
-  fbeta_recall_ref_sample: 12
-  fbeta_min_valid_to_score: 0
-  fbeta_drop_if_valid_lt: 0
+  fbeta_recall_ref_sample: 24
+  fbeta_min_valid_to_score: 2
+  fbeta_drop_if_valid_lt: 2
   fbeta_warmup_lambda: 0.0
   fbeta_warmup_sigma: 0.0
   log_success_sample_every: 10
@@ -80,6 +80,6 @@ model:
 processing:
   eos_token_id: 151672
 run:
-  name: qwen3_fscore_d075_b1.5_g0_w0_warmup0_tau0
+  name: qwen3_fscore_d075_b2.0_g1.0_w0_warmup0_tau0
 trainer:
   attn_implementation: sdpa

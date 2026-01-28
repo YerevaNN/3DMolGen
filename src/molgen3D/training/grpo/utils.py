@@ -19,6 +19,9 @@ import types
 
 # Global variables
 _smiles_mapping = None
+_smiles_mapping_neutral = None
+_smiles_mapping_achiral = None
+_conformer_key_cache = {}
 _geom_data_path = None
 
 @contextmanager
@@ -36,13 +39,27 @@ def load_smiles_mapping(mapping_path: str | Path) -> None:
     Args:
         mapping_path: Path to the JSON file containing the SMILES mapping
     """
-    global _smiles_mapping
+    global _smiles_mapping, _smiles_mapping_neutral, _smiles_mapping_achiral
     if _smiles_mapping is None:
         resolved_path = resolve_data_path(mapping_path)
         _smiles_mapping = load_json(str(resolved_path))
         logger.info(
             f"Loaded SMILES mapping ({len(_smiles_mapping)} entries) from {resolved_path}"
         )
+        _smiles_mapping_neutral = {}
+        _smiles_mapping_achiral = {}
+        for key, value in _smiles_mapping.items():
+            neutral = _neutralized_canon_smiles(key)
+            if neutral and neutral not in _smiles_mapping_neutral:
+                _smiles_mapping_neutral[neutral] = value
+            try:
+                mol = Chem.MolFromSmiles(key)
+            except Exception:
+                mol = None
+            if mol is not None:
+                achiral = Chem.MolToSmiles(remove_chiral_info(Chem.Mol(mol)), isomericSmiles=False)
+                if achiral and achiral not in _smiles_mapping_achiral:
+                    _smiles_mapping_achiral[achiral] = value
 
 def set_geom_data_path(path: str) -> None:
     """Set the path to the GEOM data folder.
@@ -108,6 +125,21 @@ def load_ground_truths(key_mol_smiles, num_gt: int = 16):
         if alt_key:
             filepath = _smiles_mapping.get(alt_key)
             logger.info("Resolved SMILES mapping via alternate key: {} -> {}", key_mol_smiles, alt_key)
+        elif _smiles_mapping_neutral is not None or _smiles_mapping_achiral is not None:
+            neutral_key = _neutralized_canon_smiles(key_mol_smiles)
+            if neutral_key and _smiles_mapping_neutral and neutral_key in _smiles_mapping_neutral:
+                filepath = _smiles_mapping_neutral.get(neutral_key)
+                logger.info("Resolved SMILES mapping via neutralized key: {} -> {}", key_mol_smiles, neutral_key)
+            if filepath is None and _smiles_mapping_achiral is not None:
+                try:
+                    mol = Chem.MolFromSmiles(key_mol_smiles)
+                except Exception:
+                    mol = None
+                if mol is not None:
+                    achiral_key = Chem.MolToSmiles(remove_chiral_info(Chem.Mol(mol)), isomericSmiles=False)
+                    if achiral_key in _smiles_mapping_achiral:
+                        filepath = _smiles_mapping_achiral.get(achiral_key)
+                        logger.info("Resolved SMILES mapping via achiral key: {} -> {}", key_mol_smiles, achiral_key)
         else:
             logger.error("Missing SMILES mapping for pad key {}", key_mol_smiles)
             return None
@@ -134,11 +166,26 @@ def load_ground_truths(key_mol_smiles, num_gt: int = 16):
                             break
                 match_kind = None
                 if not alt_key:
-                    for candidate in conformers.keys():
-                        if same_molecular_graph(key_mol_smiles, candidate):
-                            alt_key = candidate
-                            match_kind = "graph"
-                            break
+                    cache_key = str(filepath)
+                    cached = _conformer_key_cache.get(cache_key)
+                    target_neutral = _neutralized_canon_smiles(key_mol_smiles)
+                    if cached is None and target_neutral is not None:
+                        neutral_index = {}
+                        for candidate in conformers.keys():
+                            candidate_neutral = _neutralized_canon_smiles(candidate)
+                            if candidate_neutral is not None and candidate_neutral not in neutral_index:
+                                neutral_index[candidate_neutral] = candidate
+                        _conformer_key_cache[cache_key] = neutral_index
+                        cached = neutral_index
+                    if cached and target_neutral is not None and target_neutral in cached:
+                        alt_key = cached[target_neutral]
+                        match_kind = "neutralized"
+                    else:
+                        for candidate in conformers.keys():
+                            if same_molecular_graph(key_mol_smiles, candidate):
+                                alt_key = candidate
+                                match_kind = "graph"
+                                break
                 if not alt_key:
                     target_neutral = _neutralized_canon_smiles(key_mol_smiles)
                     if target_neutral is not None:
