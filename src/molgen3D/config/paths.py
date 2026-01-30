@@ -38,12 +38,9 @@ GEOM_DATA_KEYS = {
     "filtered_conformers_train",
     "filtered_conformers_valid",
     "filtered_conformers_test",
-    "binned_grouped_conformers_train",
-    "binned_grouped_conformers_valid",
-    "binned_grouped_conformers_test",
-    "binned_paired_conformers_train",
-    "binned_paired_conformers_valid",
-    "binned_paired_conformers_test",
+    "binned_stripped_conformers_train",
+    "binned_stripped_conformers_valid",
+    "binned_stripped_conformers_test",
 }
 
 
@@ -149,10 +146,6 @@ def _get_ckpt_base_path(root_rel: str, base_paths: dict) -> Path:
         return _resolve_path_value(default)
 
     if root_rel.startswith("qwen3_06b"):
-        # Check if it exists in outputs/hf_checkpoints first
-        local_hf = REPO_ROOT / "outputs" / "hf_checkpoints" / root_rel
-        if local_hf.exists():
-            return REPO_ROOT / "outputs" / "hf_checkpoints"
         return _resolve_from_keys("qwen_yerevann_root", "hf_yerevann_root")
     if "qwen3" in root_rel:
         return _resolve_from_keys("qwen3_grpo_root", "grpo_root")

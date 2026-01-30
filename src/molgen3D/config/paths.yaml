@@ -283,6 +283,24 @@ models:
       "4e": "step-22000"
       "5e": "step-27500"
 
+  qw600_pre_binned_paired:
+    root: "qwen3_06b/260126-0653-7cf8-qwen3_06b_pre_5e_8e-4_binned_grouped"
+    steps:
+      "1e": "step-5500"
+      "2e": "step-11000"
+      "3e": "step-16500"
+      "4e": "step-22000"
+      "5e": "step-27500"
+
+  qw600_pre_binned_grouped:
+    root: "qwen3_06b/260126-1354-3b2e-qwen3_06b_pre_5e_8e-4_binned_grouped"
+    steps:
+      "1e": "step-5500"
+      "2e": "step-11000"
+      "3e": "step-16500"
+      "4e": "step-22000"
+      "5e": "step-27500"
+
   # ---------- GRPO / FINETUNED MODELS (same structure) ----------
 
   m380_1e_1xgrpo_100e_100s:

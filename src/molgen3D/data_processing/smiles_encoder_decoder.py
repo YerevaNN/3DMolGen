@@ -64,28 +64,33 @@ _ORGANIC_SUBSET = {"B", "C", "N", "O", "P", "S", "F", "Cl", "Br", "I", "b", "c",
 def strip_smiles(s: str) -> str:
     """
     Normalize enriched SMILES strings into a 'canonical-ish' comparison form.
+
+    Supported inputs:
+      - Legacy enriched strings:  C<...>N<...> (atoms without brackets + coords)
+      - Current enriched strings: [C]<...>[N]<...> (atoms wrapped in brackets)
+      - Binned enriched strings: [C]123456789[N]123456789 (atoms wrapped in brackets + digits)
+      - Plain SMILES:            C[NH2+]Cc1...
+
+    Steps:
+      1. Remove every <...> coordinate block.
+      2. Remove binned coordinate digits: [C]123456789 -> [C].
+      3. Collapse decorative carbon H-counts: [CH3],[CH2],[CH],[cH] -> C/c.
+      4. Drop brackets around simple atoms: [C]->C, [c]->c, [N]->N, ...
+      5. Keep chemically meaningful brackets: [NH2+], [nH], [H], [Pt+2], etc.
     """
+
     if not s:
         return ""
 
-    # 1) Remove coordinate digits (exactly 3*digit_width digits following an atom symbol or bracket)
-    # We use a broad atom pattern here to catch everything.
-    # The digits are always 3 per axis, so 9 digits total for v2 binned.
-    # We also handle the case where digits might follow a closing bracket or a bare atom.
     s = _WHITESPACE_RE.sub('', s)
-    
-    # This regex removes exactly 9 digits that follow an atom symbol or a closing bracket.
-    # It's specific to the v2 binned format with digit_width=3.
-    s = re.sub(r"(\[[^\]]+\]|\b[A-Z][a-z]?|[cnospb])\d{9}", r"\1", s)
-    
-    # 2) Remove any remaining <...> coordinate blocks (legacy/v1)
     s = _BRACKET_COORD_RE.sub(r"\1", s)
-    base_smiles = _COORD_BLOCK_RE.sub('', s)
+    s = _COORD_BLOCK_RE.sub('', s)
 
-    # 3) Remove semicolons (tokenizer artifacts)
-    base_smiles = base_smiles.replace(';', '')
+    # Remove binned coordinate digits that follow a bracketed atom
+    # e.g., [C]123456789 -> [C]
+    s = re.sub(r'(\[[^\]]+\])\d+', r'\1', s)
 
-    # 4) normalize bracket atoms
+    # 2) normalize bracket atoms
     def repl(m: re.Match) -> str:
         inner = m.group(1)
         if re.fullmatch(r'([Cc])H\d*', inner):
