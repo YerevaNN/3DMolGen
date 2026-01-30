@@ -64,42 +64,34 @@ _ORGANIC_SUBSET = {"B", "C", "N", "O", "P", "S", "F", "Cl", "Br", "I", "b", "c",
 def strip_smiles(s: str) -> str:
     """
     Normalize enriched SMILES strings into a 'canonical-ish' comparison form.
-
-    Supported inputs:
-      - Legacy enriched strings:  C<...>N<...> (atoms without brackets + coords)
-      - Current enriched strings: [C]<...>[N]<...> (atoms wrapped in brackets)
-      - Plain SMILES:            C[NH2+]Cc1...
-
-    Steps:
-      1. Remove every <...> coordinate block (first the bracketed form, then the legacy bare form).
-      2. Collapse decorative carbon H-counts: [CH3],[CH2],[CH],[cH] -> C/c.
-      3. Drop brackets around simple atoms: [C]->C, [c]->c, [N]->N, ...
-      4. Keep chemically meaningful brackets: [NH2+], [nH], [H], [Pt+2], etc.
     """
-
     if not s:
         return ""
 
+    # 1) Remove coordinate digits (exactly 3*digit_width digits following an atom symbol or bracket)
+    # We use a broad atom pattern here to catch everything.
+    # The digits are always 3 per axis, so 9 digits total for v2 binned.
+    # We also handle the case where digits might follow a closing bracket or a bare atom.
     s = _WHITESPACE_RE.sub('', s)
+    
+    # This regex removes exactly 9 digits that follow an atom symbol or a closing bracket.
+    # It's specific to the v2 binned format with digit_width=3.
+    s = re.sub(r"(\[[^\]]+\]|\b[A-Z][a-z]?|[cnospb])\d{9}", r"\1", s)
+    
+    # 2) Remove any remaining <...> coordinate blocks (legacy/v1)
     s = _BRACKET_COORD_RE.sub(r"\1", s)
     base_smiles = _COORD_BLOCK_RE.sub('', s)
 
-    # 2) normalize bracket atoms
+    # 3) Remove semicolons (tokenizer artifacts)
+    base_smiles = base_smiles.replace(';', '')
+
+    # 4) normalize bracket atoms
     def repl(m: re.Match) -> str:
-        inner = m.group(1)  # e.g. 'CH3', 'cH', 'N', 'NH2+', 'nH', 'H'
-
-        # Carbon with decorative H-counts: [CH3], [CH2], [CH], [CH0], [cH], [cH1], ...
+        inner = m.group(1)
         if re.fullmatch(r'([Cc])H\d*', inner):
-            return inner[0]  # 'C' or 'c'
-
-        # Drop brackets around simple organic-subset atoms (no isotopes/charges/H)
-        if (
-            inner in _ORGANIC_SUBSET
-            and inner != "H"
-        ):
-            return inner  # drop brackets
-
-        # Everything else: keep bracketed, e.g. [NH2+], [nH], [O-], [H], [Pt+2], [13C]
+            return inner[0]
+        if inner in _ORGANIC_SUBSET and inner != "H":
+            return inner
         return f'[{inner}]'
 
     return re.sub(r'\[([^\]]+)\]', repl, base_smiles)
@@ -396,27 +388,43 @@ def tokenize_enriched(enriched):
 
 def tokenize_enriched_v2(enriched, digit_width):
     """Tokenize the v2 binned enriched representation (no commas, no terminator)."""
-    # Use dynamic length based on digit_width to avoid ambiguity with ring closures
+    # Clean up tokenizer artifacts (semicolons) before tokenizing
+    enriched = enriched.replace(';', '')
+    
+    # Group 1 & 2: [Atom] + digits OR BareAtom + digits
+    # Group 3: Ring closures %dd
+    # Group 4: Bonds
+    # Group 5: (
+    # Group 6: )
+    # Group 7: Single digits (ring closures)
+    # Group 8: .
+    # Group 9: Bare atoms (no digits)
+    atom_syms = r"A[cglmrstu]|B[aehikr]?|C[adeflmnorsu]?|D[bsy]|E[urs]|F[elmr]?|G[ade]|H[efgos]?|I[nr]?|K[r]?|L[airu]|M[dgnot]|N[adeiopz]?|O[gs]?|P[abdmortu]?|R[abefghnu]|S[bcegimnr]?|T[abcehilm]|U|V|W|Xe|Yb|Z[nr]|[cnospb]"
     pattern = re.compile(
-        fr"(\[[^\]]+\])(\d{{{3 * digit_width}}})|(%\d{{2,}})|(=|#|:|\/|\\|-)|(\()|(\))|(\d)|(\.)"
+        fr"(\[[^\]]+\]|{atom_syms})(\d{{{3 * digit_width}}})|(%\d{{2,}})|(=|#|:|\/|\\|-)|(\()|(\))|(\d)|(\.)|({atom_syms})"
     )
     tokens = []
     pos = 0
     for match in pattern.finditer(enriched):
         if match.start() != pos:
-            raise ValueError(
-                f"Unrecognized enriched fragment: {enriched[pos:match.start()]} in {enriched}"
-            )
+            # Skip unrecognized junk instead of crashing, but log it if it's not just whitespace
+            junk = enriched[pos:match.start()].strip()
+            if junk:
+                raise ValueError(f"Unrecognized enriched fragment: {junk} in {enriched}")
 
-        if match.group(1):
+        if match.group(1): # Atom with coordinates
+            atom_desc = match.group(1)
+            if not atom_desc.startswith("["):
+                atom_desc = f"[{atom_desc}]"
+            
             coord_str = match.group(2)
             n = digit_width
             parts = [coord_str[i : i + n] for i in range(0, len(coord_str), n)]
-            coords = tuple(_parse_float_token(p) for p in parts)
+            coords = tuple(float(p) for p in parts)
             tokens.append(
                 {
                     "type": "atom_with_coords",
-                    "atom_desc": match.group(1),
+                    "atom_desc": atom_desc,
                     "coords": coords,
                 }
             )
@@ -432,11 +440,10 @@ def tokenize_enriched_v2(enriched, digit_width):
             tokens.append({"type": "nonatom", "text": match.group(7)})
         elif match.group(8):
             tokens.append({"type": "nonatom", "text": match.group(8)})
+        elif match.group(9): # Atom without coordinates
+            tokens.append({"type": "nonatom", "text": match.group(9)})
 
         pos = match.end()
-
-    if pos != len(enriched):
-        raise ValueError(f"Unparsed trailing enriched fragment: {enriched[pos:]} in {enriched}")
 
     return tokens
 

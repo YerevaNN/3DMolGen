@@ -520,14 +520,13 @@ def launch_inference_from_cli(
     if grid_run_inference:
         jobs = []
         param_grid = [
-            ("qw600_pre_binned_paired", "1e"),
-            ("qw600_pre_binned_paired", "2e"),
-            ("qw600_pre_binned_paired", "3e"),
-            ("qw600_pre_binned_paired", "4e"),
-            ("qw600_pre_binned_paired", "5e"),
             ("qw600_pre_binned_grouped", "1e"),
             ("qw600_pre_binned_grouped", "2e"),
             ("qw600_pre_binned_grouped", "3e"),
+            ("qw600_pre_binned_grouped", "4e"),
+            ("qw600_pre_binned_grouped", "5e"),
+            ("qw600_pre_binned_paired", "5e"),
+            ("qw600_pre_binned_paired", "4e"),
 
         ]
         
