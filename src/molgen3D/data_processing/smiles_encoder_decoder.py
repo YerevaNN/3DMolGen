@@ -92,14 +92,24 @@ def strip_smiles(s: str) -> str:
 
     # 2) normalize bracket atoms
     def repl(m: re.Match) -> str:
-        inner = m.group(1)
+        inner = m.group(1)  # e.g. 'CH3', 'cH', 'N', 'NH2+', 'nH', 'H'
+
+        # Carbon with decorative H-counts: [CH3], [CH2], [CH], [CH0], [cH], [cH1], ...
         if re.fullmatch(r'([Cc])H\d*', inner):
-            return inner[0]
-        if inner in _ORGANIC_SUBSET and inner != "H":
-            return inner
+            return inner[0]  # 'C' or 'c'
+
+        # Drop brackets around simple organic-subset atoms (no isotopes/charges/H)
+        if (
+            inner in _ORGANIC_SUBSET
+            and inner != "H"
+        ):
+            return inner  # drop brackets
+
+        # Everything else: keep bracketed, e.g. [NH2+], [nH], [O-], [H], [Pt+2], [13C]
         return f'[{inner}]'
 
-    return re.sub(r'\[([^\]]+)\]', repl, base_smiles)
+    base_smiles = re.sub(r'\[([^\]]+)\]', repl, s)
+    return base_smiles.replace(';', '')
 
 def _expected_plain_token(atom) -> str:
     if atom.GetIsAromatic():

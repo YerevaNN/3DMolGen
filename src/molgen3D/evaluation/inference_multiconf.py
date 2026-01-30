@@ -24,17 +24,19 @@ import random
 import fcntl
 from collections import defaultdict, Counter
 from typing import List, Optional
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import torch
 import cloudpickle
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from tqdm import tqdm
 from loguru import logger
+import submitit
 
 from molgen3D.data_processing.smiles_encoder_decoder import (
     decode_cartesian_v2,
     strip_smiles,
-    decode_cartesian_binned,
+    decode_cartesian_binned_v2,
     get_bins_for_coords
 )
 from molgen3D.evaluation.utils import (
@@ -344,7 +346,7 @@ def generate_multiple_conformers(
     
     # Decode the output
     decoded_output = tokenizer.decode(sequence, skip_special_tokens=False)
-    decoded_output = decoded_output.replace(tokenizer.eos_token, "").replace(tokenizer.pad_token, "")
+    decoded_output = decoded_output.replace(tokenizer.eos_token, "").replace(tokenizer.pad_token, "").replace(";", "")
     
     # Extract ALL generated conformers from the output
     conformer_strings = []
@@ -378,13 +380,13 @@ def generate_multiple_conformers(
         generated_smiles = strip_smiles(generated_conformer)
         if not same_molecular_graph(canonical_smiles, generated_smiles):
             if stats["smiles_mismatch"] < 20:
-                logger.info(f"smiles mismatch: \n{canonical_smiles=}\n{generated_smiles=}")
+                logger.info(f"smiles mismatch: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
             stats["smiles_mismatch"] += 1
         else:
             # Try to decode the conformer
             try:
                 if binned:
-                    mol_obj = decode_cartesian_binned(generated_conformer, bins)
+                    mol_obj = decode_cartesian_binned_v2(generated_conformer, bins)
                 else:
                     mol_obj = decode_cartesian_v2(generated_conformer)
                 mol_objects.append(mol_obj)
@@ -558,49 +560,152 @@ def run_multiconf_inference(inference_config: dict):
 
 def launch_multiconf_inference_from_cli(
     device: str,
+    grid_run_inference: bool = False,
     test_set: str = "distinct",
+    xl: bool = False,
+    qm9: bool = False,
     conformers_per_batch: int = 8,
     conformer_multiplier: int = 2,
     limit: Optional[int] = None,
     binned: bool = False,
+    parallel_jobs: int = 1,
 ) -> None:
     """Launch multi-conformer inference from CLI arguments.
     
     Args:
         device: Device to run on
+        grid_run_inference: Whether to run a grid of models
         test_set: Test dataset to use
+        xl: Whether to run on XL dataset
+        qm9: Whether to run on QM9 dataset
         conformers_per_batch: Number of conformers to generate per model.generate() call
         conformer_multiplier: Multiply ground truth count by this (e.g., 2 = generate 2x ground truths)
         limit: Limit number of SMILES to process
         binned: Whether to use binned decoding
+        parallel_jobs: Number of parallel inference jobs for local execution
     """
     
     from molgen3D.config.sampling_config import gen_num_codes
     
-    inference_config = {
+    # Determine which test sets to run
+    test_sets_to_run = []
+    if test_set:
+        test_sets_to_run.append(test_set)
+    if xl:
+        test_sets_to_run.append("xl")
+    if qm9:
+        test_sets_to_run.append("qm9")
+    
+    if not test_sets_to_run:
+        logger.info("No test sets specified. Skipping inference.")
+        return
+
+    n_gpus = 1
+    node = device if device in ["a100", "h100"] else "local"
+    executor = None
+    
+    if device in ["a100", "h100"]:
+        executor = submitit.AutoExecutor(folder="outputs/slurm_jobs/conf_gen/job_%j")
+        executor.update_parameters(
+            name="conf_gen_multiconf",
+            timeout_min=24 * 24 * 60,
+            gpus_per_node=n_gpus,
+            nodes=1,
+            mem_gb=80,
+            cpus_per_task=n_gpus * 12,
+            slurm_additional_parameters={"partition": node},
+        )
+
+    base_inference_config = {
         "model_path": get_ckpt("m600_qwen_pre_4seq_binned", "4e"),
         "tokenizer_path": get_tokenizer_path("qwen3_0.6b_custom"),
         "torch_dtype": "bfloat16",
         "gen_config": sampling_configs["top_p_sampling1"],
-        "device": "cuda" if device == "local" else device,
+        "device": "cuda",
         "results_path": get_base_path("gen_results_root"),
-        "run_name": f"multiconf_{conformer_multiplier}x_{conformers_per_batch}batch_{test_set}",
-        "test_data_path": get_data_path(f"{test_set}_smi"),
-        "test_set": test_set,
+        "run_name": "multiconf_qwen_pre_4e_grouped",
         "conformers_per_batch": conformers_per_batch,
         "conformer_multiplier": conformer_multiplier,
         "limit": limit,
         "binned": binned,
     }
     
-    logger.info(f"Launching multi-conformer inference with config: {inference_config}")
-    run_multiconf_inference(inference_config=inference_config)
+    if grid_run_inference:
+        param_grid = [
+            ("qw600_pre_binned_paired", "1e"),
+            ("qw600_pre_binned_paired", "2e"),
+            ("qw600_pre_binned_paired", "3e"),
+            ("qw600_pre_binned_paired", "4e"),
+            ("qw600_pre_binned_paired", "5e"),
+            ("qw600_pre_binned_grouped", "1e"),
+            ("qw600_pre_binned_grouped", "2e"),
+            ("qw600_pre_binned_grouped", "3e"),
+            ("qw600_pre_binned_grouped", "4e"),
+            ("qw600_pre_binned_grouped", "5e"),
+        ]
+        
+        all_configs = []
+        for model_key in param_grid:
+            for test_set_name in test_sets_to_run:
+                grid_config = dict(base_inference_config)
+                
+                if isinstance(model_key, tuple):
+                    grid_config["model_path"] = get_ckpt(model_key[0], model_key[1])
+                    model_key_str = f"{model_key[0]}_{model_key[1]}"
+                else:
+                    grid_config["model_path"] = get_ckpt(model_key)
+                    model_key_str = model_key
+                
+                grid_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
+                grid_config["test_set"] = test_set_name
+                grid_config["run_name"] = f"multiconf_{model_key_str}_{test_set_name}"
+                all_configs.append((grid_config, grid_config["run_name"]))
+    else:
+        all_configs = []
+        for test_set_name in test_sets_to_run:
+            inference_config = dict(base_inference_config)
+            inference_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
+            inference_config["test_set"] = test_set_name
+            inference_config["run_name"] = f"multiconf_{conformer_multiplier}x_{conformers_per_batch}batch_{test_set_name}"
+            all_configs.append((inference_config, inference_config["run_name"]))
+
+    if executor is not None:
+        with executor.batch():
+            for config, _ in all_configs:
+                logger.info(f"Submitting job for {config['run_name']}...")
+                executor.submit(run_multiconf_inference, inference_config=config)
+    else:
+        if parallel_jobs <= 1:
+            logger.info(f"Running {len(all_configs)} jobs locally (sequential)")
+            for config, run_name in all_configs:
+                logger.info(f"Running inference for {run_name}...")
+                run_multiconf_inference(inference_config=config)
+        else:
+            max_workers = min(parallel_jobs, len(all_configs))
+            logger.info(f"Running {len(all_configs)} jobs locally in parallel (max workers: {max_workers})")
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                future_to_name = {
+                    executor.submit(run_multiconf_inference, inference_config=config): name
+                    for config, name in all_configs
+                }
+                for future in as_completed(future_to_name):
+                    run_name = future_to_name[future]
+                    try:
+                        future.result()
+                        logger.info(f"✓ Completed: {run_name}")
+                    except Exception as e:
+                        logger.error(f"✗ Exception in {run_name}: {e}")
+                        import traceback
+                        traceback.print_exc()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Multi-conformer inference with forced generation using ConformerControlLogitsProcessor")
-    parser.add_argument("--device", type=str, choices=["local", "cuda"], default="local")
+    parser.add_argument("--device", type=str, choices=["local", "a100", "h100"], default="local")
+    parser.add_argument("--grid_run_inference", action="store_true")
     parser.add_argument("--test_set", type=str, default="distinct")
+    parser.add_argument("--xl", action="store_true")
+    parser.add_argument("--qm9", action="store_true")
     parser.add_argument("--conformers_per_batch", type=int, default=8,
                         help="Number of conformers to generate per model.generate() call (default: 8)")
     parser.add_argument("--conformer_multiplier", type=int, default=2,
@@ -608,14 +713,19 @@ if __name__ == "__main__":
     parser.add_argument("--limit", type=int, default=None,
                         help="Limit number of unique SMILES to process")
     parser.add_argument("--binned", action="store_true", default=False)
+    parser.add_argument("--parallel_jobs", type=int, default=1, help="Number of parallel inference jobs for local execution")
     
     args = parser.parse_args()
     
     launch_multiconf_inference_from_cli(
         device=args.device,
+        grid_run_inference=args.grid_run_inference,
         test_set=args.test_set,
+        xl=args.xl,
+        qm9=args.qm9,
         conformers_per_batch=args.conformers_per_batch,
         conformer_multiplier=args.conformer_multiplier,
         limit=args.limit,
         binned=args.binned,
+        parallel_jobs=args.parallel_jobs,
     )
