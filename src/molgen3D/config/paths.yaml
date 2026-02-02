@@ -118,6 +118,15 @@ models:
       "2e": "step-40000-hf"
       "3e": "step-60000-hf"
       "4e": "step-80000-hf"
+
+  m600_qwen_pre_4e_grouped:
+    root: "qwen3_06b/260123-0058-1aea-qwen3_06b_pre_4e_8e-4_binned_grouped"
+    steps:
+      "1e": "step-8500-hf"
+      "2e": "step-17000-hf"
+      "3e": "step-25500-hf"
+      "4e": "step-34000-hf"
+
     
   m600_qwen_scr:
     root: "qwen3_06b/251210-2018-e0bf-qwen3_06b_scr_4e_144effb"
