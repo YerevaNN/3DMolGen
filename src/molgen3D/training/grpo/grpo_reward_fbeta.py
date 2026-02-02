@@ -275,6 +275,7 @@ def _compute_completion_reward_from_parsed(
     beta = float(_get_config_value(config, "fbeta_beta", DEFAULT_BETA))
     gamma = float(_get_config_value(config, "fbeta_gamma", DEFAULT_GAMMA))
     dup_tau = float(_get_config_value(config, "fbeta_dup_rmsd_tau", DEFAULT_DUP_RMSD_TAU))
+    use_uniq_frac = bool(_get_config_value(config, "fbeta_use_uniq_frac", True))
     min_valid = int(_get_config_value(config, "fbeta_min_valid_to_score", DEFAULT_MIN_VALID_TO_SCORE))
     drop_if_valid_lt = int(_get_config_value(config, "fbeta_drop_if_valid_lt", DEFAULT_DROP_IF_VALID_LT))
     rmsd_workers = int(_get_config_value(config, "rmsd_workers", 0) or 0)
@@ -309,6 +310,8 @@ def _compute_completion_reward_from_parsed(
     completion_factor = (t_valid / float(max(target_k, 1))) ** gamma if t_valid > 0 else 0.0
     uniq_count = _count_unique_conformers(valid_mols, dup_tau)
     uniq_frac = float(uniq_count) / float(t_valid) if t_valid > 0 else 1.0
+    if not use_uniq_frac:
+        uniq_frac = 1.0
 
     ref_cache_key = f"{canonical_smiles}:{len(references)}"
     with profile_section(profiler, "reward_rmsd"):

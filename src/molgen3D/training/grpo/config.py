@@ -116,6 +116,7 @@ class GRPOConfig:
     fbeta_recall_ref_sample: int = 12
     fbeta_min_valid_to_score: int = 0
     fbeta_drop_if_valid_lt: int = 3
+    fbeta_use_uniq_frac: bool = True
     fbeta_use_binned_decoder: bool = False
     fbeta_binned_ranges: Optional[List[List[float]]] = None
     fbeta_binned_bin_size: float = 0.104
