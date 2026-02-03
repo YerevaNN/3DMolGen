@@ -82,13 +82,19 @@ def strip_smiles(s: str) -> str:
     if not s:
         return ""
 
+    # Remove any tags that might be present
+    s = s.replace("[CONFORMER]", "").replace("[/CONFORMER]", "")
+    s = s.replace("[SMILES]", "").replace("[/SMILES]", "")
+    s = s.replace(";", "")
+
     s = _WHITESPACE_RE.sub('', s)
     s = _BRACKET_COORD_RE.sub(r"\1", s)
     s = _COORD_BLOCK_RE.sub('', s)
 
     # Remove binned coordinate digits that follow a bracketed atom
     # e.g., [C]123456789 -> [C]
-    s = re.sub(r'(\[[^\]]+\])\d+', r'\1', s)
+    # We match exactly 9 digits to avoid stripping ring closures (usually 1-2 digits)
+    s = re.sub(r'(\[[^\]]+\])\d{9}', r'\1', s)
 
     # 2) normalize bracket atoms
     def repl(m: re.Match) -> str:
@@ -109,7 +115,7 @@ def strip_smiles(s: str) -> str:
         return f'[{inner}]'
 
     base_smiles = re.sub(r'\[([^\]]+)\]', repl, s)
-    return base_smiles.replace(';', '')
+    return base_smiles
 
 def _expected_plain_token(atom) -> str:
     if atom.GetIsAromatic():
@@ -402,10 +408,9 @@ def tokenize_enriched(enriched):
 
 
 def tokenize_enriched_v2(enriched, digit_width):
-    """Tokenize the v2 binned enriched representation (no commas, no terminator)."""
-    # Clean up tokenizer artifacts (semicolons) before tokenizing
-    enriched = enriched.replace(';', '')
-    
+    # Tokenize the v2 binned enriched representation (raw string).
+
+
     # Group 1 & 2: [Atom] + digits OR BareAtom + digits
     # Group 3: Ring closures %dd
     # Group 4: Bonds
@@ -788,16 +793,27 @@ def encode_cartesian_binned_v2(mol, bin_size, ranges=None):
 
 def decode_cartesian_binned_v2(enriched_string, bins, use_bin_center=True):
     """
-    Reconstruct an RDKit Mol (with conformer) from a v2 binned enriched string (no angle brackets).
+    Reconstruct an RDKit Mol (with conformer) from a v2 binned enriched string.
+
+    Supports both schemas:
+        - With semicolons: [c]123123123;[n]456456456;
+        - Without semicolons: [c]123123123[n]456456456
 
     The string must have been produced by ``encode_cartesian_binned_v2`` using
     the same set of ``bins`` (one array per axis).
+
+    Semicolons (';') are treated as optional delimiters and are stripped
+    before parsing, so both ``[c]123123123;`` and ``[c]123123123`` decode
+    identically here, while upstream code can still see the raw schema.
     """
     if len(bins) != 3:
         raise ValueError("bins must be a sequence of three bin arrays (x, y, z).")
 
     digit_width = get_digit_width(bins)
-    tokens = tokenize_enriched_v2(enriched_string, digit_width)
+    # Normalize optional semicolon terminators locally, without affecting
+    # other users of ``tokenize_enriched_v2`` that may rely on raw schemas.
+    normalized = enriched_string.replace(";", "")
+    tokens = tokenize_enriched_v2(normalized, digit_width)
 
     smiles_parts = []
     coords = []
