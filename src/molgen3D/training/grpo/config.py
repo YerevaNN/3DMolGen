@@ -117,6 +117,7 @@ class GRPOConfig:
     fbeta_min_valid_to_score: int = 0
     fbeta_drop_if_valid_lt: int = 3
     fbeta_use_uniq_frac: bool = True
+    fbeta_reward_mode: str = "fbeta"  # "fbeta", "precision_only", "valid_count", "valid_frac"
     fbeta_use_binned_decoder: bool = False
     fbeta_binned_ranges: Optional[List[List[float]]] = None
     fbeta_binned_bin_size: float = 0.104

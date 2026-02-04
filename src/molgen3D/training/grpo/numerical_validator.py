@@ -23,7 +23,7 @@ import torch.distributed as dist
 from loguru import logger
 
 from molgen3D.data_processing.smiles_encoder_decoder import (
-    decode_cartesian_binned,
+    decode_cartesian_binned_v2,
     decode_cartesian_v2,
     get_bins_for_coords,
     strip_smiles,
@@ -685,7 +685,7 @@ class GRPONumericalValidator:
                     # Try to parse the conformer
                     try:
                         if self._use_binned_decoder:
-                            generated_mol = decode_cartesian_binned(
+                            generated_mol = decode_cartesian_binned_v2(
                                 conformer_text, self._binned_bins
                             )
                         else:

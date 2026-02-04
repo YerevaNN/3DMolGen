@@ -217,7 +217,7 @@ def setup_job_executor(device_type, partition_name, num_gpus, num_nodes, run_nam
             name=run_name,
             timeout_min=24 * 24 * 60,  # 24 hours
             nodes=num_nodes,
-            mem_gb=80,
+            mem_gb=280,
             cpus_per_task=num_gpus * 16,
             slurm_additional_parameters={
                 "partition": partition_name,
