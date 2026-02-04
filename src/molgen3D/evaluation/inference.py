@@ -18,6 +18,7 @@ from molgen3D.data_processing.smiles_encoder_decoder import (
     decode_cartesian_v2,
     strip_smiles,
     decode_cartesian_binned_v2,
+    decode_cartesian_binned,
     get_bins_for_coords
 )
 from molgen3D.evaluation.utils import (
