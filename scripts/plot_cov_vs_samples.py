@@ -3,7 +3,7 @@
 Generate COV-R/COV-P vs Number of Samples charts.
 
 Shows how coverage metrics change as the number of generated conformer samples
-increases (1, 2, 4, 8, ..., S). Uses first n conformers (deterministic selection,
+increases (1, 2, 4, 8, ..., S, 2*k). Uses first n conformers (deterministic selection,
 simulates "stopping early").
 
 Key insight: Compute full RMSD matrices once, then subselect columns to simulate
@@ -15,6 +15,12 @@ Example usage:
     python scripts/plot_cov_vs_samples.py \\
         -g outputs/gen_results/20260121_run/generation_results.pickle \\
         -S 256 -t 0.75 --save-csv
+
+    # With "2*k" point from full eval results
+    python scripts/plot_cov_vs_samples.py \\
+        -g outputs/gen_results/20260121_run/generation_results.pickle \\
+        -S 256 --save-csv \\
+        --eval-results-txt outputs/eval_results/20260121_run/covmat_results.txt
 
     # Slurm (more CPUs)
     python scripts/plot_cov_vs_samples.py \\
@@ -38,6 +44,80 @@ from molgen3D.config.paths import get_data_path
 from molgen3D.data_processing.utils import load_pkl
 from molgen3D.evaluation import rdkit_utils
 from molgen3D.evaluation.utils import covmat_metrics, create_slurm_executor
+
+
+# =============================================================================
+# Eval Results Parsing (for "2*k" point)
+# =============================================================================
+
+
+def parse_covmat_results(
+    filepath: Path,
+    target_threshold: float = 0.75,
+) -> Dict[str, float] | None:
+    """Parse covmat_results.txt to extract COV-R and COV-P mean values.
+
+    Args:
+        filepath: Path to covmat_results.txt
+        target_threshold: Expected threshold value (warns if mismatch)
+
+    Returns:
+        Dict with "cov_r_mean", "cov_p_mean", "threshold", "total_conformers"
+        or None if parsing fails
+    """
+    if not filepath.exists():
+        return None
+
+    try:
+        text = filepath.read_text()
+
+        # Extract threshold
+        threshold_match = None
+        for line in text.splitlines():
+            if line.startswith("Threshold:"):
+                threshold_match = float(line.split(":")[1].strip())
+                break
+
+        if threshold_match is None:
+            print(f"  Warning: Could not parse threshold from {filepath}")
+            return None
+
+        if not np.isclose(threshold_match, target_threshold):
+            print(f"  Warning: Threshold mismatch in {filepath}: "
+                  f"found {threshold_match}, expected {target_threshold}")
+
+        # Extract COV-R Mean
+        cov_r_mean = None
+        cov_p_mean = None
+        total_conformers = None
+        lines = text.splitlines()
+
+        for i, line in enumerate(lines):
+            if "Coverage-Recall (COV-R):" in line and i + 1 < len(lines):
+                mean_line = lines[i + 1]
+                if "Mean:" in mean_line:
+                    cov_r_mean = float(mean_line.split(":")[1].strip())
+            elif "Coverage-Precision (COV-P):" in line and i + 1 < len(lines):
+                mean_line = lines[i + 1]
+                if "Mean:" in mean_line:
+                    cov_p_mean = float(mean_line.split(":")[1].strip())
+            elif "Total conformers generated:" in line:
+                total_conformers = int(line.split(":")[1].strip())
+
+        if cov_r_mean is None or cov_p_mean is None:
+            print(f"  Warning: Could not parse COV-R/COV-P means from {filepath}")
+            return None
+
+        return {
+            "cov_r_mean": cov_r_mean,
+            "cov_p_mean": cov_p_mean,
+            "threshold": threshold_match,
+            "total_conformers": total_conformers,
+        }
+
+    except Exception as e:
+        print(f"  Warning: Error parsing {filepath}: {e}")
+        return None
 
 
 # =============================================================================
@@ -201,6 +281,7 @@ def plot_cov_vs_samples(
     output_base: str,
     formats: List[str],
     dpi: int = 300,
+    full_eval_data: Dict[str, float] | None = None,
 ) -> None:
     """Generate publication-quality COV-R/COV-P vs samples chart.
 
@@ -211,6 +292,8 @@ def plot_cov_vs_samples(
         output_base: Base filename (without extension)
         formats: Output formats (e.g., ["png", "pdf"])
         dpi: Resolution for raster formats
+        full_eval_data: Optional dict with "cov_r_mean", "cov_p_mean", "total_conformers"
+                       for the "2*k" point (all conformers from full eval)
     """
     # Filter to selected threshold
     df_thresh = df[np.isclose(df["threshold"], threshold)].copy()
@@ -219,21 +302,30 @@ def plot_cov_vs_samples(
     # Create figure
     fig, ax = plt.subplots(figsize=(8, 6))
 
-    x = df_thresh["n_samples"].values
+    x = df_thresh["n_samples"].values.tolist()
+    cov_r_mean = df_thresh["cov_r_mean"].values.tolist()
+    cov_p_mean = df_thresh["cov_p_mean"].values.tolist()
+    x_labels = [str(n) for n in x]
+
+    # Add "2*k" point if full eval data is provided
+    if full_eval_data is not None:
+        # Position at 2x last sample for visual spacing on log scale
+        # (actual total_conformers would create huge gap)
+        x_2k = x[-1] * 2
+        x.append(x_2k)
+        cov_r_mean.append(full_eval_data["cov_r_mean"])
+        cov_p_mean.append(full_eval_data["cov_p_mean"])
+        x_labels.append("2*k")
+
+    x = np.array(x)
+    cov_r_mean = np.array(cov_r_mean)
+    cov_p_mean = np.array(cov_p_mean)
 
     # COV-R (blue)
-    cov_r_mean = df_thresh["cov_r_mean"].values
-    cov_r_std = df_thresh["cov_r_std"].values
     ax.plot(x, cov_r_mean, "o-", color="#1f77b4", linewidth=2, markersize=6, label="COV-R")
-    ax.fill_between(x, cov_r_mean - cov_r_std, cov_r_mean + cov_r_std,
-                    color="#1f77b4", alpha=0.2)
 
     # COV-P (red)
-    cov_p_mean = df_thresh["cov_p_mean"].values
-    cov_p_std = df_thresh["cov_p_std"].values
     ax.plot(x, cov_p_mean, "s-", color="#d62728", linewidth=2, markersize=6, label="COV-P")
-    ax.fill_between(x, cov_p_mean - cov_p_std, cov_p_mean + cov_p_std,
-                    color="#d62728", alpha=0.2)
 
     # Formatting
     ax.set_xscale("log", base=2)
@@ -244,9 +336,9 @@ def plot_cov_vs_samples(
     ax.legend(fontsize=11, loc="lower right")
     ax.grid(True, alpha=0.3)
 
-    # Set x-axis ticks to powers of 2
+    # Set x-axis ticks
     ax.set_xticks(x)
-    ax.set_xticklabels([str(n) for n in x])
+    ax.set_xticklabels(x_labels)
 
     plt.tight_layout()
 
@@ -437,12 +529,29 @@ def run_analysis(args: argparse.Namespace) -> None:
         df.to_csv(csv_path, index=False)
         print(f"Saved: {csv_path}")
 
+    # Load full eval results for "2*k" point if provided
+    full_eval_data = None
+    if args.eval_results_txt:
+        eval_path = Path(args.eval_results_txt)
+        print(f"Loading full eval results from: {eval_path}")
+        # Use the first threshold for parsing (typically 0.75)
+        full_eval_data = parse_covmat_results(eval_path, thresholds[0])
+        if full_eval_data:
+            print(f"  COV-R: {full_eval_data['cov_r_mean']:.4f}, "
+                  f"COV-P: {full_eval_data['cov_p_mean']:.4f}, "
+                  f"total conformers: {full_eval_data['total_conformers']}")
+        else:
+            print("  Warning: Could not parse eval results, '2*k' point will be omitted")
+
     # Generate plots for each threshold
     for threshold in thresholds:
         # Use underscore instead of dot to avoid pathlib treating it as extension
         threshold_str = f"{threshold:.2f}".replace(".", "_")
         output_base = f"cov_vs_samples_t{threshold_str}"
-        plot_cov_vs_samples(df, threshold, output_dir, output_base, args.output_formats, args.dpi)
+        plot_cov_vs_samples(
+            df, threshold, output_dir, output_base, args.output_formats, args.dpi,
+            full_eval_data=full_eval_data,
+        )
 
     # Write summary
     t_total = time.time() - t_start
@@ -580,6 +689,12 @@ def main() -> None:
         type=int,
         default=10,
         help="Number of molecules to use for verification (default: 10)",
+    )
+    parser.add_argument(
+        "--eval-results-txt",
+        type=str,
+        default=None,
+        help="Path to covmat_results.txt from full eval run (adds '2*k' point to chart)",
     )
 
     args = parser.parse_args()
