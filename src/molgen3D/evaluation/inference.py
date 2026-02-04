@@ -17,6 +17,7 @@ import submitit
 from molgen3D.data_processing.smiles_encoder_decoder import (
     decode_cartesian_v2,
     strip_smiles,
+    decode_cartesian_binned_v2,
     decode_cartesian_binned,
     get_bins_for_coords
 )
@@ -105,9 +106,10 @@ def get_gpu_status():
 _GPU_LOCK_FILE = None
 
 
-def find_free_gpu(min_memory_gb=1.0, max_memory_usage_percent=20.0):
+def find_free_gpu(min_memory_gb=1.0, max_memory_usage_percent=20.0, requested_gpu=None):
     """Find and lock a free GPU with sufficient memory and low usage.
     
+    If requested_gpu is provided, only attempts to lock that specific GPU.
     Returns the GPU index if found and locked, None otherwise.
     """
     global _GPU_LOCK_FILE
@@ -120,8 +122,15 @@ def find_free_gpu(min_memory_gb=1.0, max_memory_usage_percent=20.0):
         if not gpu_status:
             return None
         
-        # Sort by free memory (most free first)
-        gpu_status.sort(key=lambda x: x["free_memory_gb"], reverse=True)
+        # Filter by requested_gpu if provided
+        if requested_gpu is not None:
+            gpu_status = [gpu for gpu in gpu_status if gpu["gpu_idx"] == requested_gpu]
+            if not gpu_status:
+                logger.warning(f"Requested GPU {requested_gpu} not found in system.")
+                return None
+        else:
+            # Sort by free memory (most free first)
+            gpu_status.sort(key=lambda x: x["free_memory_gb"], reverse=True)
         
         for gpu in gpu_status:
             idx = gpu["gpu_idx"]
@@ -295,7 +304,7 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id,
             else:
                 try:
                     if binned:
-                        mol_obj = decode_cartesian_binned(generated_conformer, bins)
+                        mol_obj = decode_cartesian_binned_v2(generated_conformer, bins)
                     else:
                         mol_obj = decode_cartesian_v2(generated_conformer)
                     generations[geom_smiles].append(mol_obj)
@@ -330,11 +339,20 @@ def run_inference(inference_config: dict):
     device_arg = inference_config.get("device", "cuda")
     target_device = device_arg
     
-    if device_arg == "cuda":
+    if device_arg == "cuda" or device_arg.startswith("cuda:"):
         # Add small random delay to reduce race conditions
         time.sleep(random.uniform(0.1, 4.0))
-        logger.info("Searching for GPU...")
-        free_gpu = find_free_gpu()
+        logger.info(f"Searching for GPU ({device_arg})...")
+        
+        # Check for specific GPU request (e.g., "cuda:8")
+        requested_gpu = None
+        if ":" in device_arg:
+            try:
+                requested_gpu = int(device_arg.split(":")[1])
+            except (ValueError, IndexError):
+                pass
+
+        free_gpu = find_free_gpu(requested_gpu=requested_gpu)
         
         if free_gpu is not None:
             # Set CUDA_VISIBLE_DEVICES to isolate this process to the chosen physical GPU.
@@ -488,7 +506,7 @@ def launch_inference_from_cli(
     # Base configuration template
     base_inference_config = {
         "model_path": get_ckpt("m600_qwen_pre_4seq_binned", "4e"),
-        "tokenizer_path": get_tokenizer_path("qwen3_0.6b_custom"),
+        "tokenizer_path": get_tokenizer_path("qwen3_0.6b_binned" if binned else "qwen3_0.6b_custom"),
         "torch_dtype": "bfloat16",
         "batch_size": 128,
         "num_gens": gen_num_codes["2k_per_conf"],
@@ -503,11 +521,14 @@ def launch_inference_from_cli(
     if grid_run_inference:
         jobs = []
         param_grid = [
-            ("m600_qwen_pre_4e_grouped", "1e"),
-            ("m600_qwen_pre_4e_grouped", "2e"),
-            ("m600_qwen_pre_4e_grouped", "3e"),
-            ("m600_qwen_pre_4e_grouped", "4e"),
-            ("m600_qwen_pre", "4e"),
+            ("qw600_pre_binned_grouped", "1e"),
+            ("qw600_pre_binned_grouped", "2e"),
+            ("qw600_pre_binned_grouped", "3e"),
+            ("qw600_pre_binned_grouped", "4e"),
+            ("qw600_pre_binned_grouped", "5e"),
+            ("qw600_pre_binned_paired", "5e"),
+            ("qw600_pre_binned_paired", "4e"),
+
         ]
         
         if executor is not None:
@@ -519,9 +540,22 @@ def launch_inference_from_cli(
                         if isinstance(model_key, tuple):
                             grid_config["model_path"] = get_ckpt(model_key[0], model_key[1])
                             model_key_str = f"{model_key[0]}_{model_key[1]}"
+                            # Auto-select tokenizer based on model name
+                            if "binned" in model_key[0] or "qw600" in model_key[0]:
+                                grid_config["tokenizer_path"] = get_tokenizer_path("qwen3_0.6b_binned")
+                                grid_config["binned"] = True
+                            else:
+                                grid_config["tokenizer_path"] = get_tokenizer_path("qwen3_0.6b_custom")
+                                grid_config["binned"] = False
                         else:
                             grid_config["model_path"] = get_ckpt(model_key)
                             model_key_str = model_key
+                            if "binned" in model_key or "qw600" in model_key:
+                                grid_config["tokenizer_path"] = get_tokenizer_path("qwen3_0.6b_binned")
+                                grid_config["binned"] = True
+                            else:
+                                grid_config["tokenizer_path"] = get_tokenizer_path("qwen3_0.6b_custom")
+                                grid_config["binned"] = False
                         
                         if test_set_name == "xl":
                             grid_config["batch_size"] = 100
@@ -550,9 +584,22 @@ def launch_inference_from_cli(
                     if isinstance(model_key, tuple):
                         grid_config["model_path"] = get_ckpt(model_key[0], model_key[1])
                         model_key_str = f"{model_key[0]}_{model_key[1]}"
+                        # Auto-select tokenizer based on model name
+                        if "binned" in model_key[0] or "qw600" in model_key[0]:
+                            grid_config["tokenizer_path"] = get_tokenizer_path("qwen3_0.6b_binned")
+                            grid_config["binned"] = True
+                        else:
+                            grid_config["tokenizer_path"] = get_tokenizer_path("qwen3_0.6b_custom")
+                            grid_config["binned"] = False
                     else:
                         grid_config["model_path"] = get_ckpt(model_key)
                         model_key_str = model_key
+                        if "binned" in model_key or "qw600" in model_key:
+                            grid_config["tokenizer_path"] = get_tokenizer_path("qwen3_0.6b_binned")
+                            grid_config["binned"] = True
+                        else:
+                            grid_config["tokenizer_path"] = get_tokenizer_path("qwen3_0.6b_custom")
+                            grid_config["binned"] = False
                     
                     if test_set_name == "xl":
                         grid_config["batch_size"] = 100
@@ -661,7 +708,7 @@ def launch_inference_from_cli(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device", type=str, choices=["local", "a100", "h100"], required=True)
+    parser.add_argument("--device", type=str, default="local")
     parser.add_argument("--grid_run_inference", action="store_true")
     parser.add_argument("--test_set", type=str, choices=["clean", "distinct", "corrected"], default=None)
     parser.add_argument("--binned", action="store_true", default=False)

@@ -19,6 +19,7 @@ from molgen3D.data_processing.utils import JsonlSplitWriter
 from molgen3D.data_processing.smiles_encoder_decoder import (
     encode_cartesian_binned,
     encode_cartesian_v2,
+    encode_cartesian_binned_v2,
 )
 from molgen3D.utils.utils import load_pkl
 
@@ -199,7 +200,7 @@ def read_mol(
             pass
 
         try:
-            if embedding_func == encode_cartesian_binned:
+            if embedding_func in (encode_cartesian_binned, encode_cartesian_binned_v2):
                 embedded_smile, iso_smile = embedding_func(
                     mol,
                     bin_size=bin_size,
@@ -305,6 +306,7 @@ def preprocess(
         "cartesian_v2": encode_cartesian_v2,
         "cartesian": encode_cartesian_v2,
         "cartesian_binned": encode_cartesian_binned,
+        "cartesian_binned_v2": encode_cartesian_binned_v2,
     }
     if embedding_type not in embedding_registry:
         raise ValueError(f"Unsupported embedding_type '{embedding_type}'. Options: {sorted(embedding_registry)}")
@@ -515,21 +517,21 @@ if __name__ == "__main__":
         "--geom_raw_path",
         "-p",
         type=str,
-        default="/nfs/ap/mnt/sxtn2/chem/GEOM_data/rdkit_folder",
+        default="/data/molgen/rdkit_folder",
         help="Path to the GEOM rdkit folder.",
     )
     parser.add_argument(
         "--dest",
         "-d",
         type=str,
-        default="/nfs/ap/mnt/sxtn2/chem/GEOM_data/geom_processed",
+        default="/data/molgen/",
         help="Destination directory for processed outputs.",
     )
     parser.add_argument(
         "--embedding_type",
         "-et",
         type=str,
-        choices=["cartesian", "cartesian_v2", "cartesian_binned"],
+        choices=["cartesian", "cartesian_v2", "cartesian_binned", "cartesian_binned_v2"],
         default="cartesian_v2",
         help="Embedding type to use for enrichment.",
     )
@@ -568,8 +570,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--indices_path",
-        type=str,
-        default="/nfs/ap/mnt/sxtn2/chem/GEOM_data/splits/splits/split0.npy",
+            type=str,
+            default="/data/molgen/splits/splits/split0.npy",
         help="Path to numpy file containing split indices.",
     )
     parser.add_argument(

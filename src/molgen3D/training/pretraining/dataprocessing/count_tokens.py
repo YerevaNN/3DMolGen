@@ -53,21 +53,29 @@ def _iter_isomer_units(file_path: Path):
                     obj = _json_loads(line)
                 except Exception:
                     continue
-                isomers = obj.get("isomers") or {}
-                if not isinstance(isomers, dict):
-                    continue
-                for iso_smiles, conf_list in isomers.items():
-                    if not conf_list:
+
+                # Support both "grouped" (isomers: {...}) and "flat" (canonical_smiles: ...) formats
+                if "isomers" in obj:
+                    isomers = obj.get("isomers") or {}
+                    if not isinstance(isomers, dict):
                         continue
-                    embedded_strings = []
-                    for conf in conf_list:
-                        embedded = (conf.get("embedded_smiles") or "").strip()
-                        if embedded:
-                            embedded_strings.append(embedded)
-                    iso_smiles = (iso_smiles or "").strip()
-                    if not iso_smiles or not embedded_strings:
-                        continue
-                    yield iso_smiles, embedded_strings
+                    for iso_smiles, conf_list in isomers.items():
+                        if not conf_list:
+                            continue
+                        embedded_strings = []
+                        for conf in conf_list:
+                            embedded = (conf.get("embedded_smiles") or "").strip()
+                            if embedded:
+                                embedded_strings.append(embedded)
+                        iso_smiles = (iso_smiles or "").strip()
+                        if not iso_smiles or not embedded_strings:
+                            continue
+                        yield iso_smiles, embedded_strings
+                elif "canonical_smiles" in obj and "embedded_smiles" in obj:
+                    iso_smiles = (obj.get("canonical_smiles") or "").strip()
+                    embedded = (obj.get("embedded_smiles") or "").strip()
+                    if iso_smiles and embedded:
+                        yield iso_smiles, [embedded]
     except OSError:
         return
 
@@ -943,38 +951,6 @@ def _tokenizer_signature(path: Path) -> Optional[str]:
     return hasher.hexdigest()
 
 
-    for batch in loader:
-        inputs = _extract_inputs(batch)
-        sample = inputs[0]
-        token_ids = sample.tolist()
-        non_pad_ids = [tid for tid in token_ids if pad_id is None or tid != pad_id][:limit]
-        token_strs = tokenizer.convert_ids_to_tokens(non_pad_ids)
-        token_chars = [
-            tokenizer.convert_tokens_to_string([tok]) if tok is not None else ""
-            for tok in token_strs
-        ]
-        decoded = tokenizer.decode(non_pad_ids, skip_special_tokens=False)
-
-        lines: List[str] = []
-        lines.append("\nONE-TIME SAMPLE (post-previews, pads removed, limit 1000)")
-        lines.append(f"  tokenizer: {target_alias}")
-        lines.append(f"  file: {first_file}")
-        lines.append(f"  decoded: {decoded}")
-        lines.append(f"encoded: {token_ids}")
-        lines.append("  index  id      token -> chars")
-        for i, (tid, tok, chars) in enumerate(zip(non_pad_ids, token_strs, token_chars)):
-            lines.append(f"  {i:04d}  {tid:>6}  {repr(tok):>20} -> {repr(chars)}")
-
-        # Print to stdout and append to summary file for later inspection.
-        print("\n".join(lines))
-        try:
-            with SUMMARY_PATH.open("a", encoding="utf-8") as fh:
-                fh.write("\n".join(lines) + "\n")
-        except Exception as exc:
-            print(f"Failed to write summary to {SUMMARY_PATH}: {exc}")
-        break
-
-
 def summarize_dataset(
     name: str,
     directory: str,
@@ -1378,6 +1354,60 @@ def summarize_dataset(
     return dataset_summary
 
 
+def _debug_print_samples(
+    files: List[Path], tokenizer_path: str, tokenizer, seq_len: int, num_samples: int, serialization_mode: str
+) -> None:
+    if num_samples <= 0:
+        return
+
+    print(f"\nDEBUG: _debug_print_samples called with {len(files)} files")
+    if not files:
+        print("DEBUG: No files found to print samples from.")
+        return
+
+    print(f"\nPRINTING {num_samples} DECODED SAMPLES ({serialization_mode} mode):")
+    loader = build_dataloader(
+        train_path=[str(p) for p in files],
+        tokenizer_path=tokenizer_path,
+        tokenizer=tokenizer,
+        seq_len=seq_len,
+        batch_size=1,
+        num_workers=0,
+        pin_memory=False,
+        shuffle_lines=True,
+        infinite=False,
+        seed=42,
+        min_emb_len=0,
+        drop_last=False,
+        persistent_workers=False,
+        world_size=1,
+        rank=0,
+        serialization_mode=serialization_mode,
+        emit_attention_mask=(serialization_mode == "isomer_units"),
+    )
+
+    count = 0
+    for batch in loader:
+        input_ids = _extract_inputs(batch)
+        attention_mask = _extract_attention_mask(batch)
+        
+        for i in range(input_ids.size(0)):
+            ids = input_ids[i]
+            if attention_mask is not None:
+                mask = attention_mask[i]
+                ids = ids[mask == 1]
+            
+            text = tokenizer.decode(ids, skip_special_tokens=False)
+            print(f"\nSAMPLE {count + 1}:")
+            print("-" * 40)
+            print(text)
+            print("-" * 40)
+            
+            count += 1
+            if count >= num_samples:
+                return
+
+
 def print_train_report(summary: Optional[Dict[str, Any]]) -> None:
     if not summary:
         print("SKIP dataset: no data collected.")
@@ -1779,7 +1809,7 @@ def main() -> None:
     parser.add_argument(
         "--sample-units",
         type=int,
-        default=2000,
+        default=10000,
         help="Number of units to sample for fast estimate calibration.",
     )
     parser.add_argument(
@@ -1799,18 +1829,30 @@ def main() -> None:
         default=1000,
         help="Number of JSONL lines to sample for avg units per line.",
     )
+    parser.add_argument(
+        "--print-samples",
+        type=int,
+        default=0,
+        help="Number of decoded samples to print for debugging.",
+    )
 
     args = parser.parse_args()
 
     if args.train_path.strip():
-        train_path = args.train_path.strip()
+        try:
+            train_path = str(get_data_path(args.train_path.strip()))
+        except KeyError:
+            train_path = args.train_path.strip()
     elif args.binned:
         train_path = str(get_data_path("binned_conformers_train"))
     else:
         train_path = str(get_data_path(args.dataset))
 
     if args.validation_path.strip():
-        valid_path = args.validation_path.strip()
+        try:
+            valid_path = str(get_data_path(args.validation_path.strip()))
+        except KeyError:
+            valid_path = args.validation_path.strip()
     elif args.binned:
         valid_path = str(get_data_path("binned_conformers_valid"))
     else:
@@ -1893,6 +1935,13 @@ def main() -> None:
     if not args.skip_validation:
         print_validation_report(validation_summary)
 
+    if args.print_samples > 0:
+        alias = args.tokenizers[0]
+        tok_path, tokenizer = tokenizer_map[alias]
+        files = list_jsonl_files(train_path)
+        _debug_print_samples(
+            files, tok_path, tokenizer, args.seq_len, args.print_samples, serialization_mode
+        )
 
     elapsed = time.time() - start_time
     print_overall_summary(train_summary, validation_summary, elapsed)
