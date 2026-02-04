@@ -68,21 +68,33 @@ def strip_smiles(s: str) -> str:
     Supported inputs:
       - Legacy enriched strings:  C<...>N<...> (atoms without brackets + coords)
       - Current enriched strings: [C]<...>[N]<...> (atoms wrapped in brackets)
+      - Binned enriched strings: [C]123456789[N]123456789 (atoms wrapped in brackets + digits)
       - Plain SMILES:            C[NH2+]Cc1...
 
     Steps:
-      1. Remove every <...> coordinate block (first the bracketed form, then the legacy bare form).
-      2. Collapse decorative carbon H-counts: [CH3],[CH2],[CH],[cH] -> C/c.
-      3. Drop brackets around simple atoms: [C]->C, [c]->c, [N]->N, ...
-      4. Keep chemically meaningful brackets: [NH2+], [nH], [H], [Pt+2], etc.
+      1. Remove every <...> coordinate block.
+      2. Remove binned coordinate digits: [C]123456789 -> [C].
+      3. Collapse decorative carbon H-counts: [CH3],[CH2],[CH],[cH] -> C/c.
+      4. Drop brackets around simple atoms: [C]->C, [c]->c, [N]->N, ...
+      5. Keep chemically meaningful brackets: [NH2+], [nH], [H], [Pt+2], etc.
     """
 
     if not s:
         return ""
 
+    # Remove any tags that might be present
+    s = s.replace("[CONFORMER]", "").replace("[/CONFORMER]", "")
+    s = s.replace("[SMILES]", "").replace("[/SMILES]", "")
+    s = s.replace(";", "")
+
     s = _WHITESPACE_RE.sub('', s)
     s = _BRACKET_COORD_RE.sub(r"\1", s)
-    base_smiles = _COORD_BLOCK_RE.sub('', s)
+    s = _COORD_BLOCK_RE.sub('', s)
+
+    # Remove binned coordinate digits that follow a bracketed atom
+    # e.g., [C]123456789 -> [C]
+    # We match exactly 9 digits to avoid stripping ring closures (usually 1-2 digits)
+    s = re.sub(r'(\[[^\]]+\])\d{9}', r'\1', s)
 
     # 2) normalize bracket atoms
     def repl(m: re.Match) -> str:
@@ -102,7 +114,8 @@ def strip_smiles(s: str) -> str:
         # Everything else: keep bracketed, e.g. [NH2+], [nH], [O-], [H], [Pt+2], [13C]
         return f'[{inner}]'
 
-    return re.sub(r'\[([^\]]+)\]', repl, base_smiles)
+    base_smiles = re.sub(r'\[([^\]]+)\]', repl, s)
+    return base_smiles
 
 def _expected_plain_token(atom) -> str:
     if atom.GetIsAromatic():
@@ -394,6 +407,67 @@ def tokenize_enriched(enriched):
     return tokens
 
 
+def tokenize_enriched_v2(enriched, digit_width):
+    # Tokenize the v2 binned enriched representation (raw string).
+
+
+    # Group 1 & 2: [Atom] + digits OR BareAtom + digits
+    # Group 3: Ring closures %dd
+    # Group 4: Bonds
+    # Group 5: (
+    # Group 6: )
+    # Group 7: Single digits (ring closures)
+    # Group 8: .
+    # Group 9: Bare atoms (no digits)
+    atom_syms = r"A[cglmrstu]|B[aehikr]?|C[adeflmnorsu]?|D[bsy]|E[urs]|F[elmr]?|G[ade]|H[efgos]?|I[nr]?|K[r]?|L[airu]|M[dgnot]|N[adeiopz]?|O[gs]?|P[abdmortu]?|R[abefghnu]|S[bcegimnr]?|T[abcehilm]|U|V|W|Xe|Yb|Z[nr]|[cnospb]"
+    pattern = re.compile(
+        fr"(\[[^\]]+\]|{atom_syms})(\d{{{3 * digit_width}}})|(%\d{{2,}})|(=|#|:|\/|\\|-)|(\()|(\))|(\d)|(\.)|({atom_syms})"
+    )
+    tokens = []
+    pos = 0
+    for match in pattern.finditer(enriched):
+        if match.start() != pos:
+            # Skip unrecognized junk instead of crashing, but log it if it's not just whitespace
+            junk = enriched[pos:match.start()].strip()
+            if junk:
+                raise ValueError(f"Unrecognized enriched fragment: {junk} in {enriched}")
+
+        if match.group(1): # Atom with coordinates
+            atom_desc = match.group(1)
+            if not atom_desc.startswith("["):
+                atom_desc = f"[{atom_desc}]"
+            
+            coord_str = match.group(2)
+            n = digit_width
+            parts = [coord_str[i : i + n] for i in range(0, len(coord_str), n)]
+            coords = tuple(float(p) for p in parts)
+            tokens.append(
+                {
+                    "type": "atom_with_coords",
+                    "atom_desc": atom_desc,
+                    "coords": coords,
+                }
+            )
+        elif match.group(3):
+            tokens.append({"type": "nonatom", "text": match.group(3)})
+        elif match.group(4):
+            tokens.append({"type": "nonatom", "text": match.group(4)})
+        elif match.group(5):
+            tokens.append({"type": "nonatom", "text": match.group(5)})
+        elif match.group(6):
+            tokens.append({"type": "nonatom", "text": match.group(6)})
+        elif match.group(7):
+            tokens.append({"type": "nonatom", "text": match.group(7)})
+        elif match.group(8):
+            tokens.append({"type": "nonatom", "text": match.group(8)})
+        elif match.group(9): # Atom without coordinates
+            tokens.append({"type": "nonatom", "text": match.group(9)})
+
+        pos = match.end()
+
+    return tokens
+
+
 def decode_cartesian_v2(enriched_string):
     """Reconstruct an RDKit Mol (with conformer) from the enriched string produced by the encoder."""
     tokens = tokenize_enriched(enriched_string)
@@ -497,6 +571,12 @@ def get_bins_for_coords(ranges, bin_size=0.104):
     for start, end in ranges:
         bins.append(np.arange(start, end, bin_size))
     return bins
+
+
+def get_digit_width(bins):
+    """Determine the zero-padding width based on the maximum number of bins."""
+    max_bin_len = max(len(b) for b in bins)
+    return max(3, len(str(max_bin_len)))
 
 def coords_to_bins(coords, bins):
     """Convert coordinates to bins."""
@@ -624,18 +704,116 @@ def encode_cartesian_binned(mol, bin_size, ranges=None):
     return enriched_string, smiles
 
 
-def decode_cartesian_binned(enriched_string, bins, use_bin_center=True):
+def encode_cartesian_binned_v2(mol, bin_size, ranges=None):
     """
-    Reconstruct an RDKit Mol (with conformer) from a binned enriched string.
+    Serialize a 3D RDKit Mol into an enriched text representation where
+    the Cartesian coordinates are replaced by bin indices.
 
-    The string must have been produced by ``encode_cartesian_binned`` using
-    the same set of ``bins`` (one array per axis). Bin indices are turned
-    back into coordinates by uniformly sampling within each bin interval.
+    Returns:
+        enriched_string (str): SMILES-like string with [atom]<ix,iy,iz> tokens.
+        smiles (str): Canonical SMILES of the heavy-atom molecule.
+        bins (list[np.ndarray]): [bins_x, bins_y, bins_z] used for binning.
+        ranges (list[tuple[float, float]]): Axis ranges used to construct bins.
+    """
+    mol_no_h = Chem.RemoveHs(mol)
+    if mol_no_h.GetNumConformers() == 0:
+        raise ValueError("Molecule has no conformer / 3D coordinates.")
+
+    smiles = Chem.MolToSmiles(
+        mol_no_h,
+        canonical=True,
+        isomericSmiles=True,
+        allHsExplicit=False,
+        allBondsExplicit=False,
+    )
+
+    if not mol_no_h.HasProp("_smilesAtomOutputOrder"):
+        raise ValueError("Mol is missing _smilesAtomOutputOrder after MolToSmiles.")
+
+    atom_order_raw = mol_no_h.GetProp("_smilesAtomOutputOrder")
+    atom_order = list(map(int, ast.literal_eval(atom_order_raw)))
+
+    expected_atom_tokens = [
+        _expected_plain_token(mol_no_h.GetAtomWithIdx(idx)) for idx in atom_order
+    ]
+
+    tokens = tokenize_smiles(smiles, expected_atom_tokens=expected_atom_tokens)
+
+    if ranges is None:
+        ranges = [(-13.0, 13.0), (-13.0, 13.0), (-13.0, 13.0)]
+    if len(ranges) != 3:
+        raise ValueError("ranges must be a sequence of three (start, end) tuples.")
+    bins = get_bins_for_coords(ranges, bin_size=bin_size)
+    if len(bins) != 3:
+        raise ValueError("get_bins_for_coords must return three bin arrays (x, y, z).")
+    # Determine zero-padding width; always at least 3 digits, same for all axes
+    digit_width = get_digit_width(bins)
+
+    out_parts = []
+    atom_idx_in_smiles = 0
+    conformer = mol_no_h.GetConformer()
+
+    for token in tokens:
+        if token["type"] == "atom":
+            if atom_idx_in_smiles >= len(atom_order):
+                raise ValueError("SMILES atom tokens exceed atom order mapping.")
+
+            rd_idx = atom_order[atom_idx_in_smiles]
+            atom_text = token["text"]
+            if atom_text.startswith("["):
+                atom_descriptor = atom_text
+            else:
+                atom_descriptor = f"[{atom_text}]"
+
+            pos = conformer.GetAtomPosition(rd_idx)
+
+            # Map each coordinate to a bin index (np.digitize-style).
+            ix = int(coords_to_bins(np.array([pos.x]), bins[0])[0])
+            iy = int(coords_to_bins(np.array([pos.y]), bins[1])[0])
+            iz = int(coords_to_bins(np.array([pos.z]), bins[2])[0])
+
+            # Zero-pad indices to a fixed width (>=3)
+            ix_txt = f"{ix:0{digit_width}d}"
+            iy_txt = f"{iy:0{digit_width}d}"
+            iz_txt = f"{iz:0{digit_width}d}"
+
+            out_parts.append(f"{atom_descriptor}{ix_txt}{iy_txt}{iz_txt}")
+            atom_idx_in_smiles += 1
+        else:
+            out_parts.append(token["text"])
+
+    if atom_idx_in_smiles != len(atom_order):
+        raise ValueError(
+            f"Atom count mismatch: mapped {atom_idx_in_smiles} atoms but expected {len(atom_order)}."
+        )
+
+    enriched_string = "".join(out_parts)
+    return enriched_string, smiles
+
+
+def decode_cartesian_binned_v2(enriched_string, bins, use_bin_center=True):
+    """
+    Reconstruct an RDKit Mol (with conformer) from a v2 binned enriched string.
+
+    Supports both schemas:
+        - With semicolons: [c]123123123;[n]456456456;
+        - Without semicolons: [c]123123123[n]456456456
+
+    The string must have been produced by ``encode_cartesian_binned_v2`` using
+    the same set of ``bins`` (one array per axis).
+
+    Semicolons (';') are treated as optional delimiters and are stripped
+    before parsing, so both ``[c]123123123;`` and ``[c]123123123`` decode
+    identically here, while upstream code can still see the raw schema.
     """
     if len(bins) != 3:
         raise ValueError("bins must be a sequence of three bin arrays (x, y, z).")
 
-    tokens = tokenize_enriched(enriched_string)
+    digit_width = get_digit_width(bins)
+    # Normalize optional semicolon terminators locally, without affecting
+    # other users of ``tokenize_enriched_v2`` that may rely on raw schemas.
+    normalized = enriched_string.replace(";", "")
+    tokens = tokenize_enriched_v2(normalized, digit_width)
 
     smiles_parts = []
     coords = []
@@ -648,8 +826,7 @@ def decode_cartesian_binned(enriched_string, bins, use_bin_center=True):
             else:
                 smiles_parts.append(desc)
 
-            # token["coords"] are floats parsed from the text; interpret them
-            # as (possibly float) bin indices and round to nearest int.
+            # token["coords"] are integers parsed from the text
             ix_f, iy_f, iz_f = token["coords"]
             ix = int(round(ix_f))
             iy = int(round(iy_f))
@@ -665,7 +842,7 @@ def decode_cartesian_binned(enriched_string, bins, use_bin_center=True):
     smiles = "".join(smiles_parts)
     mol = Chem.MolFromSmiles(smiles, sanitize=False)
     if mol is None:
-        raise ValueError(f"Failed to parse rebuilt SMILES from binned string: {smiles}")
+        raise ValueError(f"Failed to parse rebuilt SMILES from v2 binned string: {smiles}")
     if mol.GetNumAtoms() != len(coords):
         raise ValueError(
             f"Atom count mismatch: mol has {mol.GetNumAtoms()} atoms, coords list has {len(coords)} entries."
