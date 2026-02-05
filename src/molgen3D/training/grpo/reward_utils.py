@@ -39,6 +39,7 @@ __all__ = [
     "PoseBustersRuntimeConfig",
     "normalize_posebusters_config",
     "apply_posebusters_gate",
+    "apply_posebusters_gate_batch",
     "get_cached_ground_truths",
     "parse_rollout_group",
     "compute_distance_matrix",
@@ -63,6 +64,8 @@ EMPTY_FLOAT32 = np.array([], dtype=np.float32)
 _RMSD_POOL: Optional[mp.pool.Pool] = None
 _RMSD_POOL_SIZE = 0
 _RMSD_WORKER_STATE: Dict[str, Any] = {"ref_key": None, "ref_mols": []}
+_REF_BLOCK_CACHE_SIZE = 64
+_REF_BLOCK_CACHE: "OrderedDict[str, List[str]]" = OrderedDict()
 
 
 class _NoOpSection:
@@ -268,6 +271,22 @@ def _mol_to_block(mol: Optional[Chem.Mol]) -> Optional[str]:
         return None
 
 
+def _get_ref_blocks(ref_cache_key: str, reference_mols: List[Chem.Mol]) -> Optional[List[str]]:
+    cached = _REF_BLOCK_CACHE.get(ref_cache_key)
+    if cached is not None:
+        _REF_BLOCK_CACHE.move_to_end(ref_cache_key)
+        return cached
+
+    ref_blocks = [_mol_to_block(mol) for mol in reference_mols]
+    if any(block is None for block in ref_blocks):
+        return None
+
+    _REF_BLOCK_CACHE[ref_cache_key] = ref_blocks
+    if len(_REF_BLOCK_CACHE) > _REF_BLOCK_CACHE_SIZE:
+        _REF_BLOCK_CACHE.popitem(last=False)
+    return ref_blocks
+
+
 def _rmsd_parallel_worker(payload: Tuple[int, Optional[str], Optional[str], Optional[List[str]]]) -> Tuple[int, Optional[List[float]]]:
     idx, rollout_block, ref_key, ref_blocks = payload
     if rollout_block is None or ref_blocks is None or ref_key is None:
@@ -307,7 +326,7 @@ def compute_rmsd_safe(probe: Optional[Chem.Mol], ref: Optional[Chem.Mol]) -> flo
             return float("inf")
         return float(rmsd)
     except Exception as exc:
-        logger.debug(f"RMSD computation failed: {exc}")
+        # Suppress noisy RDKit debug output for invalid mols; return inf instead.
         return float("inf")
 
 
@@ -348,8 +367,8 @@ def _compute_distance_matrix_parallel(
     if not valid_indices:
         return np.full((K, M), float("inf"), dtype=np.float32)
 
-    ref_blocks = [_mol_to_block(mol) for mol in reference_mols]
-    if any(block is None for block in ref_blocks):
+    ref_blocks = _get_ref_blocks(ref_cache_key, reference_mols)
+    if ref_blocks is None:
         logger.debug("[reward_v3] Unable to serialize reference mols for parallel RMSD.")
         return None
 
@@ -688,6 +707,68 @@ def apply_posebusters_gate(
         updated_mask[idx] = bool(passed)
 
     return updated_mask, summary
+
+
+def apply_posebusters_gate_batch(
+    rollout_mols_list: Sequence[List[Optional[Chem.Mol]]],
+    base_valid_masks: Sequence[np.ndarray],
+    settings: PoseBustersRuntimeConfig,
+) -> Tuple[List[np.ndarray], Dict[str, float]]:
+    """Batch PoseBusters over multiple rollout groups to reduce overhead."""
+    summary = {"checked": 0.0, "passed": 0.0, "failed": 0.0, "errors": 0.0, "time_ms": 0.0}
+    if settings.mode == "off":
+        return [mask.astype(bool, copy=False) for mask in base_valid_masks], summary
+
+    valid_positions: List[Tuple[int, int]] = []
+    mol_batch: List[Chem.Mol] = []
+    for group_idx, (rollout_mols, base_valid_mask) in enumerate(zip(rollout_mols_list, base_valid_masks)):
+        for idx, flag in enumerate(base_valid_mask):
+            if flag and rollout_mols[idx] is not None:
+                valid_positions.append((group_idx, idx))
+                mol_batch.append(rollout_mols[idx])
+
+    if not valid_positions:
+        return [mask.astype(bool, copy=False) for mask in base_valid_masks], summary
+
+    summary["checked"] = float(len(valid_positions))
+    try:
+        runner = _get_posebusters_runner(settings)
+    except Exception as exc:  # pragma: no cover - depends on runtime env
+        logger.warning(
+            "[reward_v3] PoseBusters unavailable (%s); marking %d samples invalid.",
+            exc,
+            int(summary["checked"]),
+        )
+        updated_masks = [mask.copy().astype(bool, copy=False) for mask in base_valid_masks]
+        for group_idx, idx in valid_positions:
+            updated_masks[group_idx][idx] = False
+        summary["errors"] = summary["checked"]
+        return updated_masks, summary
+
+    start = time.perf_counter()
+    try:
+        report = runner.bust(mol_pred=mol_batch, full_report=False)
+        if not isinstance(report, pd.DataFrame):
+            raise TypeError("PoseBusters returned an unexpected result.")
+    except Exception as exc:  # pragma: no cover - PoseBusters runtime varies
+        logger.warning("[reward_v3] PoseBusters execution failed: %s", exc)
+        updated_masks = [mask.copy().astype(bool, copy=False) for mask in base_valid_masks]
+        for group_idx, idx in valid_positions:
+            updated_masks[group_idx][idx] = False
+        summary["errors"] = summary["checked"]
+        summary["time_ms"] = (time.perf_counter() - start) * 1000.0
+        return updated_masks, summary
+
+    summary["time_ms"] = (time.perf_counter() - start) * 1000.0
+    passes = _extract_posebusters_pass_vector(report, len(valid_positions))
+    summary["passed"] = float(sum(passes))
+    summary["failed"] = summary["checked"] - summary["passed"]
+
+    updated_masks = [mask.copy().astype(bool, copy=False) for mask in base_valid_masks]
+    for (group_idx, idx), passed in zip(valid_positions, passes):
+        updated_masks[group_idx][idx] = bool(passed)
+
+    return updated_masks, summary
 
 
 def compute_quality_reward(D: np.ndarray, validity: np.ndarray, sigma: float) -> np.ndarray:

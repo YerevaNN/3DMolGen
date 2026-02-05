@@ -20,6 +20,8 @@ class GenerationConfig:
     do_sample: bool
     repetition_penalty: float
     num_return_sequences: int
+    top_k: Optional[int] = None
+    top_p: Optional[float] = None
 
 
 @dataclass
@@ -94,6 +96,33 @@ class GRPOConfig:
     smcov_precision_weight: float = 0.10
     smcov_unique_quality_weight: float = 0.20
     scale_rewards: Optional[Union[str, bool]] = None  # TRL advantage scaling ("std", "rank", "none", False)
+    log_success_sample_every: int = 0
+    log_success_sample_chars: int = 400
+    log_debug_sample_every: int = 0
+    log_debug_sample_chars: int = 400
+    log_full_sample_every: int = 0
+
+    # Generation constraints
+    sampling_top_k: int = 50
+    sampling_top_p: Optional[float] = None
+    enable_conformer_logits_processor: bool = True
+
+    # Multi-conformer F-beta reward parameters
+    target_conformers: int = 8
+    fbeta_beta: float = 1.5
+    fbeta_gamma: float = 1.5
+    fbeta_delta: float = 0.75
+    fbeta_dup_rmsd_tau: float = 0.3
+    fbeta_recall_ref_sample: int = 12
+    fbeta_min_valid_to_score: int = 0
+    fbeta_drop_if_valid_lt: int = 3
+    fbeta_use_uniq_frac: bool = True
+    fbeta_reward_mode: str = "fbeta"  # "fbeta", "precision_only", "valid_count", "valid_frac"
+    fbeta_use_binned_decoder: bool = False
+    fbeta_binned_ranges: Optional[List[List[float]]] = None
+    fbeta_binned_bin_size: float = 0.104
+    fbeta_warmup_lambda: float = 0.1
+    fbeta_warmup_sigma: float = 0.75
 
     # Posebusters configuration
     posebusters: Optional[dict] = None
@@ -135,11 +164,15 @@ class ValidationConfig:
     # Numerical validation settings
     enable_numerical_validation: bool = True
     max_conformer_tokens: int = 2000
+    max_ground_truths: int = 30
     num_val_molecules: int = 200
     sampling_config: str = "top_p_low_temperature"
+    max_generations_per_molecule: Optional[int] = None
+    stop_after_first_conformer: bool = False
     save_failed_generations: bool = True
     validation_batch_size: int = 64
     eval_steps: Optional[int] = None
+    use_dataset_prompts: bool = False
 
 @dataclass
 class TrainerConfig:

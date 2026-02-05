@@ -20,6 +20,7 @@ if package_container and str(package_container) not in sys.path:
 # Third-party imports
 import numpy as np
 import torch
+import torch.distributed as dist
 from datasets import Dataset
 from loguru import logger
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -41,6 +42,8 @@ from molgen3D.training.grpo.rewards import reward_function
 from molgen3D.training.grpo.numerical_validator import GRPONumericalValidator
 from molgen3D.training.grpo.numerical_validation_callback import NumericalValidationCallback
 from molgen3D.training.grpo.grpo_reward_v3 import reward_function as reward_function_v3
+from molgen3D.training.grpo.grpo_reward_fbeta import reward_function as reward_function_fbeta
+from molgen3D.training.grpo.logits_constraints import attach_conformer_controls
 
 
 def initialize_random_seed(seed: int) -> None:
@@ -75,7 +78,48 @@ def ensure_completion_length_tracking():
     trl_grpo_module._molgen3d_completion_length_hook = True
 
 
+def _init_distributed() -> tuple[int, int, str, str]:
+    """Initialize torch.distributed from env vars if launched with torchrun."""
+    local_rank = os.environ.get("LOCAL_RANK", "unknown")
+    visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "all")
+    # If LOCAL_RANK is provided, ensure RANK/WORLD_SIZE reflect multi-proc launch.
+    if local_rank != "unknown":
+        world_size_env = os.environ.get("WORLD_SIZE")
+        needs_infer = world_size_env is None
+        if not needs_infer:
+            try:
+                needs_infer = int(world_size_env) <= 1 and int(local_rank) > 0
+            except ValueError:
+                needs_infer = True
+        if needs_infer:
+            inferred_world_size = os.environ.get("LOCAL_WORLD_SIZE")
+            if inferred_world_size is None:
+                inferred_world_size = str(torch.cuda.device_count() or 1)
+            os.environ["RANK"] = str(local_rank)
+            os.environ["WORLD_SIZE"] = inferred_world_size
+            os.environ.setdefault("LOCAL_WORLD_SIZE", inferred_world_size)
+            os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
+            os.environ.setdefault("MASTER_PORT", "29500")
+    if local_rank != "unknown" and torch.cuda.is_available():
+        torch.cuda.set_device(int(local_rank))
+    if (
+        dist.is_available()
+        and not dist.is_initialized()
+        and "RANK" in os.environ
+        and "WORLD_SIZE" in os.environ
+    ):
+        dist.init_process_group(backend="nccl")
+    if dist.is_available() and dist.is_initialized():
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+    else:
+        rank = 0
+        world_size = 1
+    return rank, world_size, local_rank, visible_devices
+
+
 def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
+    rank, world_size, local_rank, visible_devices = _init_distributed()
     initialize_random_seed(config.grpo.seed)
     os.environ["TOKENIZERS_PARALLELISM"] = "true" if config.trainer.tokenizers_parallelism else "false"
 
@@ -98,6 +142,18 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
     setup_logging(actual_output_dir, config.run.log_level)
     
     logger.info(f"Running GRPO")
+    # Log per-rank device mapping to diagnose GPU utilization.
+    if torch.cuda.is_available():
+        current_device = torch.cuda.current_device()
+        device_name = torch.cuda.get_device_name(current_device)
+    else:
+        current_device = "cpu"
+        device_name = "cpu"
+    logger.info(
+        f"[rank {rank}/{world_size}] local_rank={local_rank} "
+        f"cuda_visible_devices={visible_devices} "
+        f"device={current_device} ({device_name})"
+    )
 
     # Load SMILES mapping and set GEOM data path
     load_smiles_mapping(config.dataset.smiles_mapping_path)
@@ -202,11 +258,26 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
                 completion_lengths=completion_lengths,
             )
 
+    elif reward_strategy == "fbeta":
+        logger.info("Using GRPO reward function fbeta (multi-conformer coverage)")
+
+        def reward_func(prompts, completions, **kwargs):
+            completion_entropies = kwargs.get("mean_token_entropy")
+            completion_lengths = kwargs.get("completion_lengths")
+            return reward_function_fbeta(
+                prompts,
+                completions,
+                stats,
+                tokenizer,
+                config,
+                completion_entropies=completion_entropies,
+                completion_lengths=completion_lengths,
+            )
     else:
         if reward_strategy != "legacy":
             raise ValueError(
                 f"Unsupported reward_strategy '{reward_strategy}'. "
-                "Supported values: 'v3', 'legacy'."
+                "Supported values: 'v3', 'fbeta', 'legacy'."
             )
 
         logger.info("Using legacy reward function")
@@ -215,6 +286,21 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
             return reward_function(prompts, completions, stats, tokenizer, config)
 
     ensure_completion_length_tracking()
+
+    # Generation constraints: top-k sampling + conformer tag control.
+    top_k = int(getattr(config.grpo, "sampling_top_k", 50))
+    top_p = getattr(config.grpo, "sampling_top_p", None)
+    model.generation_config.do_sample = True
+    model.generation_config.top_k = top_k
+    if top_p is not None:
+        model.generation_config.top_p = float(top_p)
+    else:
+        model.generation_config.top_p = 1.0
+    logger.info("Set generation config: do_sample=True, top_k=%d, top_p=%s", top_k, model.generation_config.top_p)
+
+    if getattr(config.grpo, "enable_conformer_logits_processor", True):
+        attach_conformer_controls(model, tokenizer, config)
+        logger.info("Attached conformer logits processor and stopping criterion.")
 
     # Set DataLoader parameters from YAML config
     training_args.dataloader_num_workers = config.dataloader.num_workers
@@ -235,12 +321,12 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
 
         # Run validation every eval_steps if configured, otherwise every 1000 steps
         validation_interval = config.validation.eval_steps or 1000
+        validation_max_seq_len = getattr(model.config, "max_position_embeddings", None)
         numerical_callback = NumericalValidationCallback(
             validator=numerical_validator,
             stats=stats,
             validation_steps=validation_interval,
-            max_seq_len=config.generation.max_completion_length
-            + config.validation.max_conformer_tokens,
+            max_seq_len=validation_max_seq_len,
         )
         logger.info(
             f"Numerical validation callback created (interval: {validation_interval} steps)"
@@ -254,6 +340,13 @@ def main(config: Config, enable_wandb: bool = False, output_dir: str = None):
         train_dataset=dataset,
         callbacks=[numerical_callback] if numerical_callback is not None else None,
     )
+    if hasattr(trainer, "accelerator"):
+        logger.info(
+            "[accelerate] process_index=%s local_process_index=%s device=%s",
+            getattr(trainer.accelerator, "process_index", "unknown"),
+            getattr(trainer.accelerator, "local_process_index", "unknown"),
+            getattr(trainer.accelerator, "device", "unknown"),
+        )
 
     
     # Set epsilon parameters on trainer (not available in GRPOConfig)

@@ -35,6 +35,26 @@ from molgen3D.training.grpo.config import (
     ValidationConfig,
 )
 from molgen3D.training.grpo.utils import create_code_snapshot
+
+# WandB defaults (API key is loaded from a local file or env).
+WANDB_ENTITY_DEFAULT = "menuab_team"
+WANDB_PROJECT_DEFAULT = "huggingface"
+WANDB_KEY_FILENAME = "wandb.key"
+
+
+def ensure_wandb_api_key(project_root: Path) -> None:
+    """Load WANDB_API_KEY from env or a local file at repo root."""
+    if os.environ.get("WANDB_API_KEY"):
+        return
+    key_path = project_root / WANDB_KEY_FILENAME
+    if key_path.exists():
+        with open(key_path, "r", encoding="utf-8") as handle:
+            api_key = handle.read().strip()
+        if not api_key:
+            raise RuntimeError(f"{key_path} is empty; set WANDB_API_KEY or write a key.")
+        os.environ["WANDB_API_KEY"] = api_key
+    else:
+        raise RuntimeError(f"WANDB_API_KEY is not set and {key_path} does not exist.")
 def ensure_snapshot_has_grpo_code(snapshot_dir: Path) -> None:
     """Verify that the GRPO training entry script exists inside the snapshot."""
     required_path = snapshot_dir / "molgen3D" / "training" / "grpo" / "train_grpo_model.py"
@@ -175,7 +195,7 @@ def prepare_snapshot_accelerate_config(snapshot_dir: Path, strategy: str, num_pr
     return snapshot_config
 
 
-def setup_job_executor(device_type, num_gpus, run_name):
+def setup_job_executor(device_type, partition_name, num_gpus, num_nodes, run_name):
     """Setup the appropriate job executor based on device type."""
     if submitit is None:
         raise RuntimeError("submitit is required to configure job executors.")
@@ -188,19 +208,19 @@ def setup_job_executor(device_type, num_gpus, run_name):
         logger.info("Using LocalExecutor for local execution")
     else:
         executor = submitit.AutoExecutor(folder=job_folder)
-        logger.info(f"Using AutoExecutor for SLURM submission to {device_type} partition")
+        logger.info(f"Using AutoExecutor for SLURM submission to {partition_name} partition")
     
     # Configure job parameters - use GRES instead of gpus_per_node for specific GPU types
-    if device_type in ["a100", "h100", "all"]:
+    if device_type in ["a100", "h100", "all", "pod"]:
         # Use GRES for specific GPU type requests
         executor.update_parameters(
             name=run_name,
             timeout_min=24 * 24 * 60,  # 24 hours
-            nodes=1,
-            mem_gb=80,
+            nodes=num_nodes,
+            mem_gb=280,
             cpus_per_task=num_gpus * 16,
             slurm_additional_parameters={
-                "partition": device_type,
+                "partition": partition_name,
                 "gres": f"gpu:{num_gpus}"
             },
         )
@@ -210,15 +230,16 @@ def setup_job_executor(device_type, num_gpus, run_name):
             name=run_name,
             timeout_min=24 * 24 * 60,  # 24 hours
             gpus_per_node=num_gpus,
-            nodes=1,
+            nodes=num_nodes,
             mem_gb=80,
             cpus_per_task=num_gpus * 8,
-            slurm_additional_parameters={"partition": device_type},
+            slurm_additional_parameters={"partition": partition_name},
         )
     
     logger.info(f"Job configuration:")
-    logger.info(f"  - Partition: {device_type}")
-    logger.info(f"  - GPUs: {num_gpus}")
+    logger.info(f"  - Partition: {partition_name}")
+    logger.info(f"  - Nodes: {num_nodes}")
+    logger.info(f"  - GPUs per node: {num_gpus}")
     if device_type in ["a100", "h100"]:
         logger.info(f"  - GRES: gpu:{device_type}:{num_gpus}")
     else:
@@ -230,7 +251,9 @@ def setup_job_executor(device_type, num_gpus, run_name):
 def run_command_locally(cmd: list[str], work_dir: Path | str):
     """Execute the launch command locally when submitit is unavailable."""
     logger.info("Running training command directly via subprocess for local device.")
-    subprocess.run(cmd, cwd=str(work_dir), check=True)
+    env = os.environ.copy()
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    subprocess.run(cmd, cwd=str(work_dir), check=True, env=env)
 
 def save_updated_config(config, config_file_path):
     """Save the updated configuration to file."""
@@ -250,19 +273,55 @@ def main():
     parser.add_argument("--wandb", action="store_true", help="Enable wandb tracking")
     parser.add_argument("--device", type=str, choices=["local", "a100", "h100", "all"], 
                        default="local", help="Target device type for job submission")
+    parser.add_argument(
+        "--nodes",
+        dest="nodes",
+        type=int,
+        default=1,
+        help="Number of nodes to request",
+    )
+    parser.add_argument(
+        "--partition",
+        type=str,
+        default=None,
+        help="Override the SLURM partition name (defaults to device)",
+    )
     parser.add_argument("--ngpus", type=int, default=1, help="Number of GPUs to use")
     parser.add_argument("--strategy", type=str, choices=["single", "ddp", "fsdp", "ds"], 
                        default="single", help="Training strategy")
     parser.add_argument("--nccl-debug", action="store_true", help="Enable NCCL debug logging")
+    # WandB is configured via hardcoded defaults and environment variables.
     
     args = parser.parse_args()
 
     try:
+        if args.device != "local" and not os.environ.get("SLURM_CONF"):
+            default_slurm_conf = "/cm/shared/apps/slurm/etc/slurm/slurm.conf"
+            if os.path.exists(default_slurm_conf):
+                os.environ["SLURM_CONF"] = default_slurm_conf
+                logger.info(f"Using SLURM_CONF default: {default_slurm_conf}")
+            else:
+                logger.warning("SLURM_CONF is not set; sbatch may fail to locate slurmctld.")
+
         # Load and update configurations
         config_data = load_and_update_configs(args, project_root)
         
         # Create directories and get config object
         config, output_dir = create_directories(config_data, args, project_root)
+
+        if args.wandb:
+            ensure_wandb_api_key(project_root)
+            os.environ.setdefault("WANDB_ENTITY", WANDB_ENTITY_DEFAULT)
+            os.environ.setdefault("WANDB_PROJECT", WANDB_PROJECT_DEFAULT)
+            wandb_user = (
+                os.environ.get("SUDO_USER")
+                or os.environ.get("USER")
+                or os.environ.get("LOGNAME")
+                or "root"
+            )
+            default_config_dir = project_root / "outputs" / "wandb_configs" / wandb_user
+            os.environ.setdefault("WANDB_CONFIG_DIR", str(default_config_dir))
+            os.environ.setdefault("WANDB_DIR", str(Path(output_dir) / "wandb"))
         
         # Create code snapshot
         create_code_snapshot(str(project_root), str(output_dir))
@@ -274,7 +333,12 @@ def main():
         logger.info(f"Wrote snapshot-only config to: {snapshot_config_path}")
         
         # Update accelerate config inside the snapshot (if needed)
-        snapshot_accelerate_config = prepare_snapshot_accelerate_config(output_dir, args.strategy, config.device.num_gpus)
+        total_processes = config.device.num_gpus * args.nodes
+        snapshot_accelerate_config = prepare_snapshot_accelerate_config(
+            output_dir,
+            args.strategy,
+            total_processes,
+        )
         
         # Build launch command using snapshot config
         cmd = build_launch_command(
@@ -294,7 +358,16 @@ def main():
             raise RuntimeError("submitit is required for remote execution modes.")
         
         # Setup and submit job
-        executor = setup_job_executor(args.device, config.device.num_gpus, config.run.name)
+        partition_name = args.partition or args.device
+        executor = setup_job_executor(
+            args.device,
+            partition_name,
+            config.device.num_gpus,
+            args.nodes,
+            config.run.name,
+        )
+        logger.info("Disabling srun to avoid PMIx/MPI plugin issues.")
+        executor.update_parameters(slurm_use_srun=False)
         job = executor.submit(submitit.helpers.CommandFunction(cmd, cwd=str(output_dir)))
         
         logger.info(f"Job submitted successfully!")

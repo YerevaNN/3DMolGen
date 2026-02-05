@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+# Example (this project):
+#   python src/molgen3D/training/pretraining/helpers/convert_qwen3_dcp_to_hf.py \
+#     --dcp-path /home/chem-project/checkpoints/qwen3_06b/260122-0843-3a41-qwen3_06b_pre_4e_8e-4_binned_grouped/step-34000 \
+#     --hf-assets-path /home/chem-project/checkpoints/Qwen3-0.6B-Base/patched_for_titan \
+#     --tokenizer-path /home/chem-project/mb-3dmolgen/3DMolGen/src/molgen3D/training/tokenizers/Qwen3_tokenizer_binned
+
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -10,22 +16,20 @@ import torch
 import torch.nn as nn
 import torch.distributed.checkpoint as dcp
 import tyro
-from transformers import Qwen3Config, Qwen3ForCausalLM
+from transformers import AutoTokenizer, Qwen3Config, Qwen3ForCausalLM
 
 from torchtitan.models.qwen3.model.state_dict_adapter import Qwen3StateDictAdapter
+from molgen3D.config.paths import get_tokenizer_path
 # from torchtitan.tools.logging import logger
 
 
 # ---------------------------------------------------------------------------
-# Hard-coded Qwen3 vocab layout for your setup
+# Default Qwen3 vocab layout for your setup (used as fallback only)
 # ---------------------------------------------------------------------------
 
 BASE_VOCAB: int = 151_669
 PADDED_VOCAB: int = 151_936
 NUM_NEW_TOKENS: int = 4
-
-EXTRA_START: int = BASE_VOCAB
-EXTRA_END: int = BASE_VOCAB + NUM_NEW_TOKENS  # 151673
 
 EMBED_WEIGHT_KEYS: Tuple[str, ...] = (
     "model.embed_tokens.weight",
@@ -76,6 +80,118 @@ def _find_tensor_key_from_metadata(
             if name.endswith(suf):
                 return name
     return None
+
+
+def _looks_like_tokenizer_dir(path: Path) -> bool:
+    if not path.exists():
+        return False
+    expected_files = [
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.json",
+        "merges.txt",
+        "sentencepiece.bpe.model",
+    ]
+    return any((path / name).exists() for name in expected_files)
+
+
+def _looks_like_hf_model_dir(path: Path) -> bool:
+    if not path.exists():
+        return False
+    expected_files = [
+        "config.json",
+        "model.safetensors",
+        "pytorch_model.bin",
+        "model.safetensors.index.json",
+    ]
+    return any((path / name).exists() for name in expected_files)
+
+
+def _load_tokenizer(tokenizer_path: Path):
+    return AutoTokenizer.from_pretrained(
+        str(tokenizer_path),
+        trust_remote_code=True,
+        local_files_only=True,
+    )
+
+
+def _get_tokenizer_vocab_info(tokenizer) -> Tuple[int, int, int]:
+    total_vocab = len(tokenizer)
+    base_vocab = getattr(tokenizer, "vocab_size", None)
+    added_vocab_count = None
+    if hasattr(tokenizer, "get_added_vocab"):
+        added_vocab_count = len(tokenizer.get_added_vocab())
+
+    if base_vocab is None:
+        base_vocab = total_vocab - (added_vocab_count or 0)
+
+    if base_vocab > total_vocab:
+        base_vocab = total_vocab
+
+    num_new_tokens = added_vocab_count if added_vocab_count is not None else max(total_vocab - base_vocab, 0)
+    return base_vocab, num_new_tokens, total_vocab
+
+
+def _resolve_tokenizer_path_from_job_cfg(
+    job_cfg: Dict,
+    *,
+    override: Optional[str] = None,
+) -> Optional[Path]:
+    if override:
+        path = Path(override)
+        if _looks_like_tokenizer_dir(path):
+            return path
+        raise FileNotFoundError(f"Tokenizer override path does not look valid: {path}")
+
+    model_cfg = job_cfg.get("model", {})
+    data_cfg = job_cfg.get("molgen_data", {})
+    run_cfg = job_cfg.get("molgen_run", {})
+
+    train_path = str(data_cfg.get("train_path") or "")
+    tokenizer_candidates: list[tuple[str, Path]] = []
+
+    direct_paths = [
+        ("model.tokenizer_path", model_cfg.get("tokenizer_path")),
+        ("molgen_data.tokenizer_override", data_cfg.get("tokenizer_override")),
+        ("model.hf_assets_path", model_cfg.get("hf_assets_path")),
+    ]
+    for source, value in direct_paths:
+        if isinstance(value, str):
+            path = Path(value)
+            if _looks_like_tokenizer_dir(path):
+                tokenizer_candidates.append((source, path))
+
+    tokenizer_tag = run_cfg.get("tokenizer_tag")
+    if isinstance(tokenizer_tag, str) and tokenizer_tag.startswith("tokenizers:"):
+        alias = tokenizer_tag.split(":", 1)[1]
+        try:
+            path = get_tokenizer_path(alias)
+            tokenizer_candidates.append(("molgen_run.tokenizer_tag", path))
+        except Exception as exc:
+            print(f"[WARN] Failed to resolve tokenizer_tag {tokenizer_tag}: {exc}")
+
+    tokenizer_key = data_cfg.get("tokenizer_key")
+    if isinstance(tokenizer_key, str):
+        try:
+            path = get_tokenizer_path(tokenizer_key)
+            tokenizer_candidates.append(("molgen_data.tokenizer_key", path))
+        except Exception as exc:
+            print(f"[WARN] Failed to resolve tokenizer_key {tokenizer_key}: {exc}")
+
+    if not tokenizer_candidates:
+        return None
+
+    if "binned" in train_path.lower():
+        for source, path in tokenizer_candidates:
+            if "binned" in str(path).lower():
+                if source not in ("molgen_data.tokenizer_override", "model.tokenizer_path"):
+                    print(
+                        "[WARN] Train path looks binned; selecting binned tokenizer "
+                        f"from {source}={path}"
+                    )
+                return path
+
+    return tokenizer_candidates[0][1]
 
 
 def _load_full_dcp_state(step_dir: Path) -> Dict[str, torch.Tensor]:
@@ -174,7 +290,11 @@ def _load_run_config(step_dir: Path) -> Dict:
     )
 
 
-def _collect_run_metadata(job_cfg: Dict) -> Dict[str, Optional[object]]:
+def _collect_run_metadata(
+    job_cfg: Dict,
+    *,
+    tokenizer_override: Optional[str] = None,
+) -> Dict[str, Optional[object]]:
     model_cfg = job_cfg.get("model", {})
     data_cfg = job_cfg.get("molgen_data", {})
     training_cfg = job_cfg.get("training", {})
@@ -184,16 +304,25 @@ def _collect_run_metadata(job_cfg: Dict) -> Dict[str, Optional[object]]:
     padded_vocab = int(model_cfg.get("padded_vocab_size", PADDED_VOCAB))
     seq_len = int(training_cfg.get("seq_len", 0))
 
-    tokenizer_path = (
-        model_cfg.get("tokenizer_override")
-        or data_cfg.get("tokenizer_override")
-        or model_cfg.get("hf_assets_path")
-    )
+    tokenizer_path = _resolve_tokenizer_path_from_job_cfg(job_cfg, override=tokenizer_override)
+
+    total_vocab = None
+    if tokenizer_path:
+        tok_path = Path(tokenizer_path)
+        tokenizer = _load_tokenizer(tok_path)
+        base_vocab, added_tokens, total_vocab = _get_tokenizer_vocab_info(tokenizer)
+        print(
+            "[INFO] Tokenizer-derived vocab sizes: "
+            f"path={tok_path}, base_vocab={base_vocab}, new_tokens={added_tokens}, total_vocab={total_vocab}"
+        )
+    else:
+        print("[WARN] No tokenizer path found in job config; using fallback vocab sizes.")
 
     return {
         "base_vocab": base_vocab,
         "new_tokens": added_tokens,
         "padded_vocab": padded_vocab,
+        "total_vocab": total_vocab,
         "seq_len": seq_len,
         "tokenizer_path": tokenizer_path,
     }
@@ -261,13 +390,14 @@ def _sanity_check_qwen3_vocab_and_tie(
     *,
     expected_base_vocab: int,
     expected_extra_tokens: int,
-    expected_padded_vocab: int,
+    expected_padded_vocab: Optional[int],
+    expected_total_vocab: Optional[int] = None,
 ) -> None:
     """Checks that Titan embeddings/head look like your intended Qwen3 layout."""
     emb_vocab, emb_dim = titan_embed.shape
     head_vocab, head_dim = titan_head.shape
 
-    if emb_vocab != expected_padded_vocab:
+    if expected_padded_vocab is not None and emb_vocab != expected_padded_vocab:
         raise ValueError(
             f"Embedding vocab {emb_vocab} != expected PADDED_VOCAB {expected_padded_vocab}"
         )
@@ -283,6 +413,11 @@ def _sanity_check_qwen3_vocab_and_tie(
 
     if not torch.isfinite(titan_embed).all():
         raise ValueError("Titan embedding contains non-finite values (NaN/Inf).")
+
+    if expected_total_vocab is not None and expected_total_vocab > emb_vocab:
+        raise ValueError(
+            f"Tokenizer vocab {expected_total_vocab} exceeds embedding rows {emb_vocab}"
+        )
 
     # Check extra rows
     extra_start = expected_base_vocab
@@ -647,14 +782,6 @@ def export_qwen3_dcp_step_to_hf(
     titan_embed, titan_head, _, _ = _resolve_embed_and_head(titan_state)
     print(f"[INFO] Titan model: {titan_embed.shape[0]} vocab, {titan_embed.shape[1]} hidden dim")
 
-    if titan_embed.shape[0] != PADDED_VOCAB:
-        raise ValueError(
-            f"Embedding vocab {titan_embed.shape[0]} != expected PADDED_VOCAB {PADDED_VOCAB}"
-        )
-    if titan_embed.shape[0] < BASE_VOCAB + NUM_NEW_TOKENS:
-        raise ValueError(
-            "Embedding rows are insufficient for base + new tokens; invariants broken."
-        )
     if titan_head.shape != titan_embed.shape:
         raise ValueError(
             f"LM head shape {tuple(titan_head.shape)} != embed shape {tuple(titan_embed.shape)}"
@@ -662,7 +789,14 @@ def export_qwen3_dcp_step_to_hf(
 
     base_vocab = int(expected_specs["base_vocab"])
     extra_tokens = int(expected_specs["new_tokens"])
-    padded_vocab = int(expected_specs["padded_vocab"])
+    padded_vocab = titan_embed.shape[0]
+    recorded_padded = expected_specs.get("padded_vocab")
+    if recorded_padded is not None and int(recorded_padded) != padded_vocab:
+        print(
+            f"[WARN] Padded vocab in config ({recorded_padded}) != embedding rows ({padded_vocab}); "
+            "using embedding rows as source of truth."
+        )
+    total_vocab = expected_specs.get("total_vocab")
     seq_len = int(expected_specs.get("seq_len") or 0)
 
     _sanity_check_qwen3_vocab_and_tie(
@@ -671,6 +805,7 @@ def export_qwen3_dcp_step_to_hf(
         expected_base_vocab=base_vocab,
         expected_extra_tokens=extra_tokens,
         expected_padded_vocab=padded_vocab,
+        expected_total_vocab=total_vocab,
     )
 
     # Build and convert to HF
@@ -729,6 +864,8 @@ class DcpToHfConfig:
     """
     dcp_path: str
     dry_run: bool = False
+    hf_assets_path: Optional[str] = None
+    tokenizer_path: Optional[str] = None
 
 
 def _find_step_dirs(root: Path) -> List[Path]:
@@ -784,13 +921,21 @@ def main(cfg: DcpToHfConfig) -> None:
             print(f"[INFO] Processing {i}/{len(step_dirs)}: {step_dir.name}")
         try:
             job_cfg = _load_run_config(step_dir)
-            run_metadata = _collect_run_metadata(job_cfg)
+            run_metadata = _collect_run_metadata(job_cfg, tokenizer_override=cfg.tokenizer_path)
             dtype_str, dtype = _resolve_expected_dtype(job_cfg)
-            hf_assets = job_cfg.get("model", {}).get("hf_assets_path")
+            hf_assets = cfg.hf_assets_path or job_cfg.get("model", {}).get("hf_assets_path")
+            if not hf_assets or not _looks_like_hf_model_dir(Path(hf_assets)):
+                fallback = job_cfg.get("checkpoint", {}).get("initial_load_path")
+                if fallback and _looks_like_hf_model_dir(Path(fallback)):
+                    print(
+                        f"[WARN] Using checkpoint.initial_load_path for HF assets: {fallback}"
+                    )
+                    hf_assets = fallback
             if not hf_assets:
                 raise ValueError(
-                    "job_config.json does not contain model.hf_assets_path; "
-                    "re-run training with normalized paths."
+                    "Unable to resolve HF assets path. Provide --hf-assets-path "
+                    "or ensure job_config.json has model.hf_assets_path or "
+                    "checkpoint.initial_load_path."
                 )
             hf_base = Path(hf_assets)
             if not hf_base.exists():

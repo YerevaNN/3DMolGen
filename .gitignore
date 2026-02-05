@@ -20,6 +20,7 @@ outputs/
 notebooks/
 wandb/
 wandb_runs/
+wandb.key
 # tests/
 *.egg-info/
 build/

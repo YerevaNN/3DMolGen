@@ -9,8 +9,8 @@ RMSD metrics against ground truth conformers.
 
 from __future__ import annotations
 
-from contextlib import nullcontext
 from pathlib import Path
+import os
 from typing import Dict, List, Tuple
 import random
 import time
@@ -23,7 +23,9 @@ import torch.distributed as dist
 from loguru import logger
 
 from molgen3D.data_processing.smiles_encoder_decoder import (
+    decode_cartesian_binned_v2,
     decode_cartesian_v2,
+    get_bins_for_coords,
     strip_smiles,
 )
 from molgen3D.evaluation.utils import (
@@ -34,7 +36,8 @@ from molgen3D.evaluation.utils import (
 )
 from molgen3D.utils.utils import get_best_rmsd
 from molgen3D.config.sampling_config import sampling_configs
-from molgen3D.config.paths import get_data_path
+from molgen3D.config.paths import get_data_path, resolve_data_path
+from molgen3D.training.grpo.utils import load_smiles_mapping, load_ground_truths
 
 # Failure type constants
 FAIL_NO_CLOSING_TAG = "no_closing_tag"
@@ -42,6 +45,9 @@ FAIL_EMPTY_CONFORMER = "empty_conformer"
 FAIL_PARSING_ERROR = "parsing_error"
 FAIL_SMILES_MISMATCH = "smiles_mismatch"
 FAIL_RMSD_NAN = "rmsd_nan"
+
+DEFAULT_BINNED_RANGES = [(-13.0, 13.0), (-13.0, 13.0), (-13.0, 13.0)]
+DEFAULT_BIN_SIZE = 0.104
 
 
 class GRPONumericalValidator:
@@ -82,6 +88,28 @@ class GRPONumericalValidator:
 
         self._pad_id = self.tokenizer.pad_token_id or self._eos_id or 0
 
+        self._use_binned_decoder = bool(
+            getattr(getattr(self.config, "grpo", self.config), "fbeta_use_binned_decoder", False)
+        )
+        self._binned_bins = None
+        if self._use_binned_decoder:
+            ranges = getattr(
+                getattr(self.config, "grpo", self.config),
+                "fbeta_binned_ranges",
+                DEFAULT_BINNED_RANGES,
+            )
+            if ranges is None:
+                ranges = DEFAULT_BINNED_RANGES
+            bin_size = getattr(
+                getattr(self.config, "grpo", self.config),
+                "fbeta_binned_bin_size",
+                DEFAULT_BIN_SIZE,
+            )
+            self._binned_bins = get_bins_for_coords(ranges, bin_size)
+            logger.info(
+                f"[numerical_validation] binned decode enabled: ranges={ranges}, bin_size={bin_size}"
+            )
+
         if self._conformer_start_id is None or self._conformer_end_id is None:
             raise ValueError("Tokenizer must define [CONFORMER] and [/CONFORMER] tokens.")
 
@@ -93,6 +121,37 @@ class GRPONumericalValidator:
         from `validation_pickle` (valid_set.pickle) defined in paths.yaml.
         We simply sample SMILES keys from that pickle.
         """
+        if getattr(self.config.validation, "use_dataset_prompts", False):
+            dataset_path = resolve_data_path(self.config.dataset.dataset_path)
+            load_smiles_mapping(self.config.dataset.smiles_mapping_path)
+            logger.info(f"Loading numerical validation prompts from {dataset_path}")
+            with open(dataset_path, "r", encoding="utf-8", errors="replace") as fh:
+                raw_lines = [line.strip() for line in fh if line.strip()]
+            rng = np.random.default_rng(self._get_validation_seed())
+            rng.shuffle(raw_lines)
+
+            prompts: List[str] = []
+            ground_truths: Dict[str, List] = {}
+            for line in raw_lines:
+                smiles = extract_between(line, "[SMILES]", "[/SMILES]") or line
+                if not smiles:
+                    continue
+                gts = load_ground_truths(
+                    smiles,
+                    num_gt=getattr(self.config.validation, "max_ground_truths", 30),
+                )
+                if not gts:
+                    continue
+                prompts.append(smiles)
+                ground_truths[smiles] = gts
+                if len(prompts) >= self.config.validation.num_val_molecules:
+                    break
+
+            logger.info(
+                f"Loaded {len(prompts)} validation SMILES keys from dataset prompts"
+            )
+            return prompts, ground_truths
+
         gt_path = get_data_path("validation_pickle")
         logger.info(f"Loading numerical validation keys from {gt_path}")
 
@@ -111,16 +170,26 @@ class GRPONumericalValidator:
                 break
         ground_truths = {key: gt_dict[key] for key in prompts}
 
+        # Normalize ground-truth payloads to lists of RDKit mols.
+        for key, value in list(ground_truths.items()):
+            if value is None:
+                ground_truths[key] = []
+                continue
+            if not isinstance(value, list):
+                try:
+                    value = list(value)
+                except Exception:
+                    value = [value]
+            if value and isinstance(value[0], dict):
+                mols = [entry.get("mol") for entry in value if isinstance(entry, dict)]
+                value = [mol for mol in mols if mol is not None]
+            max_gt = int(getattr(self.config.validation, "max_ground_truths", 30))
+            if max_gt > 0 and len(value) > max_gt:
+                value = value[:max_gt]
+            ground_truths[key] = value
+
         logger.info(f"Loaded {len(prompts)} validation SMILES keys from validation_pickle")
         return prompts, ground_truths
-
-    def _build_prompt_tensor(
-        self, smiles: str, device: torch.device
-    ) -> torch.Tensor:
-        """Build a prompt tensor for conformer generation."""
-        prompt_text = f"[SMILES]{smiles}[/SMILES][CONFORMER]"
-        tokens = self.tokenizer.encode(prompt_text, add_special_tokens=False)
-        return torch.tensor(tokens, device=device, dtype=torch.long).unsqueeze(0)
 
     def _get_validation_seed(self) -> int | None:
         """Return the seed to use for deterministic numerical validation."""
@@ -368,7 +437,7 @@ class GRPONumericalValidator:
         self,
         model: torch.nn.Module,
         step: int,
-        max_seq_len: int = 2048
+        max_seq_len: int | None = 2048
     ) -> Dict[str, float]:
         """
         Run numerical validation.
@@ -398,6 +467,13 @@ class GRPONumericalValidator:
             rank = dist.get_rank()
 
         valid_prompts = self._validation_prompts
+        local_rank = os.environ.get("LOCAL_RANK", "unknown")
+        visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "all")
+        if rank == 0:
+            logger.info(
+                f"[rank {rank}/{world_size}] validation device={device}, "
+                f"local_rank={local_rank}, cuda_visible_devices={visible_devices}"
+            )
 
         base_seed = self._get_validation_seed()
         per_rank_seed: int | None = None
@@ -450,234 +526,271 @@ class GRPONumericalValidator:
             gen_cfg = sampling_configs[self.config.validation.sampling_config]
             sampling_enabled = bool(getattr(gen_cfg, "do_sample", False))
 
-            # Expand prompts (per-molecule conformer requests)
-            prepared_texts: List[str] = []
-            prepared_smiles: List[str] = []
+            # Expand prompts (per-molecule conformer requests) without building large lists.
+            total_prompts_before_sharding = 0
+            for smiles in valid_prompts:
+                if sampling_enabled:
+                    num_ground_truths = len(self._ground_truths.get(smiles, []))
+                    num_generations = max(2 * num_ground_truths, 1)
+                else:
+                    num_generations = 1
+                total_prompts_before_sharding += num_generations
+
+            if rank == 0:
+                logger.info(
+                    f"[rank {rank}] Numerical validation prepared {total_prompts_before_sharding} prompts "
+                    f"(sampling_enabled={sampling_enabled}, batch_size={validation_batch_size})."
+                )
+
+            rank_prompt_count = 0
+            rank_processed_count = 0
+            global_idx = 0
+            batch_texts: List[str] = []
+            batch_smiles: List[str] = []
+
+            def _flush_batch(batch_start: int) -> None:
+                if not batch_texts:
+                    return
+                if rank == 0:
+                    logger.info(
+                        f"[rank {rank}] Processing batch {batch_start // validation_batch_size + 1}: "
+                        f"{len(batch_texts)} prompts"
+                    )
+                _process_batch(batch_texts, batch_smiles, batch_start)
+                batch_texts.clear()
+                batch_smiles.clear()
+
+            def _process_batch(batch_texts: List[str], batch_smiles: List[str], batch_start: int) -> None:
+                if not batch_texts:
+                    return
+                nonlocal rank_processed_count
+                encodings = self.tokenizer(
+                    batch_texts,
+                    padding=True,
+                    pad_to_multiple_of=8,
+                    return_tensors="pt",
+                )
+
+                input_ids = encodings["input_ids"]
+                attention_mask = encodings["attention_mask"]
+                vocab_size = getattr(model.config, "vocab_size", None)
+                if vocab_size is not None:
+                    invalid_rows = (input_ids < 0) | (input_ids >= vocab_size)
+                    if invalid_rows.any():
+                        bad_mask = invalid_rows.any(dim=1)
+                        bad_count = int(bad_mask.sum().item())
+                        if bad_count == input_ids.shape[0]:
+                            logger.error(
+                                f"[rank {rank}] All prompts in batch have invalid token ids; "
+                                f"skipping batch of size {bad_count}."
+                            )
+                            return
+                        logger.warning(
+                            f"[rank {rank}] Dropping {bad_count}/{input_ids.shape[0]} prompts "
+                            "with invalid token ids during numerical validation."
+                        )
+                        keep_mask = ~bad_mask
+                        keep_list = keep_mask.tolist()
+                        input_ids = input_ids[keep_mask]
+                        attention_mask = attention_mask[keep_mask]
+                        batch_texts = [t for t, keep in zip(batch_texts, keep_list) if keep]
+                        batch_smiles = [s for s, keep in zip(batch_smiles, keep_list) if keep]
+
+                # Move to device and ensure proper types
+                input_ids = input_ids.to(device)
+                attention_mask = attention_mask.to(device)
+
+                # Use validation hyperparameter directly for max new tokens.
+                max_new_tokens = int(self.config.validation.max_conformer_tokens)
+                if rank == 0:
+                    logger.info(
+                        "Generation limits: max_new_tokens=%s",
+                        max_new_tokens,
+                    )
+
+                generate_kwargs = {
+                    "input_ids": input_ids,
+                    "attention_mask": attention_mask,
+                    "do_sample": sampling_configs[self.config.validation.sampling_config].do_sample,
+                    "top_p": sampling_configs[self.config.validation.sampling_config].top_p,
+                    "temperature": sampling_configs[self.config.validation.sampling_config].temperature,
+                    "max_new_tokens": max_new_tokens,
+                    "pad_token_id": self._pad_id,
+                    "eos_token_id": self._conformer_end_id,
+                }
+                seed_value = None
+                if per_rank_seed is not None:
+                    seed_value = per_rank_seed + batch_start
+                    torch.manual_seed(seed_value)
+                    if device.type == "cuda":
+                        torch.cuda.manual_seed_all(seed_value)
+
+                generated_outputs = model.generate(**generate_kwargs)
+                if rank == 0:
+                    logger.info(f"Generated outputs shape: {generated_outputs.shape}")
+
+                sequences = generated_outputs.detach().cpu()
+                decoded_batch = self.tokenizer.batch_decode(
+                    sequences, skip_special_tokens=True
+                )
+                del sequences, generated_outputs
+
+                # Process each generated sequence in the batch
+                for batch_idx, (smiles, full_decoded, prompt_text) in enumerate(
+                    zip(batch_smiles, decoded_batch, batch_texts)
+                ):
+                    generated_only_decoded = (
+                        full_decoded[len(prompt_text):]
+                        if full_decoded.startswith(prompt_text)
+                        else full_decoded
+                    )
+
+                    # Extract SMILES and conformer similar to inference.py
+                    canonical_smiles = extract_between(full_decoded, "[SMILES]", "[/SMILES]")
+                    conformer_text = extract_between(full_decoded, "[CONFORMER]", "[/CONFORMER]")
+
+                    # Check for empty/missing conformer
+                    if not conformer_text:
+                        # Check if [/CONFORMER] is missing
+                        if (
+                            "[/CONFORMER]" not in full_decoded
+                        ):
+                            failure_counts[FAIL_NO_CLOSING_TAG] += 1
+                            all_failed_generations.append(
+                                (smiles, generated_only_decoded, FAIL_NO_CLOSING_TAG)
+                            )
+                            if len(sample_failures) < 1000:
+                                sample_failures.append(
+                                    (
+                                        smiles,
+                                        FAIL_NO_CLOSING_TAG,
+                                        f"generated: {generated_only_decoded[:200]}",
+                                    )
+                                )
+                        else:
+                            failure_counts[FAIL_EMPTY_CONFORMER] += 1
+                            all_failed_generations.append(
+                                (smiles, generated_only_decoded, FAIL_EMPTY_CONFORMER)
+                            )
+                            if len(sample_failures) < 1000:
+                                sample_failures.append(
+                                    (
+                                        smiles,
+                                        FAIL_EMPTY_CONFORMER,
+                                        f"generated: {generated_only_decoded[:200]}",
+                                    )
+                                )
+                        continue
+
+                    # Try to parse the conformer
+                    try:
+                        if self._use_binned_decoder:
+                            generated_mol = decode_cartesian_binned_v2(
+                                conformer_text, self._binned_bins
+                            )
+                        else:
+                            generated_mol = decode_cartesian_v2(conformer_text)
+                    except Exception as e:
+                        failure_counts[FAIL_PARSING_ERROR] += 1
+                        all_failed_generations.append(
+                            (smiles, generated_only_decoded, FAIL_PARSING_ERROR)
+                        )
+                        if len(sample_failures) < 10:
+                            sample_failures.append(
+                                (
+                                    smiles,
+                                    FAIL_PARSING_ERROR,
+                                    f"{e}: {conformer_text[:80]}",
+                                )
+                            )
+                        continue
+
+                    # Check SMILES match (similar to inference.py)
+                    generated_smiles = strip_smiles(conformer_text)
+                    if not same_molecular_graph(canonical_smiles, generated_smiles):
+                        failure_counts[FAIL_SMILES_MISMATCH] += 1
+                        all_failed_generations.append(
+                            (smiles, generated_only_decoded, FAIL_SMILES_MISMATCH)
+                        )
+                        if len(sample_failures) < 10:
+                            sample_failures.append(
+                                (
+                                    smiles,
+                                    FAIL_SMILES_MISMATCH,
+                                    f"canonical: {canonical_smiles}, got: {generated_smiles}",
+                                )
+                            )
+                        continue
+
+                    # Compute RMSD statistics
+                    gt_confs = self._ground_truths[smiles]
+                    min_val, max_val, avg_val, rmsd_vec = self._compute_rmsd_stats(
+                        generated_mol, gt_confs
+                    )
+
+                    if np.isnan(min_val):
+                        failure_counts[FAIL_RMSD_NAN] += 1
+                        all_failed_generations.append(
+                            (smiles, generated_only_decoded, FAIL_RMSD_NAN)
+                        )
+                        if len(sample_failures) < 10:
+                            sample_failures.append(
+                                (smiles, FAIL_RMSD_NAN, "RMSD returned NaN")
+                            )
+                    else:
+                        min_rmsds.append(min_val)
+                        max_rmsds.append(max_val)
+                        avg_rmsds.append(avg_val)
+
+                        # Store per-molecule RMSD vector for covmat-style metrics
+                        if rmsd_vec.size > 0:
+                            per_smiles_rmsd_vectors.setdefault(smiles, []).append(
+                                rmsd_vec
+                            )
+
+                    # Progress logging (per-rank)
+                    rank_processed_count += 1
+                    if rank_processed_count % 5 == 0 and rank == 0:
+                        total_failures = sum(failure_counts.values())
+                        valid_count = len(min_rmsds)
+                        failure_rate = (total_failures / rank_processed_count) if rank_processed_count else 0.0
+                        logger.info(
+                            f"[rank {rank}] Numerical validation progress: "
+                            f"processed={rank_processed_count}/{rank_prompt_count}, "
+                            f"valid={valid_count}, failures={total_failures}, "
+                            f"failure_rate={failure_rate:.2%}"
+                        )
 
             for smiles in valid_prompts:
                 prompt_text = f"[SMILES]{smiles}[/SMILES][CONFORMER]"
-
-                # Number of generations to request for this molecule
                 if sampling_enabled:
                     num_ground_truths = len(self._ground_truths.get(smiles, []))
-                    # Target ~2k conformers per molecule (k = num_ground_truths)
                     num_generations = max(2 * num_ground_truths, 1)
                 else:
                     num_generations = 1
 
                 for _ in range(num_generations):
-                    prepared_texts.append(prompt_text)
-                    prepared_smiles.append(smiles)
+                    if global_idx % world_size == rank:
+                        batch_texts.append(prompt_text)
+                        batch_smiles.append(smiles)
+                        rank_prompt_count += 1
+                        if len(batch_texts) >= validation_batch_size:
+                            if rank == 0:
+                                logger.info(
+                                    f"[rank {rank}] Queued {rank_prompt_count} prompts, "
+                                    f"flushing batch at global_idx={global_idx}"
+                                )
+                            _flush_batch(global_idx)
+                    global_idx += 1
 
-            total_prompts_before_sharding = len(prepared_texts)
-
-            if world_size > 1 and total_prompts_before_sharding > 0:
-                rank_indices = [
-                    idx for idx in range(total_prompts_before_sharding) if idx % world_size == rank
-                ]
-                prepared_texts = [prepared_texts[idx] for idx in rank_indices]
-                prepared_smiles = [prepared_smiles[idx] for idx in rank_indices]
-
-            rank_prompt_count = len(prepared_texts)
+            _flush_batch(global_idx)
 
             if rank_prompt_count == 0:
-                # Log for all ranks to ensure all are aware when validation is skipped
                 logger.warning(
                     f"[rank {rank}] No valid prompts for batched generation (after sharding). "
                     f"Total prompts before sharding: {total_prompts_before_sharding}, "
                     f"world_size: {world_size}"
                 )
-            else:
-                # Process prompts in batches
-                for batch_start in range(0, rank_prompt_count, validation_batch_size):
-                    batch_end = min(batch_start + validation_batch_size, rank_prompt_count)
-                    batch_texts = prepared_texts[batch_start:batch_end]
-                    batch_smiles = prepared_smiles[batch_start:batch_end]
-
-                    if rank == 0:
-                        logger.info(
-                            f"[rank {rank}] Processing batch {batch_start // validation_batch_size + 1}: "
-                            f"{batch_end - batch_start} prompts"
-                        )
-
-                    if not batch_texts:
-                        continue
-                    
-                    encodings = self.tokenizer(
-                        batch_texts,
-                        padding=True,
-                        pad_to_multiple_of=8,
-                        return_tensors="pt",
-                    )
-
-                    # Move to device and ensure proper types
-                    input_ids = encodings['input_ids'].to(device)
-                    attention_mask = encodings['attention_mask'].to(device)
-
-                    # Calculate max new tokens based on padded prompt length
-                    max_prompt_len = input_ids.shape[1]
-                    available = max(max_seq_len - max_prompt_len, 1)
-                    max_new_tokens = min(
-                        self.config.validation.max_conformer_tokens, available
-                    )
-                    if rank == 0:
-                        logger.info(
-                            f"Generation limits: max_seq_len={max_seq_len}, "
-                            f"max_prompt_len={max_prompt_len}, "
-                            f"available={available}, max_new_tokens={max_new_tokens}"
-                        )
-
-                    
-                    generate_kwargs = {
-                        "input_ids": input_ids,
-                        "attention_mask": attention_mask,
-                        "do_sample": sampling_configs[self.config.validation.sampling_config].do_sample,
-                        "top_p": sampling_configs[self.config.validation.sampling_config].top_p,
-                        "temperature": sampling_configs[self.config.validation.sampling_config].temperature,
-                        "max_new_tokens": max_new_tokens,
-                        "pad_token_id": self._pad_id,
-                        "eos_token_id": self._conformer_end_id,
-                    }
-                    seed_context = nullcontext()
-                    if per_rank_seed is not None:
-                        seed_value = per_rank_seed + batch_start
-                        fork_devices = [device] if device.type == "cuda" else []
-                        seed_context = torch.random.fork_rng(devices=fork_devices)
-                    else:
-                        seed_value = None
-
-                    with seed_context:
-                        if seed_value is not None:
-                            torch.manual_seed(seed_value)
-                            if device.type == "cuda":
-                                torch.cuda.manual_seed_all(seed_value)
-                        generated_outputs = model.generate(**generate_kwargs)
-                    if rank == 0:
-                        logger.info(f"Generated outputs shape: {generated_outputs.shape}")
-
-                    sequences = generated_outputs.detach().cpu()
-                    decoded_batch = self.tokenizer.batch_decode(
-                        sequences, skip_special_tokens=True
-                    )
-                    del sequences, generated_outputs
-
-                    # Process each generated sequence in the batch
-                    for batch_idx, (smiles, full_decoded, prompt_text) in enumerate(
-                        zip(batch_smiles, decoded_batch, batch_texts)
-                    ):
-                        generated_only_decoded = (
-                            full_decoded[len(prompt_text):]
-                            if full_decoded.startswith(prompt_text)
-                            else full_decoded
-                        )
-
-                        # Extract SMILES and conformer similar to inference.py
-                        canonical_smiles = extract_between(full_decoded, "[SMILES]", "[/SMILES]")
-                        conformer_text = extract_between(full_decoded, "[CONFORMER]", "[/CONFORMER]")
-
-                        # Check for empty/missing conformer
-                        if not conformer_text:
-                            # Check if [/CONFORMER] is missing
-                            if (
-                                "[/CONFORMER]" not in full_decoded
-                            ):
-                                failure_counts[FAIL_NO_CLOSING_TAG] += 1
-                                all_failed_generations.append(
-                                    (smiles, generated_only_decoded, FAIL_NO_CLOSING_TAG)
-                                )
-                                if len(sample_failures) < 1000:
-                                    sample_failures.append(
-                                        (
-                                            smiles,
-                                            FAIL_NO_CLOSING_TAG,
-                                            f"generated: {generated_only_decoded[:200]}",
-                                        )
-                                    )
-                            else:
-                                failure_counts[FAIL_EMPTY_CONFORMER] += 1
-                                all_failed_generations.append(
-                                    (smiles, generated_only_decoded, FAIL_EMPTY_CONFORMER)
-                                )
-                                if len(sample_failures) < 1000:
-                                    sample_failures.append(
-                                        (
-                                            smiles,
-                                            FAIL_EMPTY_CONFORMER,
-                                            f"generated: {generated_only_decoded[:200]}",
-                                        )
-                                    )
-                            continue
-
-                        # Try to parse the conformer
-                        try:
-                            generated_mol = decode_cartesian_v2(conformer_text)
-                        except Exception as e:
-                            failure_counts[FAIL_PARSING_ERROR] += 1
-                            all_failed_generations.append(
-                                (smiles, generated_only_decoded, FAIL_PARSING_ERROR)
-                            )
-                            if len(sample_failures) < 10:
-                                sample_failures.append(
-                                    (
-                                        smiles,
-                                        FAIL_PARSING_ERROR,
-                                        f"{e}: {conformer_text[:80]}",
-                                    )
-                                )
-                            continue
-
-                        # Check SMILES match (similar to inference.py)
-                        generated_smiles = strip_smiles(conformer_text)
-                        if not same_molecular_graph(canonical_smiles, generated_smiles):
-                            failure_counts[FAIL_SMILES_MISMATCH] += 1
-                            all_failed_generations.append(
-                                (smiles, generated_only_decoded, FAIL_SMILES_MISMATCH)
-                            )
-                            if len(sample_failures) < 10:
-                                sample_failures.append(
-                                    (
-                                        smiles,
-                                        FAIL_SMILES_MISMATCH,
-                                        f"canonical: {canonical_smiles}, got: {generated_smiles}",
-                                    )
-                                )
-                            continue
-
-                        # Compute RMSD statistics
-                        gt_confs = self._ground_truths[smiles]
-                        min_val, max_val, avg_val, rmsd_vec = self._compute_rmsd_stats(
-                            generated_mol, gt_confs
-                        )
-
-                        if np.isnan(min_val):
-                            failure_counts[FAIL_RMSD_NAN] += 1
-                            all_failed_generations.append(
-                                (smiles, generated_only_decoded, FAIL_RMSD_NAN)
-                            )
-                            if len(sample_failures) < 10:
-                                sample_failures.append(
-                                    (smiles, FAIL_RMSD_NAN, "RMSD returned NaN")
-                                )
-                        else:
-                            min_rmsds.append(min_val)
-                            max_rmsds.append(max_val)
-                            avg_rmsds.append(avg_val)
-
-                            # Store per-molecule RMSD vector for covmat-style metrics
-                            if rmsd_vec.size > 0:
-                                per_smiles_rmsd_vectors.setdefault(smiles, []).append(
-                                    rmsd_vec
-                                )
-
-                        # Progress logging (per-rank)
-                        global_sample_idx = batch_start + batch_idx + 1
-                        if global_sample_idx % 5 == 0 and rank == 0:
-                            total_failures = sum(failure_counts.values())
-                            logger.info(
-                                f"[rank {rank}] Numerical validation progress: "
-                                f"{global_sample_idx}/{rank_prompt_count}, "
-                                f"successes={len(min_rmsds)}, failures={total_failures}"
-                            )
 
         finally:
             if was_training:

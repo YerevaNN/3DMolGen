@@ -1,0 +1,90 @@
+validation:
+  enable_numerical_validation: true
+  use_dataset_prompts: false
+  validation_batch_size: 2048
+  max_conformer_tokens: 1000
+  max_ground_truths: 30
+  stop_after_first_conformer: true
+  eval_steps: 200
+dataset: 
+  dataset_path: /data/molgen/cartesian_v5_binned_grouped/grouped_binned_run1/train_smiles.jsonl
+  smiles_mapping_path: /data/molgen/cartesian_v5_binned_grouped/grouped_binned_run1/train_smiles_to_pickle.json
+device:
+  device_type: local
+  num_gpus: 1
+generation:
+  do_sample: true
+  max_completion_length: 3000
+  num_return_sequences: 1
+  repetition_penalty: 1.0
+  temperature: 1.0
+grpo:
+  output_base_dir: ./grpo_outputs
+  checkpoint_base_dir: /home/chem-project/checkpoints/conf_grpo
+  reward_strategy: fbeta
+  learning_rate: 8.0e-05
+  temperature: 1.0
+  num_generations: 8
+  grad_acc_steps: 2
+  per_device_batch_size: 2
+  scheduler: cosine
+  # TRL advantage scaling: "batch" or "group"
+  scale_rewards: group
+  importance_sampling_level: sequence
+  # Increase clip range to allow larger policy ratio moves
+  epsilon_high: 0.012
+  epsilon_low: 0.005
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  weight_decay: 0.0
+  num_iterations: 1
+  warmup_ratio: 0.03
+  max_grad_norm: 1.0
+  beta: 0
+  seed: 1
+  max_ground_truths: 30
+  max_steps: 2000
+  posebusters:
+    chunk_size: 16
+    energy_num_threads: 1
+    max_workers: 4
+    mode: off
+  sampling_top_k: 100
+  steps_per_generation: 8
+  enable_conformer_logits_processor: true
+  target_conformers: 8
+  fbeta_use_binned_decoder: true
+  fbeta_beta: 2.0
+  fbeta_gamma: 2.0
+  fbeta_delta: 0.75
+  fbeta_dup_rmsd_tau: 0.0
+  # Reward mode: "fbeta", "precision_only", "valid_count", "valid_frac"
+  fbeta_reward_mode: fbeta
+  fbeta_use_uniq_frac: true
+  fbeta_recall_ref_sample: 24
+  fbeta_min_valid_to_score: 1
+  fbeta_drop_if_valid_lt: 1
+  fbeta_warmup_lambda: 0.0
+  fbeta_warmup_sigma: 0.0
+  log_success_sample_every: 10
+  log_success_sample_chars: 400
+  log_debug_sample_every: 10
+  log_debug_sample_chars: 400
+  log_full_sample_every: 10
+model:
+  checkpoint_path: /data/chem-project/checkpoints/qwen3_06b/260126-0653-7cf8-qwen3_06b_pre_5e_8e-4_binned_grouped/step-27500-hf
+  tokenizer_path: src/molgen3D/training/tokenizers/Qwen3_tokenizer_binned
+  mol_tags:
+  - '[SMILES]'
+  - '[/SMILES]'
+  conf_tags:
+  - '[CONFORMER]'
+  - '[/CONFORMER]'
+  pad_token: <|endoftext|>
+  dtype: bf16
+processing:
+  eos_token_id: 151672
+run:
+  name: qwen3_fscore_lr1e-04_d075_b2.0_g2.0_w0_warmup0_tau0_groupscale_7cf8model
+trainer:
+  attn_implementation: sdpa

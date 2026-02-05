@@ -1,4 +1,5 @@
 import argparse
+import ast
 import glob
 import json
 import os
@@ -15,7 +16,11 @@ from rdkit import Chem, RDLogger
 from tqdm.auto import tqdm
 
 from molgen3D.data_processing.utils import JsonlSplitWriter
-from molgen3D.data_processing.smiles_encoder_decoder import encode_cartesian_v2
+from molgen3D.data_processing.smiles_encoder_decoder import (
+    encode_cartesian_binned,
+    encode_cartesian_v2,
+    encode_cartesian_binned_v2,
+)
 from molgen3D.utils.utils import load_pkl
 
 random.seed(42)
@@ -139,7 +144,7 @@ def filter_conformers_keep_dotted(
 
 
 def read_mol(
-    args: Tuple[str, int, int, Any, str]
+    args: Tuple[str, int, int, Any, float, List[Tuple[float, float]], str]
 ) -> Optional[
     Tuple[
         Optional[str],
@@ -149,7 +154,7 @@ def read_mol(
         Dict[str, List[Dict[str, Any]]],
     ]
 ]:
-    mol_path, max_confs, precision, embedding_func, sort_by = args
+    mol_path, max_confs, precision, embedding_func, bin_size, ranges, sort_by = args
     mol_object = load_pkl(mol_path)
     geom_key = mol_object.get("smiles")
     geom_id = infer_geom_id(mol_path)
@@ -195,7 +200,14 @@ def read_mol(
             pass
 
         try:
-            embedded_smile, iso_smile = embedding_func(mol, precision)
+            if embedding_func in (encode_cartesian_binned, encode_cartesian_binned_v2):
+                embedded_smile, iso_smile = embedding_func(
+                    mol,
+                    bin_size=bin_size,
+                    ranges=ranges,
+                )
+            else:
+                embedded_smile, iso_smile = embedding_func(mol, precision)
         except Exception as exc:
             log.error("Error encoding conformer | path={} | failure={}", mol_path, exc)
             local_failures["encoding_error"] += 1
@@ -283,6 +295,8 @@ def preprocess(
     splits: Optional[str] = None,
     dest_path: Optional[str] = None,
     max_confs: int = 30,
+    bin_size: float = 0.104,
+    ranges: str = "[-13.0, 13.0], [-13.0, 13.0], [-13.0, 13.0]",
     sort_by: str = "energy",
 ) -> None:
     if dest_path is None:
@@ -291,6 +305,8 @@ def preprocess(
     embedding_registry = {
         "cartesian_v2": encode_cartesian_v2,
         "cartesian": encode_cartesian_v2,
+        "cartesian_binned": encode_cartesian_binned,
+        "cartesian_binned_v2": encode_cartesian_binned_v2,
     }
     if embedding_type not in embedding_registry:
         raise ValueError(f"Unsupported embedding_type '{embedding_type}'. Options: {sorted(embedding_registry)}")
@@ -302,7 +318,7 @@ def preprocess(
 
     strings_root = osp.join(dest_path, "processed_strings")
     split_writers = {
-        split: JsonlSplitWriter(osp.join(strings_root, split), split)
+        split: JsonlSplitWriter(osp.join(strings_root, split), split, chunk_size=50_000)
         for split in ("train", "valid", "test")
     }
     split_pickle_dirs = {
@@ -316,6 +332,13 @@ def preprocess(
     log.info("Reading files from %s", geom_raw_path)
 
     split_indices_array = np.load(indices_path, allow_pickle=True)
+
+    try:
+        parsed_ranges = ast.literal_eval(f"[{ranges}]")
+        parsed_ranges = [tuple(r) for r in parsed_ranges]
+    except Exception as exc:
+        log.error("Failed to parse ranges: {} | failure={}", ranges, exc)
+        parsed_ranges = [(-13.0, 13.0), (-13.0, 13.0), (-13.0, 13.0)]
 
     pickle_glob = osp.join(geom_raw_path, f"{dataset_type}/*.pickle")
     pickle_paths = np.array(sorted(glob.glob(pickle_glob)))
@@ -358,6 +381,8 @@ def preprocess(
                 max_confs,
                 precision,
                 embedding_func,
+                bin_size,
+                parsed_ranges,
                 sort_by,
             )
             for path in mol_paths
@@ -492,21 +517,21 @@ if __name__ == "__main__":
         "--geom_raw_path",
         "-p",
         type=str,
-        default="/nfs/ap/mnt/sxtn2/chem/GEOM_data/rdkit_folder",
+        default="/data/molgen/rdkit_folder",
         help="Path to the GEOM rdkit folder.",
     )
     parser.add_argument(
         "--dest",
         "-d",
         type=str,
-        default="/nfs/ap/mnt/sxtn2/chem/GEOM_data/geom_processed",
+        default="/data/molgen/",
         help="Destination directory for processed outputs.",
     )
     parser.add_argument(
         "--embedding_type",
         "-et",
         type=str,
-        choices=["cartesian", "cartesian_v2"],
+        choices=["cartesian", "cartesian_v2", "cartesian_binned", "cartesian_binned_v2"],
         default="cartesian_v2",
         help="Embedding type to use for enrichment.",
     )
@@ -545,8 +570,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--indices_path",
-        type=str,
-        default="/nfs/ap/mnt/sxtn2/chem/GEOM_data/splits/splits/split0.npy",
+            type=str,
+            default="/data/molgen/splits/splits/split0.npy",
         help="Path to numpy file containing split indices.",
     )
     parser.add_argument(
@@ -554,6 +579,18 @@ if __name__ == "__main__":
         type=int,
         default=30,
         help="Maximum number of conformers per molecule.",
+    )
+    parser.add_argument(
+        "--bin_size",
+        type=float,
+        default=0.104,
+        help="Bin size for binned embedding.",
+    )
+    parser.add_argument(
+        "--ranges",
+        type=str,
+        default="[-13.0, 13.0], [-13.0, 13.0], [-13.0, 13.0]",
+        help="Ranges for binned embedding.",
     )
     parser.add_argument(
         "--sort_by",
@@ -587,4 +624,6 @@ if __name__ == "__main__":
         dataset_type=args.dataset_type,
         splits=args.splits,
         sort_by=args.sort_by,
+        bin_size=args.bin_size,
+        ranges=args.ranges,
     )
