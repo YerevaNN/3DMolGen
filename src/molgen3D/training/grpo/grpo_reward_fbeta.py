@@ -22,7 +22,7 @@ from molgen3D.evaluation.utils import extract_between, same_molecular_graph
 from molgen3D.training.grpo.grpo_reward_v3 import group_by_prompt
 from .reward_utils import (
     RewardProfiler,
-    apply_posebusters_gate,
+    apply_posebusters_gate_batch,
     compute_distance_matrix,
     compute_rmsd_safe,
     get_cached_ground_truths,
@@ -66,6 +66,17 @@ class CompletionMetrics:
     sample_stats: Optional[Dict[str, object]] = None
 
 
+@dataclass
+class ParsedCompletion:
+    completion: str
+    blocks: List[str]
+    blocks_found: int
+    parsed_blocks: int
+    rollout_mols: List[Optional[Chem.Mol]]
+    base_valid_mask: np.ndarray
+    failure_counts: Dict[str, int]
+
+
 def _get_config_value(config, name: str, default):
     return getattr(getattr(config, "grpo", config), name, default)
 
@@ -95,126 +106,23 @@ def _f_beta(cov_r: float, cov_p: float, beta: float) -> float:
     return float((1.0 + beta_sq) * cov_p * cov_r / denom)
 
 
-def _count_unique_conformers(mols: Sequence[Chem.Mol], tau: float) -> int:
-    if not mols:
-        return 0
-    reps: List[Chem.Mol] = []
-    for mol in mols:
-        if mol is None:
-            continue
-        is_dup = False
-        for rep in reps:
-            if compute_rmsd_safe(mol, rep) < tau:
-                is_dup = True
-                break
-        if not is_dup:
-            reps.append(mol)
-    return len(reps)
-
-
-def _sample_references(
-    references: Sequence[Chem.Mol],
-    max_samples: int,
-    rng: np.random.Generator,
-) -> List[Chem.Mol]:
-    if max_samples <= 0 or len(references) <= max_samples:
-        return list(references)
-    indices = rng.choice(len(references), size=max_samples, replace=False)
-    return [references[i] for i in indices]
-
-
-def _compute_cov_metrics(
-    valid_mols: List[Chem.Mol],
-    references: List[Chem.Mol],
-    recall_refs: List[Chem.Mol],
-    delta: float,
-    rmsd_workers: int,
-    ref_cache_key: str,
-) -> Tuple[float, float, np.ndarray, np.ndarray]:
-    if not valid_mols or not references:
-        return 0.0, 0.0, np.array([], dtype=np.float32), np.array([], dtype=np.float32)
-
-    validity = np.ones(len(valid_mols), dtype=np.int32)
-    D_prec = compute_distance_matrix(
-        valid_mols,
-        references,
-        validity,
-        rmsd_workers=rmsd_workers,
-        ref_cache_key=ref_cache_key,
-    )
-    min_gen = np.min(D_prec, axis=1)
-    cov_p = float(np.mean(min_gen < delta)) if min_gen.size > 0 else 0.0
-
-    D_rec = compute_distance_matrix(
-        valid_mols,
-        recall_refs,
-        validity,
-        rmsd_workers=rmsd_workers,
-        ref_cache_key=f"{ref_cache_key}:recall:{len(recall_refs)}",
-    )
-    min_ref = np.min(D_rec, axis=0)
-    cov_r = float(np.mean(min_ref < delta)) if min_ref.size > 0 else 0.0
-
-    return cov_r, cov_p, min_gen.astype(np.float32, copy=False), min_ref.astype(np.float32, copy=False)
-
-
-def _soft_precision(min_gen: np.ndarray, sigma: float) -> float:
-    if min_gen.size == 0:
-        return 0.0
-    sigma = max(float(sigma), 1e-8)
-    values = np.exp(-((min_gen.astype(np.float32) ** 2) / (sigma ** 2)))
-    return float(np.mean(values)) if values.size > 0 else 0.0
-
-
-def _compute_completion_reward(
+def _parse_completion(
     canonical_smiles: str,
     completion: str,
-    references: List[Chem.Mol],
-    config,
     stats,
-    rng: np.random.Generator,
-    profiler: Optional[RewardProfiler],
     bins,
     binned: bool,
     target_k: int,
-) -> Tuple[float, CompletionMetrics, Dict[str, int]]:
-    delta = float(_get_config_value(config, "fbeta_delta", DEFAULT_DELTA))
-    beta = float(_get_config_value(config, "fbeta_beta", DEFAULT_BETA))
-    gamma = float(_get_config_value(config, "fbeta_gamma", DEFAULT_GAMMA))
-    dup_tau = float(_get_config_value(config, "fbeta_dup_rmsd_tau", DEFAULT_DUP_RMSD_TAU))
-    min_valid = int(_get_config_value(config, "fbeta_min_valid_to_score", DEFAULT_MIN_VALID_TO_SCORE))
-    drop_if_valid_lt = int(_get_config_value(config, "fbeta_drop_if_valid_lt", DEFAULT_DROP_IF_VALID_LT))
-    recall_sample = int(_get_config_value(config, "fbeta_recall_ref_sample", DEFAULT_RECALL_REF_SAMPLE_M))
-    rmsd_workers = int(_get_config_value(config, "rmsd_workers", 0) or 0)
-    warmup_lambda = float(_get_config_value(config, "fbeta_warmup_lambda", DEFAULT_WARMUP_LAMBDA))
-    warmup_sigma = float(_get_config_value(config, "fbeta_warmup_sigma", DEFAULT_WARMUP_SIGMA))
-
+    profiler: Optional[RewardProfiler],
+) -> ParsedCompletion:
     blocks, blocks_found = _extract_conformer_blocks(completion, target_k)
     parsed_blocks = len(blocks)
-
     failure_counts = {
         "decode_fail": 0,
         "rdkit_fail": 0,
         "smiles_mismatch": 0,
         "posebusters_fail": 0,
     }
-
-    if not references:
-        stats.failed_ground_truth += 1
-        metrics = CompletionMetrics(
-            n_blocks_found=blocks_found,
-            n_blocks_parsed=parsed_blocks,
-            t_valid=0,
-            cov_r=0.0,
-            cov_p=0.0,
-            fbeta=0.0,
-            completion_factor=0.0,
-            uniq_frac=1.0,
-            reward=0.0,
-            min_rmsd_gen=np.array([], dtype=np.float32),
-            min_rmsd_ref=np.array([], dtype=np.float32),
-        )
-        return 0.0, metrics, failure_counts
 
     rollout_mols: List[Optional[Chem.Mol]] = []
     base_valid_flags: List[bool] = []
@@ -249,42 +157,149 @@ def _compute_completion_reward(
             base_valid_flags.append(True)
 
     base_valid_mask = np.array(base_valid_flags, dtype=bool)
-    pose_cfg = normalize_posebusters_config(getattr(config.grpo, "posebusters", None))
-    with profile_section(profiler, "reward_posebusters"):
-        pose_mask, pose_summary = apply_posebusters_gate(
-            rollout_mols,
-            base_valid_mask.astype(bool, copy=False),
-            pose_cfg,
-        )
+    return ParsedCompletion(
+        completion=completion,
+        blocks=blocks,
+        blocks_found=blocks_found,
+        parsed_blocks=parsed_blocks,
+        rollout_mols=rollout_mols,
+        base_valid_mask=base_valid_mask,
+        failure_counts=failure_counts,
+    )
 
-    pose_checked = int(pose_summary["checked"])
-    pose_passed = int(pose_summary["passed"])
-    pose_failed = int(pose_summary["failed"])
-    pose_errors = int(pose_summary["errors"])
-    stats.posebusters_checked += pose_checked
-    stats.posebusters_failed += pose_failed
-    stats.posebusters_errors += pose_errors
-    stats.posebusters_time_ms += pose_summary["time_ms"]
-    stats.posebusters_successes += pose_passed
-    stats.posebusters_failures += pose_failed + pose_errors
 
+def _build_empty_metrics(blocks_found: int, parsed_blocks: int) -> CompletionMetrics:
+    return CompletionMetrics(
+        n_blocks_found=blocks_found,
+        n_blocks_parsed=parsed_blocks,
+        t_valid=0,
+        cov_r=0.0,
+        cov_p=0.0,
+        fbeta=0.0,
+        completion_factor=0.0,
+        uniq_frac=1.0,
+        reward=0.0,
+        min_rmsd_gen=np.array([], dtype=np.float32),
+        min_rmsd_ref=np.array([], dtype=np.float32),
+    )
+
+
+def _count_unique_conformers(mols: Sequence[Chem.Mol], tau: float) -> int:
+    if not mols:
+        return 0
+    reps: List[Chem.Mol] = []
+    for mol in mols:
+        if mol is None:
+            continue
+        is_dup = False
+        for rep in reps:
+            if compute_rmsd_safe(mol, rep) < tau:
+                is_dup = True
+                break
+        if not is_dup:
+            reps.append(mol)
+    return len(reps)
+
+
+def _sample_references(
+    references: Sequence[Chem.Mol],
+    max_samples: int,
+    rng: np.random.Generator,
+) -> Tuple[np.ndarray, List[Chem.Mol]]:
+    if max_samples <= 0 or len(references) <= max_samples:
+        indices = np.arange(len(references), dtype=np.int64)
+        return indices, list(references)
+    indices = rng.choice(len(references), size=max_samples, replace=False)
+    return indices.astype(np.int64, copy=False), [references[i] for i in indices]
+
+
+def _compute_cov_metrics(
+    valid_mols: List[Chem.Mol],
+    references: List[Chem.Mol],
+    delta: float,
+    rmsd_workers: int,
+    ref_cache_key: str,
+    recall_indices: Optional[np.ndarray] = None,
+) -> Tuple[float, float, np.ndarray, np.ndarray]:
+    if not valid_mols or not references:
+        return 0.0, 0.0, np.array([], dtype=np.float32), np.array([], dtype=np.float32)
+
+    validity = np.ones(len(valid_mols), dtype=np.int32)
+    D_prec = compute_distance_matrix(
+        valid_mols,
+        references,
+        validity,
+        rmsd_workers=rmsd_workers,
+        ref_cache_key=ref_cache_key,
+    )
+    min_gen = np.min(D_prec, axis=1)
+    cov_p = float(np.mean(min_gen < delta)) if min_gen.size > 0 else 0.0
+    if recall_indices is None or recall_indices.size == 0:
+        min_ref = np.min(D_prec, axis=0)
+        cov_r = float(np.mean(min_ref < delta)) if min_ref.size > 0 else 0.0
+        return cov_r, cov_p, min_gen.astype(np.float32, copy=False), min_ref.astype(np.float32, copy=False)
+
+    recall_indices = np.asarray(recall_indices, dtype=np.int64)
+    recall_indices = recall_indices[(recall_indices >= 0) & (recall_indices < D_prec.shape[1])]
+    if recall_indices.size == 0:
+        return 0.0, cov_p, min_gen.astype(np.float32, copy=False), np.array([], dtype=np.float32)
+
+    D_rec = D_prec[:, recall_indices]
+    min_ref = np.min(D_rec, axis=0)
+    cov_r = float(np.mean(min_ref < delta)) if min_ref.size > 0 else 0.0
+
+    return cov_r, cov_p, min_gen.astype(np.float32, copy=False), min_ref.astype(np.float32, copy=False)
+
+
+def _soft_precision(min_gen: np.ndarray, sigma: float) -> float:
+    if min_gen.size == 0:
+        return 0.0
+    sigma = max(float(sigma), 1e-8)
+    values = np.exp(-((min_gen.astype(np.float32) ** 2) / (sigma ** 2)))
+    return float(np.mean(values)) if values.size > 0 else 0.0
+
+
+def _compute_completion_reward_from_parsed(
+    canonical_smiles: str,
+    parsed: ParsedCompletion,
+    pose_mask: np.ndarray,
+    references: List[Chem.Mol],
+    config,
+    stats,
+    rng: np.random.Generator,
+    profiler: Optional[RewardProfiler],
+    target_k: int,
+    recall_indices: np.ndarray,
+) -> Tuple[float, CompletionMetrics, Dict[str, int]]:
+    delta = float(_get_config_value(config, "fbeta_delta", DEFAULT_DELTA))
+    beta = float(_get_config_value(config, "fbeta_beta", DEFAULT_BETA))
+    gamma = float(_get_config_value(config, "fbeta_gamma", DEFAULT_GAMMA))
+    dup_tau = float(_get_config_value(config, "fbeta_dup_rmsd_tau", DEFAULT_DUP_RMSD_TAU))
+    use_uniq_frac = bool(_get_config_value(config, "fbeta_use_uniq_frac", True))
+    min_valid = int(_get_config_value(config, "fbeta_min_valid_to_score", DEFAULT_MIN_VALID_TO_SCORE))
+    drop_if_valid_lt = int(_get_config_value(config, "fbeta_drop_if_valid_lt", DEFAULT_DROP_IF_VALID_LT))
+    rmsd_workers = int(_get_config_value(config, "rmsd_workers", 0) or 0)
+    warmup_lambda = float(_get_config_value(config, "fbeta_warmup_lambda", DEFAULT_WARMUP_LAMBDA))
+    warmup_sigma = float(_get_config_value(config, "fbeta_warmup_sigma", DEFAULT_WARMUP_SIGMA))
+    failure_counts = dict(parsed.failure_counts)
+    base_valid_mask = parsed.base_valid_mask
     if base_valid_mask.any():
         pose_fail_mask = base_valid_mask & (~pose_mask)
         failure_counts["posebusters_fail"] += int(np.count_nonzero(pose_fail_mask))
 
-    valid_mols = [mol for mol, flag in zip(rollout_mols, pose_mask) if flag and mol is not None]
+    valid_mols = [mol for mol, flag in zip(parsed.rollout_mols, pose_mask) if flag and mol is not None]
     t_valid = len(valid_mols)
     sample_completion = None
     sample_generated_smiles = None
     sample_stats: Optional[Dict[str, object]] = None
     if t_valid > 0:
-        sample_completion = completion
+        sample_completion = parsed.completion
         first_valid_idx = int(np.where(pose_mask)[0][0])
-        if 0 <= first_valid_idx < len(blocks):
-            sample_generated_smiles = strip_smiles(blocks[first_valid_idx])
+        if 0 <= first_valid_idx < len(parsed.blocks):
+            sample_generated_smiles = strip_smiles(parsed.blocks[first_valid_idx])
         sample_stats = {
-            "blocks_found": blocks_found,
-            "blocks_parsed": parsed_blocks,
+            "blocks_found": parsed.blocks_found,
+            "blocks_parsed": parsed.parsed_blocks,
             "valid": t_valid,
             "decode_fail": failure_counts["decode_fail"],
             "rdkit_fail": failure_counts["rdkit_fail"],
@@ -295,17 +310,18 @@ def _compute_completion_reward(
     completion_factor = (t_valid / float(max(target_k, 1))) ** gamma if t_valid > 0 else 0.0
     uniq_count = _count_unique_conformers(valid_mols, dup_tau)
     uniq_frac = float(uniq_count) / float(t_valid) if t_valid > 0 else 1.0
+    if not use_uniq_frac:
+        uniq_frac = 1.0
 
     ref_cache_key = f"{canonical_smiles}:{len(references)}"
-    recall_refs = _sample_references(references, recall_sample, rng)
     with profile_section(profiler, "reward_rmsd"):
         cov_r, cov_p, min_gen, min_ref = _compute_cov_metrics(
             valid_mols,
             references,
-            recall_refs,
             delta,
             rmsd_workers,
             ref_cache_key,
+            recall_indices=recall_indices,
         )
     fbeta = _f_beta(cov_r, cov_p, beta)
     soft_p = _soft_precision(min_gen, warmup_sigma)
@@ -321,12 +337,12 @@ def _compute_completion_reward(
         for value in min_gen:
             if np.isfinite(value):
                 stats.add_rmsd(float(value))
-    elif parsed_blocks == 0:
+    elif parsed.parsed_blocks == 0:
         stats.failed_conformer_generation += 1
 
     metrics = CompletionMetrics(
-        n_blocks_found=blocks_found,
-        n_blocks_parsed=parsed_blocks,
+        n_blocks_found=parsed.blocks_found,
+        n_blocks_parsed=parsed.parsed_blocks,
         t_valid=t_valid,
         cov_r=cov_r,
         cov_p=cov_p,
@@ -435,6 +451,7 @@ def reward_function(
     log_debug_every = max(int(_get_config_value(config, "log_debug_sample_every", 0) or 0), 0)
     log_debug_chars = max(int(_get_config_value(config, "log_debug_sample_chars", 400) or 0), 0)
     log_full_every = max(int(_get_config_value(config, "log_full_sample_every", 0) or 0), 0)
+    recall_sample = int(_get_config_value(config, "fbeta_recall_ref_sample", DEFAULT_RECALL_REF_SAMPLE_M))
 
     bins = None
     if binned:
@@ -455,6 +472,7 @@ def reward_function(
     profiler = RewardProfiler(enabled=profile_enabled)
     total_start = time.perf_counter() if profile_enabled else None
     reward_rng = make_reward_rng(config, stats)
+    pose_cfg = normalize_posebusters_config(getattr(config.grpo, "posebusters", None))
 
     expected_k = int(_get_config_value(config, "num_generations", 1))
     initial_processed = getattr(stats, "processed_prompts", 0)
@@ -483,18 +501,60 @@ def reward_function(
             num_gt=_get_config_value(config, "max_ground_truths", 0),
         )
 
-        for completion, global_idx in zip(group["completions"], group["indices"]):
-            reward, metrics, failure_counts = _compute_completion_reward(
+        if not references:
+            for completion, global_idx in zip(group["completions"], group["indices"]):
+                stats.failed_ground_truth += 1
+                blocks, blocks_found = _extract_conformer_blocks(completion, target_k)
+                metrics = _build_empty_metrics(blocks_found, len(blocks))
+                final_rewards[global_idx] = 0.0
+                metrics_list.append(metrics)
+            continue
+
+        parsed_items: List[ParsedCompletion] = []
+        for completion in group["completions"]:
+            parsed_items.append(
+                _parse_completion(
+                    canonical_smiles=canonical_smiles,
+                    completion=completion,
+                    stats=stats,
+                    bins=bins,
+                    binned=binned,
+                    target_k=target_k,
+                    profiler=profiler if profile_enabled else None,
+                )
+            )
+
+        recall_indices, _ = _sample_references(references, recall_sample, reward_rng)
+        with profile_section(profiler, "reward_posebusters"):
+            pose_masks, pose_summary = apply_posebusters_gate_batch(
+                [item.rollout_mols for item in parsed_items],
+                [item.base_valid_mask for item in parsed_items],
+                pose_cfg,
+            )
+
+        pose_checked = int(pose_summary["checked"])
+        pose_passed = int(pose_summary["passed"])
+        pose_failed = int(pose_summary["failed"])
+        pose_errors = int(pose_summary["errors"])
+        stats.posebusters_checked += pose_checked
+        stats.posebusters_failed += pose_failed
+        stats.posebusters_errors += pose_errors
+        stats.posebusters_time_ms += pose_summary["time_ms"]
+        stats.posebusters_successes += pose_passed
+        stats.posebusters_failures += pose_failed + pose_errors
+
+        for parsed, pose_mask, global_idx in zip(parsed_items, pose_masks, group["indices"]):
+            reward, metrics, failure_counts = _compute_completion_reward_from_parsed(
                 canonical_smiles=canonical_smiles,
-                completion=completion,
+                parsed=parsed,
+                pose_mask=pose_mask,
                 references=references,
                 config=config,
                 stats=stats,
                 rng=reward_rng,
                 profiler=profiler if profile_enabled else None,
-                bins=bins,
-                binned=binned,
                 target_k=target_k,
+                recall_indices=recall_indices,
             )
             final_rewards[global_idx] = float(reward)
             metrics_list.append(metrics)

@@ -19,6 +19,9 @@ import types
 
 # Global variables
 _smiles_mapping = None
+_smiles_mapping_neutral = None
+_smiles_mapping_achiral = None
+_conformer_key_cache = {}
 _geom_data_path = None
 
 @contextmanager
@@ -36,13 +39,27 @@ def load_smiles_mapping(mapping_path: str | Path) -> None:
     Args:
         mapping_path: Path to the JSON file containing the SMILES mapping
     """
-    global _smiles_mapping
+    global _smiles_mapping, _smiles_mapping_neutral, _smiles_mapping_achiral
     if _smiles_mapping is None:
         resolved_path = resolve_data_path(mapping_path)
         _smiles_mapping = load_json(str(resolved_path))
         logger.info(
             f"Loaded SMILES mapping ({len(_smiles_mapping)} entries) from {resolved_path}"
         )
+        _smiles_mapping_neutral = {}
+        _smiles_mapping_achiral = {}
+        for key, value in _smiles_mapping.items():
+            neutral = _neutralized_canon_smiles(key)
+            if neutral and neutral not in _smiles_mapping_neutral:
+                _smiles_mapping_neutral[neutral] = value
+            try:
+                mol = Chem.MolFromSmiles(key)
+            except Exception:
+                mol = None
+            if mol is not None:
+                achiral = Chem.MolToSmiles(remove_chiral_info(Chem.Mol(mol)), isomericSmiles=False)
+                if achiral and achiral not in _smiles_mapping_achiral:
+                    _smiles_mapping_achiral[achiral] = value
 
 def set_geom_data_path(path: str) -> None:
     """Set the path to the GEOM data folder.
@@ -108,6 +125,21 @@ def load_ground_truths(key_mol_smiles, num_gt: int = 16):
         if alt_key:
             filepath = _smiles_mapping.get(alt_key)
             logger.info("Resolved SMILES mapping via alternate key: {} -> {}", key_mol_smiles, alt_key)
+        elif _smiles_mapping_neutral is not None or _smiles_mapping_achiral is not None:
+            neutral_key = _neutralized_canon_smiles(key_mol_smiles)
+            if neutral_key and _smiles_mapping_neutral and neutral_key in _smiles_mapping_neutral:
+                filepath = _smiles_mapping_neutral.get(neutral_key)
+                logger.info("Resolved SMILES mapping via neutralized key: {} -> {}", key_mol_smiles, neutral_key)
+            if filepath is None and _smiles_mapping_achiral is not None:
+                try:
+                    mol = Chem.MolFromSmiles(key_mol_smiles)
+                except Exception:
+                    mol = None
+                if mol is not None:
+                    achiral_key = Chem.MolToSmiles(remove_chiral_info(Chem.Mol(mol)), isomericSmiles=False)
+                    if achiral_key in _smiles_mapping_achiral:
+                        filepath = _smiles_mapping_achiral.get(achiral_key)
+                        logger.info("Resolved SMILES mapping via achiral key: {} -> {}", key_mol_smiles, achiral_key)
         else:
             logger.error("Missing SMILES mapping for pad key {}", key_mol_smiles)
             return None
@@ -134,11 +166,26 @@ def load_ground_truths(key_mol_smiles, num_gt: int = 16):
                             break
                 match_kind = None
                 if not alt_key:
-                    for candidate in conformers.keys():
-                        if same_molecular_graph(key_mol_smiles, candidate):
-                            alt_key = candidate
-                            match_kind = "graph"
-                            break
+                    cache_key = str(filepath)
+                    cached = _conformer_key_cache.get(cache_key)
+                    target_neutral = _neutralized_canon_smiles(key_mol_smiles)
+                    if cached is None and target_neutral is not None:
+                        neutral_index = {}
+                        for candidate in conformers.keys():
+                            candidate_neutral = _neutralized_canon_smiles(candidate)
+                            if candidate_neutral is not None and candidate_neutral not in neutral_index:
+                                neutral_index[candidate_neutral] = candidate
+                        _conformer_key_cache[cache_key] = neutral_index
+                        cached = neutral_index
+                    if cached and target_neutral is not None and target_neutral in cached:
+                        alt_key = cached[target_neutral]
+                        match_kind = "neutralized"
+                    else:
+                        for candidate in conformers.keys():
+                            if same_molecular_graph(key_mol_smiles, candidate):
+                                alt_key = candidate
+                                match_kind = "graph"
+                                break
                 if not alt_key:
                     target_neutral = _neutralized_canon_smiles(key_mol_smiles)
                     if target_neutral is not None:
@@ -284,6 +331,63 @@ def create_code_snapshot(project_root: str, snapshot_dir: str):
             dirs_exist_ok=True,
             ignore=ignore_patterns,
         )
+    _sanitize_snapshot_numerical_validator(destination_root)
+
+
+def _sanitize_snapshot_numerical_validator(destination_root: Path) -> None:
+    """Normalize indentation in numerical_validator.py within a snapshot."""
+    target_file = destination_root / "training" / "grpo" / "numerical_validator.py"
+    if not target_file.exists():
+        return
+
+    try:
+        lines = target_file.read_text().splitlines()
+    except Exception:
+        return
+
+    changed = False
+    seed_value_indent = None
+
+    for idx, line in enumerate(lines):
+        stripped = line.lstrip()
+
+        if stripped == "seed_value = None":
+            seed_value_indent = line[:len(line) - len(stripped)]
+
+        if stripped == "if per_rank_seed is not None:" and seed_value_indent is not None:
+            base_indent = line[:len(line) - len(stripped)]
+            child_indent = base_indent + "    "
+
+            # Ensure the seed_value assignment is indented as a child.
+            if idx + 1 < len(lines) and lines[idx + 1].lstrip().startswith(
+                "seed_value = per_rank_seed + batch_start"
+            ):
+                lines[idx + 1] = child_indent + lines[idx + 1].lstrip()
+                changed = True
+
+            # Ensure manual_seed calls are indented as children.
+            if idx + 2 < len(lines) and lines[idx + 2].lstrip().startswith("torch.manual_seed("):
+                lines[idx + 2] = child_indent + lines[idx + 2].lstrip()
+                changed = True
+            if idx + 3 < len(lines) and lines[idx + 3].lstrip().startswith('if device.type == "cuda"'):
+                lines[idx + 3] = child_indent + lines[idx + 3].lstrip()
+                changed = True
+            if idx + 4 < len(lines) and lines[idx + 4].lstrip().startswith("torch.cuda.manual_seed_all("):
+                lines[idx + 4] = child_indent + "    " + lines[idx + 4].lstrip()
+                changed = True
+
+        if stripped == "else:" and idx >= 1:
+            recent_window = "\n".join(lines[max(0, idx - 5):idx])
+            if "decode_cartesian_binned" in recent_window:
+                if idx + 1 < len(lines) and lines[idx + 1].lstrip().startswith(
+                    "generated_mol = decode_cartesian_v2("
+                ):
+                    indent = line[:len(line) - len(stripped)] + "    "
+                    lines[idx + 1] = indent + lines[idx + 1].lstrip()
+                    changed = True
+
+    if changed:
+        target_file.write_text("\n".join(lines) + "\n")
 
 def dataclass_to_dict(obj):
     """Convert dataclass objects to dictionary recursively."""

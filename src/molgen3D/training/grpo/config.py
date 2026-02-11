@@ -116,6 +116,7 @@ class GRPOConfig:
     fbeta_recall_ref_sample: int = 12
     fbeta_min_valid_to_score: int = 0
     fbeta_drop_if_valid_lt: int = 3
+    fbeta_use_uniq_frac: bool = True
     fbeta_use_binned_decoder: bool = False
     fbeta_binned_ranges: Optional[List[List[float]]] = None
     fbeta_binned_bin_size: float = 0.104
@@ -162,8 +163,11 @@ class ValidationConfig:
     # Numerical validation settings
     enable_numerical_validation: bool = True
     max_conformer_tokens: int = 2000
+    max_ground_truths: int = 30
     num_val_molecules: int = 200
     sampling_config: str = "top_p_low_temperature"
+    max_generations_per_molecule: Optional[int] = None
+    stop_after_first_conformer: bool = False
     save_failed_generations: bool = True
     validation_batch_size: int = 64
     eval_steps: Optional[int] = None
