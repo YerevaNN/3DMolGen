@@ -37,6 +37,19 @@ torch.set_grad_enabled(False)
 NVML_AVAILABLE = None
 
 
+def _run_from_config_file(config_path: str):
+    """
+    Minimal wrapper function for submitit that loads config from file and runs inference.
+    This avoids pickling the main function and its dependencies.
+    """
+    import json
+    with open(config_path, 'r') as f:
+        inference_config = json.load(f)
+    # Import here to avoid module-level CUDA state
+    from molgen3D.evaluation.inference import run_inference
+    return run_inference(inference_config)
+
+
 def init_nvml():
     """Initialize NVML for GPU monitoring. Returns True if available, False otherwise."""
     global NVML_AVAILABLE
@@ -334,6 +347,11 @@ def split_batch_on_geom_size(batch: list[list], max_geom_len: int = 80) -> list[
 
 def run_inference(inference_config: dict):
     """Main inference function that handles GPU assignment and model execution."""
+    # Convert gen_config from dict to GenerationConfig if needed (for submitit pickling)
+    from transformers import GenerationConfig
+    if isinstance(inference_config.get("gen_config"), dict):
+        inference_config["gen_config"] = GenerationConfig.from_dict(inference_config["gen_config"])
+
     # Handle GPU assignment if using CUDA
     device_arg = inference_config.get("device", "cuda")
     target_device = device_arg
@@ -397,7 +415,7 @@ def run_inference(inference_config: dict):
     
     mols_list = []
     test_set: str = inference_config.get("test_set", "distinct")
-    
+
     if test_set in ("clean"):
         for geom_smiles, data in test_data.items():
             mols_list.extend([(geom_smiles, f"[SMILES]{data['corrected_smi']}[/SMILES]")] * data["num_confs"] * 2)
@@ -416,6 +434,17 @@ def run_inference(inference_config: dict):
         for geom_smiles, data in test_data.items():
             for sub_smiles, count in data["sub_smiles_counts"].items():
                 mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * count * 2)
+    elif test_set == "valid":
+        logger.info("Processing as validation dataset")
+        # Validation set format: {smiles: [mol_obj1, mol_obj2, ...]}
+        for geom_smiles, mol_list in test_data.items():
+            if isinstance(mol_list, list):
+                # Each entry has a list of ground truth conformers
+                num_ground_truths = len(mol_list)
+                # Generate 2x the ground truth count
+                mols_list.extend([(geom_smiles, f"[SMILES]{geom_smiles}[/SMILES]")] * num_ground_truths * 2)
+            else:
+                logger.warning(f"Unexpected data format for {geom_smiles}, skipping")
     elif test_set == "icl":
         logger.info("Processing as icl dataset")
         for geom_smiles, data in test_data.items():
@@ -464,6 +493,7 @@ def launch_inference_from_cli(
     test_set: str = None,
     xl: bool = False,
     qm9: bool = False,
+    valid: bool = False,
     limit: int = None,
     binned: bool = False,
     icl: bool = False,
@@ -479,18 +509,19 @@ def launch_inference_from_cli(
         test_sets_to_run.append("xl")
     if qm9:
         test_sets_to_run.append("qm9")
+    if valid:
+        test_sets_to_run.append("valid")
     if icl:
         test_sets_to_run.append(f"icl_{icl_n}")
-    
+
     if not test_sets_to_run:
         logger.info("No test sets specified. Skipping inference.")
         return
     
     n_gpus = 1
-    node = device if device in ["a100", "h100"] else "local"
     executor = None
-    
-    if device in ["a100", "h100"]:
+
+    if device in ["a100", "h100", "all"]:
         executor = submitit.AutoExecutor(folder="outputs/slurm_jobs/conf_gen/job_%j")
         executor.update_parameters(
             name="conf_gen",
@@ -499,20 +530,22 @@ def launch_inference_from_cli(
             nodes=1,
             mem_gb=80,
             cpus_per_task=n_gpus * 12,
-            slurm_additional_parameters={"partition": node},
+            slurm_additional_parameters={"partition": device},
+            slurm_use_srun=False,  # Don't use srun to avoid MPI issues
         )
+        logger.info(f"✓ Submitit executor configured for partition: {device}")
     
     # Base configuration template
     base_inference_config = {
-        "model_path": get_ckpt("m600_qwen_pre_4seq_binned", "4e"),
-        "tokenizer_path": get_tokenizer_path("qwen3_0.6b_binned" if binned else "qwen3_0.6b_custom"),
+        "model_path": str(get_ckpt("m600_qwen_pre_4seq_binned", "4e")),  # Convert Path to str for JSON
+        "tokenizer_path": str(get_tokenizer_path("qwen3_0.6b_binned" if binned else "qwen3_0.6b_custom")),
         "torch_dtype": "bfloat16",
         "batch_size": 128,
         "num_gens": gen_num_codes["2k_per_conf"],
-        "gen_config": sampling_configs["top_p_sampling1"],
+        "gen_config": sampling_configs["top_p_sampling1"].to_dict(),  # Convert to dict for JSON
         "device": "cuda",
-        "results_path": get_base_path("gen_results_root"),
-        "run_name": "qwen_pre_4e_grouped",
+        "results_path": str(get_base_path("gen_results_root")),  # Convert Path to str for JSON
+        "run_name": "qwen_pre_5e_grouped",
         "limit": limit,
         "binned": binned,
     }
@@ -525,52 +558,70 @@ def launch_inference_from_cli(
             ("qw600_pre_binned_grouped", "3e"),
             ("qw600_pre_binned_grouped", "4e"),
             ("qw600_pre_binned_grouped", "5e"),
-            ("qw600_pre_binned_paired", "5e"),
-            ("qw600_pre_binned_paired", "4e"),
 
         ]
         
         if executor is not None:
+            # Use config file submission to avoid pickling complex objects
+            import json
             with executor.batch():
                 for model_key in param_grid:
                     for test_set_name in test_sets_to_run:
                         grid_config = dict(base_inference_config)
-                        
+
                         if isinstance(model_key, tuple):
-                            grid_config["model_path"] = get_ckpt(model_key[0], model_key[1])
+                            grid_config["model_path"] = str(get_ckpt(model_key[0], model_key[1]))
                             model_key_str = f"{model_key[0]}_{model_key[1]}"
                             # Auto-select tokenizer based on model name
                             if "binned" in model_key[0] or "qw600" in model_key[0]:
-                                grid_config["tokenizer_path"] = get_tokenizer_path("qwen3_0.6b_binned")
+                                grid_config["tokenizer_path"] = str(get_tokenizer_path("qwen3_0.6b_binned"))
                                 grid_config["binned"] = True
                             else:
-                                grid_config["tokenizer_path"] = get_tokenizer_path("qwen3_0.6b_custom")
+                                grid_config["tokenizer_path"] = str(get_tokenizer_path("qwen3_0.6b_custom"))
                                 grid_config["binned"] = False
                         else:
-                            grid_config["model_path"] = get_ckpt(model_key)
+                            grid_config["model_path"] = str(get_ckpt(model_key))
                             model_key_str = model_key
                             if "binned" in model_key or "qw600" in model_key:
-                                grid_config["tokenizer_path"] = get_tokenizer_path("qwen3_0.6b_binned")
+                                grid_config["tokenizer_path"] = str(get_tokenizer_path("qwen3_0.6b_binned"))
                                 grid_config["binned"] = True
                             else:
-                                grid_config["tokenizer_path"] = get_tokenizer_path("qwen3_0.6b_custom")
+                                grid_config["tokenizer_path"] = str(get_tokenizer_path("qwen3_0.6b_custom"))
                                 grid_config["binned"] = False
-                        
+
                         if test_set_name == "xl":
                             grid_config["batch_size"] = 100
-                        
+
                         if test_set_name == "qm9":
                             grid_config["batch_size"] = 100
-                        
+
+                        if test_set_name == "valid":
+                            grid_config["batch_size"] = 128
+
                         if test_set_name == "icl":
                             grid_config["batch_size"] = 64
-                        
-                        grid_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
+
+                        # Handle validation set path differently
+                        if test_set_name == "valid":
+                            grid_config["test_data_path"] = str(get_data_path("validation_pickle"))
+                        else:
+                            grid_config["test_data_path"] = str(get_data_path(f"{test_set_name}_smi"))
                         grid_config["test_set"] = test_set_name
                         grid_config["run_name"] = f"{model_key_str}_{test_set_name}"
-                        
+
                         logger.info(f"Submitting job for {grid_config['run_name']}...")
-                        job = executor.submit(run_inference, inference_config=grid_config)
+
+                        # Save config to a file
+                        config_dir = os.path.join("outputs", "slurm_jobs", "conf_gen", "configs")
+                        os.makedirs(config_dir, exist_ok=True)
+                        config_file = os.path.join(config_dir, f"{grid_config['run_name']}_config.json")
+                        with open(config_file, 'w') as f:
+                            json.dump(grid_config, f, indent=2)
+
+                        logger.info(f"  Config saved to: {config_file}")
+
+                        # Submit the minimal wrapper function with just the config path
+                        job = executor.submit(_run_from_config_file, config_file)
                         jobs.append(job)
         else:
             # Run grid search locally - either sequential or parallel
@@ -581,35 +632,42 @@ def launch_inference_from_cli(
                     grid_config = dict(base_inference_config)
                     
                     if isinstance(model_key, tuple):
-                        grid_config["model_path"] = get_ckpt(model_key[0], model_key[1])
+                        grid_config["model_path"] = str(get_ckpt(model_key[0], model_key[1]))
                         model_key_str = f"{model_key[0]}_{model_key[1]}"
                         # Auto-select tokenizer based on model name
                         if "binned" in model_key[0] or "qw600" in model_key[0]:
-                            grid_config["tokenizer_path"] = get_tokenizer_path("qwen3_0.6b_binned")
+                            grid_config["tokenizer_path"] = str(get_tokenizer_path("qwen3_0.6b_binned"))
                             grid_config["binned"] = True
                         else:
-                            grid_config["tokenizer_path"] = get_tokenizer_path("qwen3_0.6b_custom")
+                            grid_config["tokenizer_path"] = str(get_tokenizer_path("qwen3_0.6b_custom"))
                             grid_config["binned"] = False
                     else:
-                        grid_config["model_path"] = get_ckpt(model_key)
+                        grid_config["model_path"] = str(get_ckpt(model_key))
                         model_key_str = model_key
                         if "binned" in model_key or "qw600" in model_key:
-                            grid_config["tokenizer_path"] = get_tokenizer_path("qwen3_0.6b_binned")
+                            grid_config["tokenizer_path"] = str(get_tokenizer_path("qwen3_0.6b_binned"))
                             grid_config["binned"] = True
                         else:
-                            grid_config["tokenizer_path"] = get_tokenizer_path("qwen3_0.6b_custom")
+                            grid_config["tokenizer_path"] = str(get_tokenizer_path("qwen3_0.6b_custom"))
                             grid_config["binned"] = False
                     
                     if test_set_name == "xl":
                         grid_config["batch_size"] = 100
-                    
+
                     if test_set_name == "qm9":
                         grid_config["batch_size"] = 100
-                    
+
+                    if test_set_name == "valid":
+                        grid_config["batch_size"] = 128
+
                     if test_set_name == "icl":
                         grid_config["batch_size"] = 64
-                    
-                    grid_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
+
+                    # Handle validation set path differently
+                    if test_set_name == "valid":
+                        grid_config["test_data_path"] = str(get_data_path("validation_pickle"))
+                    else:
+                        grid_config["test_data_path"] = str(get_data_path(f"{test_set_name}_smi"))
                     grid_config["test_set"] = test_set_name
                     grid_config["run_name"] = f"{model_key_str}_{test_set_name}"
                     all_configs.append((grid_config, grid_config["run_name"]))
@@ -642,37 +700,62 @@ def launch_inference_from_cli(
                             traceback.print_exc()
     else:
         if executor is not None:
+            # Use config file submission to avoid pickling complex objects
+            import json
             with executor.batch():
                 for test_set_name in test_sets_to_run:
                     inference_config = dict(base_inference_config)
-                    
+
                     if test_set_name == "xl":
                         inference_config["batch_size"] = 100
                     if test_set_name == "qm9":
                         inference_config["batch_size"] = 100
+                    if test_set_name == "valid":
+                        inference_config["batch_size"] = 128
                     if test_set_name == "icl":
                         inference_config["batch_size"] = 64
-                    
-                    inference_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
+
+                    # Handle validation set path differently
+                    if test_set_name == "valid":
+                        inference_config["test_data_path"] = str(get_data_path("validation_pickle"))
+                    else:
+                        inference_config["test_data_path"] = str(get_data_path(f"{test_set_name}_smi"))
                     inference_config["test_set"] = test_set_name
                     inference_config["run_name"] = f"new_data_p1_{test_set_name}"
-                    
-                    logger.info(f"Running inference for {test_set_name} with config: {inference_config}")
-                    job = executor.submit(run_inference, inference_config=inference_config)
+
+                    logger.info(f"Submitting job for {inference_config['run_name']}...")
+
+                    # Save config to a file
+                    config_dir = os.path.join("outputs", "slurm_jobs", "conf_gen", "configs")
+                    os.makedirs(config_dir, exist_ok=True)
+                    config_file = os.path.join(config_dir, f"{inference_config['run_name']}_config.json")
+                    with open(config_file, 'w') as f:
+                        json.dump(inference_config, f, indent=2)
+
+                    logger.info(f"  Config saved to: {config_file}")
+
+                    # Submit the minimal wrapper function with just the config path
+                    job = executor.submit(_run_from_config_file, config_file)
         else:
             # Build all configs first
             all_configs = []
             for test_set_name in test_sets_to_run:
                 inference_config = dict(base_inference_config)
-                
+
                 if test_set_name == "xl":
                     inference_config["batch_size"] = 100
                 if test_set_name == "qm9":
                     inference_config["batch_size"] = 100
+                if test_set_name == "valid":
+                    inference_config["batch_size"] = 128
                 if test_set_name == "icl":
                     inference_config["batch_size"] = 64
-                
-                inference_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
+
+                # Handle validation set path differently
+                if test_set_name == "valid":
+                    inference_config["test_data_path"] = str(get_data_path("validation_pickle"))
+                else:
+                    inference_config["test_data_path"] = str(get_data_path(f"{test_set_name}_smi"))
                 inference_config["test_set"] = test_set_name
                 inference_config["run_name"] = f"new_data_p1_{test_set_name}"
                 all_configs.append((inference_config, inference_config["run_name"]))
@@ -707,12 +790,15 @@ def launch_inference_from_cli(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device", type=str, default="local")
+    parser.add_argument("--device", type=str, default="local",
+                        choices=["local", "a100", "h100", "all"],
+                        help="Device to run on: local (current machine), a100/h100/all (cluster partitions)")
     parser.add_argument("--grid_run_inference", action="store_true")
     parser.add_argument("--test_set", type=str, choices=["clean", "distinct", "corrected"], default=None)
     parser.add_argument("--binned", action="store_true", default=False)
     parser.add_argument("--xl", action="store_true")
     parser.add_argument("--qm9", action="store_true")
+    parser.add_argument("--valid", action="store_true", help="Run inference on validation set")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--icl", action="store_true")
     parser.add_argument("--icl_n", type=int, default=5)
@@ -724,6 +810,7 @@ if __name__ == "__main__":
         test_set=args.test_set,
         xl=args.xl,
         qm9=args.qm9,
+        valid=args.valid,
         limit=args.limit,
         binned=args.binned,
         icl=args.icl,

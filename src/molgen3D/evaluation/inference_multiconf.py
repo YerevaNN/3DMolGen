@@ -237,9 +237,120 @@ def save_results(results_path, generations, stats):
     """Save generation results to pickle and text files."""
     with open(os.path.join(results_path, "generation_results.pickle"), 'wb') as results_file_pickle:
         cloudpickle.dump(generations, results_file_pickle, protocol=4)
-    
+
     with open(os.path.join(results_path, "generation_results.txt"), 'w') as results_file_txt:
         results_file_txt.write(f"{stats=}")
+
+
+def _decode_single_conformer(args):
+    """Helper function for parallel conformer decoding.
+
+    Args:
+        args: Tuple of (conformer_string, canonical_smiles, binned, bins)
+
+    Returns:
+        Tuple of (mol_obj or None, error_type: str or None)
+        error_type can be 'smiles_mismatch' or 'mol_parse_fail'
+    """
+    conformer_string, canonical_smiles, binned, bins_tuple = args
+
+    # Import here to avoid issues with multiprocessing
+    from molgen3D.data_processing.smiles_encoder_decoder import (
+        decode_cartesian_v2,
+        strip_smiles,
+        decode_cartesian_binned_v2,
+        get_bins_for_coords,
+    )
+    from molgen3D.evaluation.utils import same_molecular_graph
+
+    # Reconstruct bins if binned
+    bins = None
+    if binned and bins_tuple is not None:
+        # bins_tuple is (ranges, bin_size)
+        ranges, bin_size = bins_tuple
+        bins = get_bins_for_coords(ranges, bin_size=bin_size)
+
+    try:
+        # Validate SMILES match
+        generated_smiles = strip_smiles(conformer_string)
+        if not same_molecular_graph(canonical_smiles, generated_smiles):
+            return None, 'smiles_mismatch'
+
+        # Decode the conformer
+        if binned:
+            mol_obj = decode_cartesian_binned_v2(conformer_string, bins)
+        else:
+            mol_obj = decode_cartesian_v2(conformer_string)
+
+        return mol_obj, None
+
+    except Exception as e:
+        return None, 'mol_parse_fail'
+
+
+def decode_conformers_parallel(
+    conformer_strings: List[str],
+    canonical_smiles: str,
+    binned: bool,
+    bins,
+    max_workers: int = 4,
+) -> tuple[List, dict]:
+    """Decode multiple conformers in parallel using multiprocessing.
+
+    Args:
+        conformer_strings: List of conformer strings to decode
+        canonical_smiles: Expected canonical SMILES for validation
+        binned: Whether to use binned decoding
+        bins: Bin arrays for binned decoding (or None)
+        max_workers: Number of parallel workers
+
+    Returns:
+        Tuple of (list of successfully decoded molecule objects, dict of error counts by type)
+    """
+    if not conformer_strings:
+        return [], {}
+
+    # For small batches, parallel overhead isn't worth it
+    if len(conformer_strings) < 4:
+        max_workers = 1
+
+    # Prepare bins for serialization (can't pickle numpy arrays directly in some cases)
+    bins_tuple = None
+    if binned and bins is not None:
+        ranges = [(-13.0, 13.0), (-13.0, 13.0), (-13.0, 13.0)]
+        bin_size = 0.104
+        bins_tuple = (ranges, bin_size)
+
+    mol_objects = []
+    error_counts = defaultdict(int)
+
+    if max_workers <= 1:
+        # Sequential fallback
+        for conformer_str in conformer_strings:
+            mol_obj, error = _decode_single_conformer(
+                (conformer_str, canonical_smiles, binned, bins_tuple)
+            )
+            if mol_obj is not None:
+                mol_objects.append(mol_obj)
+            elif error:
+                error_counts[error] += 1
+    else:
+        # Parallel decoding
+        args_list = [
+            (conformer_str, canonical_smiles, binned, bins_tuple)
+            for conformer_str in conformer_strings
+        ]
+
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            results = executor.map(_decode_single_conformer, args_list)
+
+            for mol_obj, error in results:
+                if mol_obj is not None:
+                    mol_objects.append(mol_obj)
+                elif error:
+                    error_counts[error] += 1
+
+    return mol_objects, dict(error_counts)
 
 
 def generate_multiple_conformers(
@@ -271,8 +382,8 @@ def generate_multiple_conformers(
         Tuple of (list of successfully decoded molecule objects, full decoded output)
     """
     # Import dependencies here to avoid CUDA state in module globals
-    from molgen3D.training.grpo.logits_constraints import (
-        ConformerControlLogitsProcessor,
+    from molgen3D.training.grpo.logits_constraints_optimized import (
+        ConformerControlLogitsProcessorOptimized as ConformerControlLogitsProcessor,
         ConformerCountStoppingCriteria,
     )
     from molgen3D.data_processing.smiles_encoder_decoder import (
@@ -348,9 +459,9 @@ def generate_multiple_conformers(
     )
     
     # Generate all conformers in one go
-    # Each conformer needs ~600-800 tokens, stay under 4096 model limit
-    max_tokens_per_conformer = 500
-    max_new_tokens = min(max_tokens_per_conformer * num_conformers, 4000)
+    # Each conformer needs ~600-800 tokens for large molecules
+    max_tokens_per_conformer = 650  # Increased from 500
+    max_new_tokens = min(max_tokens_per_conformer * num_conformers, 5000)  # Increased from 4000
 
     start_time = time.perf_counter()
     with torch.inference_mode():
@@ -387,47 +498,64 @@ def generate_multiple_conformers(
         conformer_start = decoded_output.find("[CONFORMER]", idx)
         if conformer_start == -1:
             break
-        
-        # Find corresponding [/CONFORMER]
+
         conformer_content_start = conformer_start + len("[CONFORMER]")
+
+        # Look for closing tag, but also check if another [CONFORMER] appears first
         conformer_end = decoded_output.find("[/CONFORMER]", conformer_content_start)
-        
+        next_conformer_start = decoded_output.find("[CONFORMER]", conformer_content_start)
+
+        # Check if there's another [CONFORMER] before [/CONFORMER]
+        # This indicates the current conformer is unterminated
         if conformer_end == -1:
+            # No closing tag found at all
             stats["no_eos"] += 1
             if stats["no_eos"] < 20:
                 logger.info(f"no conformer end tag found for conformer starting at {conformer_start}")
-            break
-        
-        # Extract conformer content
+            idx = conformer_content_start
+            continue
+        elif next_conformer_start != -1 and next_conformer_start < conformer_end:
+            # Another [CONFORMER] appears before [/CONFORMER] - current conformer is unterminated
+            stats["no_eos"] += 1
+            if stats["no_eos"] < 20:
+                logger.info(
+                    f"unterminated conformer at {conformer_start} "
+                    f"(next [CONFORMER] at {next_conformer_start} before [/CONFORMER] at {conformer_end})"
+                )
+            # Skip to the next [CONFORMER]
+            idx = next_conformer_start
+            continue
+
+        # Valid conformer found
         generated_conformer = decoded_output[conformer_content_start:conformer_end]
         conformer_strings.append(generated_conformer)
-        
+
         # Move to next potential conformer
         idx = conformer_end + len("[/CONFORMER]")
     
-    # Validate and decode each conformer
-    for generated_conformer in conformer_strings:
-        # Validate SMILES match
-        generated_smiles = strip_smiles(generated_conformer)
-        if not same_molecular_graph(canonical_smiles, generated_smiles):
-            if stats["smiles_mismatch"] < 20:
-                logger.info(f"smiles mismatch: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
-            stats["smiles_mismatch"] += 1
-        else:
-            # Try to decode the conformer
-            try:
-                if binned:
-                    mol_obj = decode_cartesian_binned_v2(generated_conformer, bins)
-                else:
-                    mol_obj = decode_cartesian_v2(generated_conformer)
-                mol_objects.append(mol_obj)
-            except Exception as e:
-                if stats["mol_parse_fail"] < 20:
-                    logger.info(f"mol parse fail: {e}\n{canonical_smiles=}\n{generated_conformer[:200]=}")
-                stats["mol_parse_fail"] += 1
-    
-    logger.debug(f"Generated {len(mol_objects)} valid conformers out of {len(conformer_strings)} total conformers for {canonical_smiles}")
-    
+    # Track generation attempt metrics
+    stats["conformers_requested"] += num_conformers
+    stats["conformers_extracted"] += len(conformer_strings)
+    stats["conformers_never_generated"] += num_conformers - len(conformer_strings)
+
+    # Decode conformers in parallel (if enough conformers to make it worthwhile)
+    mol_objects, decode_errors = decode_conformers_parallel(
+        conformer_strings=conformer_strings,
+        canonical_smiles=canonical_smiles,
+        binned=binned,
+        bins=bins,
+        max_workers=4,  # Use 4 parallel workers
+    )
+
+    # Update stats with actual error counts (not estimates)
+    for error_type, count in decode_errors.items():
+        stats[error_type] += count
+
+    logger.debug(
+        f"Generated {len(mol_objects)} valid conformers out of {len(conformer_strings)} extracted "
+        f"({num_conformers} requested) for {canonical_smiles}"
+    )
+
     return mol_objects, decoded_output
 
 
@@ -458,9 +586,9 @@ def generate_multiple_conformers_batched(
         List of lists of molecule objects (one list per SMILES in batch)
     """
     # Import dependencies here to avoid CUDA state in module globals
-    from molgen3D.training.grpo.logits_constraints import (
-        ConformerControlLogitsProcessor,
-        ConformerCountStoppingCriteria,
+    from molgen3D.training.grpo.logits_constraints_optimized import (
+        ConformerControlLogitsProcessorOptimized as ConformerControlLogitsProcessor,
+        ConformerCountStoppingCriteriaPerSequence,
     )
     from molgen3D.data_processing.smiles_encoder_decoder import (
         decode_cartesian_v2,
@@ -479,10 +607,10 @@ def generate_multiple_conformers_batched(
     pad_token_id = tokenizer.pad_token_id
     
     # Setup banned tokens
+    # NOTE: Don't ban EOS here - it's handled per-sequence in the logits processor
     banned_ids = set(smiles_start_ids)
     banned_ids.update(smiles_end_ids)
-    if eos_token_id is not None:
-        banned_ids.add(eos_token_id)
+    # EOS is intentionally NOT banned here - we control it per-sequence
     if pad_token_id is not None:
         banned_ids.add(pad_token_id)
     for tok in conformer_start_ids:
@@ -507,10 +635,10 @@ def generate_multiple_conformers_batched(
             if smiles_end != -1:
                 canonical_smiles = prompt[smiles_content_start:smiles_end]
         batch_canonical_smiles.append(canonical_smiles)
-    
-    # Use max conformer count for the batch
+
+    # Use max conformer count for the batch (for token budget calculation)
     max_conformers = max(batch_num_conformers)
-    
+
     # Tokenize all prompts with padding
     tokenized = tokenizer(
         batch_prompts,
@@ -520,26 +648,32 @@ def generate_multiple_conformers_batched(
     )
     input_ids = tokenized["input_ids"].to(model.device, non_blocking=True)
     attention_mask = tokenized["attention_mask"].to(model.device, non_blocking=True).contiguous()
-    
-    # Create processors
+
+    # Create processors with per-sequence target support
+    # The logits processor will force EOS for sequences that reach their target,
+    # allowing them to stop while other sequences continue
     logits_processor = ConformerControlLogitsProcessor(
         conformer_start_ids=conformer_start_ids,
         conformer_end_ids=conformer_end_ids,
         banned_token_ids=banned_ids,
-        target_k=max_conformers,
+        target_k=max_conformers,  # Fallback for sequences without specific target
         force_hard=True,
+        eos_token_id=eos_token_id,
+        target_counts=batch_num_conformers,  # Per-sequence targets for EOS forcing
     )
-    
-    stopping_criteria = ConformerCountStoppingCriteria(
+
+    # Use per-sequence stopping criteria - stops when ALL sequences finish
+    # Combined with EOS forcing above, this allows sequences to stop independently
+    stopping_criteria = ConformerCountStoppingCriteriaPerSequence(
         conformer_end_ids=conformer_end_ids,
-        target_k=max_conformers,
+        target_counts=batch_num_conformers,
     )
     
     # Generate for entire batch
-    # Each conformer needs ~600-800 tokens, so for 8 conformers = ~6400 tokens max
-    # Keep it under 4096 to avoid model length limit warnings
-    max_tokens_per_conformer = 500  # Conservative to stay under limits
-    max_new_tokens = min(max_tokens_per_conformer * max_conformers, 4000)
+    # Each conformer needs ~600-800 tokens for large molecules
+    # With per-sequence stopping, sequences stop independently so we can be more generous
+    max_tokens_per_conformer = 650  # Increased from 500 to reduce truncation
+    max_new_tokens = min(max_tokens_per_conformer * max_conformers, 5000)  # Increased from 4000
 
     start_time = time.perf_counter()
     with torch.inference_mode():
@@ -583,30 +717,48 @@ def generate_multiple_conformers_batched(
             conformer_start = decoded_output.find("[CONFORMER]", idx)
             if conformer_start == -1:
                 break
+
             conformer_content_start = conformer_start + len("[CONFORMER]")
+
+            # Look for closing tag, but also check if another [CONFORMER] appears first
             conformer_end = decoded_output.find("[/CONFORMER]", conformer_content_start)
+            next_conformer_start = decoded_output.find("[CONFORMER]", conformer_content_start)
+
+            # Check if there's another [CONFORMER] before [/CONFORMER]
             if conformer_end == -1:
+                # No closing tag found at all
                 stats["no_eos"] += 1
-                break
+                idx = conformer_content_start
+                continue
+            elif next_conformer_start != -1 and next_conformer_start < conformer_end:
+                # Another [CONFORMER] before [/CONFORMER] - unterminated
+                stats["no_eos"] += 1
+                idx = next_conformer_start
+                continue
+
+            # Valid conformer found
             conformer_strings.append(decoded_output[conformer_content_start:conformer_end])
             idx = conformer_end + len("[/CONFORMER]")
         
-        # Decode and validate conformers (up to target_count)
-        mol_objects = []
-        for generated_conformer in conformer_strings[:target_count]:
-            generated_smiles = strip_smiles(generated_conformer)
-            if not same_molecular_graph(canonical_smiles, generated_smiles):
-                stats["smiles_mismatch"] += 1
-            else:
-                try:
-                    if binned:
-                        mol_obj = decode_cartesian_binned_v2(generated_conformer, bins)
-                    else:
-                        mol_obj = decode_cartesian_v2(generated_conformer)
-                    mol_objects.append(mol_obj)
-                except Exception as e:
-                    stats["mol_parse_fail"] += 1
-        
+        # Track generation attempt metrics for this sequence
+        conformers_to_decode = conformer_strings[:target_count]
+        stats["conformers_requested"] += target_count
+        stats["conformers_extracted"] += len(conformers_to_decode)
+        stats["conformers_never_generated"] += target_count - len(conformers_to_decode)
+
+        # Decode conformers in parallel (up to target_count)
+        mol_objects, decode_errors = decode_conformers_parallel(
+            conformer_strings=conformers_to_decode,
+            canonical_smiles=canonical_smiles,
+            binned=binned,
+            bins=bins,
+            max_workers=4,
+        )
+
+        # Update stats with actual error counts (not estimates)
+        for error_type, count in decode_errors.items():
+            stats[error_type] += count
+
         batch_results.append(mol_objects)
     
     return batch_results
@@ -678,18 +830,39 @@ def run_multiconf_inference(inference_config: dict):
     smiles_to_process = []
     test_set: str = inference_config.get("test_set", "distinct")
     multiplier = inference_config.get("conformer_multiplier", 2)  # Generate 2x ground truths by default
+    # Optional per-SMILES cap on target conformers to prevent extremely large targets
+    max_target_per_smiles = inference_config.get("max_target_per_smiles")
 
-    if test_set in ("clean"):
+    if test_set in ("clean",):
+        # Standard clean/test format with num_confs and corrected_smi.
         for geom_smiles, data in test_data.items():
             num_ground_truths = data["num_confs"]
             target_count = num_ground_truths * multiplier
-            smiles_to_process.append((geom_smiles, data['corrected_smi'], target_count))
+            if max_target_per_smiles is not None:
+                target_count = min(target_count, max_target_per_smiles)
+            smiles_to_process.append((geom_smiles, data["corrected_smi"], target_count))
     elif test_set in ("distinct", "xl", "qm9"):
+        # Datasets with grouped sub-SMILES counts.
         logger.info(f"Processing as {test_set} dataset")
         for geom_smiles, data in test_data.items():
             for sub_smiles, count in data["sub_smiles_counts"].items():
                 target_count = count * multiplier
+                if max_target_per_smiles is not None:
+                    target_count = min(target_count, max_target_per_smiles)
                 smiles_to_process.append((geom_smiles, sub_smiles, target_count))
+    elif test_set == "valid":
+        # Validation set: keys are SMILES, values are lists of ground-truth conformers.
+        # We treat the key SMILES as both geom_smiles and sub_smiles, and
+        # generate `multiplier * num_ground_truths` conformers per SMILES.
+        logger.info("Processing validation set from validation_pickle")
+        for smiles, conf_list in test_data.items():
+            if not conf_list:
+                continue
+            num_ground_truths = len(conf_list)
+            target_count = num_ground_truths * multiplier
+            if max_target_per_smiles is not None:
+                target_count = min(target_count, max_target_per_smiles)
+            smiles_to_process.append((smiles, smiles, target_count))
 
     total_conformers_to_generate = sum(count for _, _, count in smiles_to_process)
     logger.info(f"Total unique SMILES to process: {len(smiles_to_process)}")
@@ -718,6 +891,9 @@ def run_multiconf_inference(inference_config: dict):
         "mol_parse_fail": 0,
         "no_eos": 0,
         "no_conformer_start": 0,
+        "conformers_requested": 0,
+        "conformers_extracted": 0,
+        "conformers_never_generated": 0,
     })
     generations_all = defaultdict(list)
     total_conformers_generated = 0
@@ -790,31 +966,77 @@ def run_multiconf_inference(inference_config: dict):
             batch_targets,
             batch_full_targets
         ):
-            if mol_objects:
+            # Always add successful conformers to results
+            num_generated = len(mol_objects)
+            if num_generated > 0:
                 generations_all[geom_smiles].extend(mol_objects)
-                num_generated = len(mol_objects)
                 total_conformers_generated += num_generated
                 pbar.update(num_generated)
 
-                # Update remaining count
-                new_remaining = remaining_count - num_generated
-                if new_remaining <= 0:
-                    # Done with this SMILES
-                    del remaining_conformers[(geom_smiles, sub_smiles)]
-                    logger.debug(f"  ✓ {geom_smiles}: Complete ({remaining_count} conformers)")
-                else:
-                    # Still need more conformers
-                    remaining_conformers[(geom_smiles, sub_smiles)] = new_remaining
-                    logger.debug(f"  {geom_smiles}: {num_generated} generated, {new_remaining} remaining")
-            else:
-                # Failed to generate, remove from queue
-                logger.warning(f"  ✗ {geom_smiles}: Failed to generate conformers, skipping")
+            # Update remaining count based on REQUESTED amount (generated_count), not actual successes
+            # This ensures we make a fixed number of attempts regardless of success rate
+            new_remaining = remaining_count - generated_count
+
+            if new_remaining <= 0:
+                # Done with this SMILES (exhausted attempt budget)
                 del remaining_conformers[(geom_smiles, sub_smiles)]
+                logger.debug(
+                    f"  ✓ {geom_smiles}: Complete "
+                    f"({num_generated}/{generated_count} succeeded this batch, attempt budget exhausted)"
+                )
+            else:
+                # Still have attempt budget remaining
+                remaining_conformers[(geom_smiles, sub_smiles)] = new_remaining
+                logger.debug(
+                    f"  → {geom_smiles}: {num_generated}/{generated_count} succeeded this batch, "
+                    f"{new_remaining} attempts remaining"
+                )
 
     pbar.close()
 
     logger.info(f"Generation complete. Total conformers: {total_conformers_generated}/{total_conformers_to_generate}")
     logger.info(f"Stats: {dict(stats)}")
+
+    # Log detailed breakdown
+    logger.info("=" * 80)
+    logger.info("GENERATION ATTEMPT BREAKDOWN")
+    logger.info("=" * 80)
+
+    # Overall success rate
+    overall_success_rate = 100 * total_conformers_generated / max(1, stats['conformers_requested'])
+    logger.info(f"OVERALL SUCCESS RATE:        {overall_success_rate:>9.1f}% ({total_conformers_generated:,} / {stats['conformers_requested']:,})")
+    logger.info("=" * 80)
+
+    # Detailed breakdown
+    logger.info(f"Conformers requested:        {stats['conformers_requested']:>10,} (100.0%)")
+
+    extraction_rate = 100 * stats['conformers_extracted'] / max(1, stats['conformers_requested'])
+    logger.info(f"Conformers extracted:        {stats['conformers_extracted']:>10,} ({extraction_rate:>5.1f}%)")
+
+    never_gen_rate = 100 * stats['conformers_never_generated'] / max(1, stats['conformers_requested'])
+    logger.info(f"Conformers never generated:  {stats['conformers_never_generated']:>10,} ({never_gen_rate:>5.1f}%)")
+
+    logger.info("-" * 80)
+
+    parse_success_rate = 100 * total_conformers_generated / max(1, stats['conformers_extracted'])
+    logger.info(f"Successfully parsed:         {total_conformers_generated:>10,} ({parse_success_rate:>5.1f}% of extracted)")
+
+    smiles_mm_rate = 100 * stats['smiles_mismatch'] / max(1, stats['conformers_extracted'])
+    logger.info(f"SMILES mismatch:             {stats['smiles_mismatch']:>10,} ({smiles_mm_rate:>5.1f}% of extracted)")
+
+    parse_fail_rate = 100 * stats['mol_parse_fail'] / max(1, stats['conformers_extracted'])
+    logger.info(f"Mol parse fail:              {stats['mol_parse_fail']:>10,} ({parse_fail_rate:>5.1f}% of extracted)")
+
+    logger.info(f"No EOS tag:                  {stats['no_eos']:>10,}")
+    logger.info("=" * 80)
+
+    # Sanity check
+    extracted_accounted = total_conformers_generated + stats['smiles_mismatch'] + stats['mol_parse_fail']
+    if extracted_accounted != stats['conformers_extracted']:
+        logger.warning(
+            f"Accounting mismatch: {extracted_accounted} != {stats['conformers_extracted']} "
+            f"(diff: {stats['conformers_extracted'] - extracted_accounted})"
+        )
 
     # Save results in the same format as inference.py
     save_results(results_path, dict(generations_all), stats)
@@ -834,6 +1056,7 @@ def launch_multiconf_inference_from_cli(
     limit: Optional[int] = None,
     binned: bool = False,
     parallel_jobs: int = 1,
+    max_target_per_smiles: Optional[int] = None,
 ) -> None:
     """Launch multi-conformer inference from CLI arguments.
 
@@ -911,7 +1134,7 @@ def launch_multiconf_inference_from_cli(
         logger.info(f"✓ Jobs will run LOCALLY (device={device})")
 
     base_inference_config = {
-        "model_path": str(get_ckpt("qw600_pre_binned_grouped", "4e")),  # Convert Path to str for pickling
+        "model_path": str(get_ckpt("qw600_pre_binned_grouped", "5e")),  # Convert Path to str for pickling
         "tokenizer_path": str(get_tokenizer_path("qwen3_0.6b_binned")),  # Convert Path to str for pickling
         "torch_dtype": "bfloat16",
         "gen_config": sampling_configs["top_p_sampling1"].to_dict(),  # Convert to dict for pickling
@@ -922,7 +1145,8 @@ def launch_multiconf_inference_from_cli(
         "conformers_per_batch": conformers_per_batch,
         "conformer_multiplier": conformer_multiplier,
         "limit": limit,
-        "binned": True,  # Auto-enable for binned models
+        "binned": True, 
+        "max_target_per_smiles": max_target_per_smiles,
     }
     
     if grid_run_inference:
@@ -938,7 +1162,7 @@ def launch_multiconf_inference_from_cli(
         for model_key in param_grid:
             for test_set_name in test_sets_to_run:
                 grid_config = dict(base_inference_config)
-                
+
                 if isinstance(model_key, tuple):
                     grid_config["model_path"] = str(get_ckpt(model_key[0], model_key[1]))
                     model_key_str = f"{model_key[0]}_{model_key[1]}"
@@ -946,7 +1170,11 @@ def launch_multiconf_inference_from_cli(
                     grid_config["model_path"] = str(get_ckpt(model_key))
                     model_key_str = model_key
 
-                grid_config["test_data_path"] = str(get_data_path(f"{test_set_name}_smi"))
+                # Handle validation set path differently (use validation_pickle)
+                if test_set_name == "valid":
+                    grid_config["test_data_path"] = str(get_data_path("validation_pickle"))
+                else:
+                    grid_config["test_data_path"] = str(get_data_path(f"{test_set_name}_smi"))
                 grid_config["test_set"] = test_set_name
                 grid_config["run_name"] = f"multiconf_{model_key_str}_{test_set_name}"
                 all_configs.append((grid_config, grid_config["run_name"]))
@@ -954,7 +1182,11 @@ def launch_multiconf_inference_from_cli(
         all_configs = []
         for test_set_name in test_sets_to_run:
             inference_config = dict(base_inference_config)
-            inference_config["test_data_path"] = str(get_data_path(f"{test_set_name}_smi"))
+            # Handle validation set path differently (use validation_pickle)
+            if test_set_name == "valid":
+                inference_config["test_data_path"] = str(get_data_path("validation_pickle"))
+            else:
+                inference_config["test_data_path"] = str(get_data_path(f"{test_set_name}_smi"))
             inference_config["test_set"] = test_set_name
             inference_config["run_name"] = f"multiconf_{conformer_multiplier}x_{conformers_per_batch}batch_{test_set_name}"
             all_configs.append((inference_config, inference_config["run_name"]))
@@ -1029,6 +1261,8 @@ if __name__ == "__main__":
                         help="Use binned decoding")
     parser.add_argument("--parallel_jobs", type=int, default=1,
                         help="Number of parallel inference jobs for local execution")
+    parser.add_argument("--max_target_per_smiles", type=int,
+                        help="Optional cap on target conformers per (geom_smiles, sub_smiles) entry")
 
     args = parser.parse_args()
 
@@ -1046,4 +1280,5 @@ if __name__ == "__main__":
         limit=args.limit,
         binned=args.binned,
         parallel_jobs=args.parallel_jobs,
+        max_target_per_smiles=args.max_target_per_smiles,
     )

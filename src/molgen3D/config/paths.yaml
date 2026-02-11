@@ -105,6 +105,13 @@ data:
   binned_paired_conformers_test:
     - "binned_paired_stripped/processed_strings/test"
 
+  binned_grouped_isolated_train:
+    - "binned_grouped_isolated_bins/processed_strings/train"
+  binned_grouped_isolated_valid:
+    - "binned_grouped_isolated_bins/processed_strings/valid"
+  binned_grouped_isolated_test:
+    - "binned_grouped_isolated_bins/processed_strings/test"
+
   filtered_conformers_train: 
     - "3DMolGen_data/binned_filtered/processed_strings/train"
     - "binned_filtered/processed_strings/train"

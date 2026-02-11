@@ -150,6 +150,32 @@ def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers:
         traceback.print_exc()
         return None, None, None
 
+def normalize_gt_data(gt_dict: Dict, test_set: str) -> Dict:
+    """Normalize ground truth data to have consistent structure with 'confs' key.
+
+    Args:
+        gt_dict: Ground truth dictionary
+        test_set: Name of the test set
+
+    Returns:
+        Normalized dictionary where each value has a 'confs' key with list of molecules
+    """
+    if test_set == "valid":
+        # Validation set format: {smiles: [mol_obj1, mol_obj2, ...]}
+        # Convert to: {smiles: {"confs": [mol_obj1, mol_obj2, ...]}}
+        normalized = {}
+        for smiles, mol_list in gt_dict.items():
+            if isinstance(mol_list, list):
+                normalized[smiles] = {"confs": mol_list}
+            else:
+                # Already in correct format or unexpected format
+                normalized[smiles] = {"confs": [mol_list]} if mol_list else {"confs": []}
+        return normalized
+    else:
+        # Other test sets already have the correct structure
+        return gt_dict
+
+
 def get_missing_evaluation_dirs(gen_base: str, eval_base: str, max_recent: Optional[int]) -> List[str]:
     gen_path = Path(gen_base)
     eval_path = Path(eval_base)
@@ -177,8 +203,14 @@ def derive_eval_base_from_gen(gen_base: str) -> str:
         return str(Path(*parts))
     return str(p.parent / "eval_results")
 
-def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
-                              results_path: str, args: argparse.Namespace) -> bool:
+def process_generation_pickle(
+    gens_dict: Dict,
+    gt_dict: Dict,
+    gens_path: str,
+    results_path: str,
+    args: argparse.Namespace,
+    gt_path: Optional[str] = None,
+) -> bool:
 
     t0 = time.time()
     # Process generated molecules and calculate total count
@@ -198,7 +230,7 @@ def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
     gt_stats = {
         "total_molecules_num": len(gt_dict),
         "total_conformers_num": sum(_num_confs(value) for value in gt_dict.values()),
-        "gt_path": get_data_path(f"{args.test_set}_smi"),
+        "gt_path": gt_path if gt_path is not None else get_data_path(f"{args.test_set}_smi"),
     }
     
     t_prep = time.time()
@@ -258,11 +290,26 @@ def run_evaluation(directory_name: str, gen_base: str, eval_base: str, args: arg
         return False
     gens_dict = load_pkl(gen_pickle_path)
 
-    gt_dict = load_pkl(get_data_path(f"{args.test_set}_smi"))
-    print(f"Loaded {len(gt_dict)} ground truth geom_smiles")
+    # Load ground truth depending on test_set. For "valid", we use the
+    # dedicated validation pickle and normalize its structure.
+    if args.test_set == "valid":
+        gt_path = get_data_path("validation_pickle")
+    else:
+        gt_path = get_data_path(f"{args.test_set}_smi")
+
+    raw_gt_dict = load_pkl(gt_path)
+    gt_dict = normalize_gt_data(raw_gt_dict, args.test_set)
+    print(f"Loaded {len(gt_dict)} ground truth geom_smiles from {gt_path}")
     
     results_path = os.path.join(eval_base, f"{directory_name}")
-    return process_generation_pickle(gens_dict, gt_dict, gens_path, results_path, args)
+    return process_generation_pickle(
+        gens_dict=gens_dict,
+        gt_dict=gt_dict,
+        gens_path=gens_path,
+        results_path=results_path,
+        args=args,
+        gt_path=str(gt_path),
+    )
 
 def run_directory_mode(args) -> None:
     gen_base = get_base_path("gen_results_root")
@@ -315,7 +362,7 @@ def main() -> None:
     parser.add_argument("--num-workers", type=int, default=10, help="Number of workers for evaluation")
     parser.add_argument("--max-recent", type=int, default=3, help="Max recent missing directories to evaluate")
     parser.add_argument("--specific-dir", type=str, default=None, help="Specific directory to evaluate")
-    parser.add_argument("--test_set", type=str, default="distinct", choices=["clean", "distinct", "xl", "qm9"], help="Test set to evaluate")
+    parser.add_argument("--test_set", type=str, default="distinct", choices=["clean", "distinct", "xl", "qm9", "valid"], help="Test set to evaluate")
     args = parser.parse_args()
     
     run_directory_mode(args)
