@@ -922,17 +922,32 @@ def run_multiconf_inference(inference_config: dict):
     while remaining_conformers:
         batch_num += 1
 
-        # Select up to smiles_batch_size SMILES that still need conformers
+        # Fill batch by adding each SMILES multiple times until it completes or batch is full
         current_batch = []
+        batch_generation_tracker = {}  # Track total conformers requested per (geom, sub) in this batch
+
         for (geom_smiles, sub_smiles), remaining in list(remaining_conformers.items()):
             if len(current_batch) >= smiles_batch_size:
                 break
-            current_batch.append((geom_smiles, sub_smiles, remaining))
+
+            # Add this SMILES multiple times to fill the batch
+            remaining_for_this_smiles = remaining
+            batch_generation_tracker[(geom_smiles, sub_smiles)] = 0
+
+            while remaining_for_this_smiles > 0 and len(current_batch) < smiles_batch_size:
+                to_generate = min(remaining_for_this_smiles, conformers_per_batch)
+                current_batch.append((geom_smiles, sub_smiles, to_generate))
+                batch_generation_tracker[(geom_smiles, sub_smiles)] += to_generate
+                remaining_for_this_smiles -= to_generate
 
         if not current_batch:
             break
 
-        logger.info(f"Processing batch {batch_num}: {len(current_batch)} SMILES with remaining conformers")
+        unique_smiles_count = len(batch_generation_tracker)
+        logger.info(
+            f"Processing batch {batch_num}: {len(current_batch)} slots filled, "
+            f"{unique_smiles_count} unique SMILES"
+        )
 
         # Prepare batch data
         batch_geom_smiles = []
@@ -959,36 +974,43 @@ def run_multiconf_inference(inference_config: dict):
             stats=stats,
         )
 
-        # Accumulate results and update remaining counts
-        for (geom_smiles, sub_smiles), mol_objects, generated_count, remaining_count in zip(
+        # Accumulate results per unique SMILES (same SMILES may appear multiple times in batch)
+        smiles_accumulated_results = {}  # {(geom, sub): list of all mol_objects}
+
+        for (geom_smiles, sub_smiles), mol_objects in zip(
             [(g, s) for g, s, _ in current_batch],
-            batch_results,
-            batch_targets,
-            batch_full_targets
+            batch_results
         ):
-            # Always add successful conformers to results
-            num_generated = len(mol_objects)
+            if (geom_smiles, sub_smiles) not in smiles_accumulated_results:
+                smiles_accumulated_results[(geom_smiles, sub_smiles)] = []
+            smiles_accumulated_results[(geom_smiles, sub_smiles)].extend(mol_objects)
+
+        # Update remaining counts for each unique SMILES processed in this batch
+        for (geom_smiles, sub_smiles), mol_objects_list in smiles_accumulated_results.items():
+            # Add all successful conformers to results
+            num_generated = len(mol_objects_list)
             if num_generated > 0:
-                generations_all[geom_smiles].extend(mol_objects)
+                generations_all[geom_smiles].extend(mol_objects_list)
                 total_conformers_generated += num_generated
                 pbar.update(num_generated)
 
-            # Update remaining count based on REQUESTED amount (generated_count), not actual successes
-            # This ensures we make a fixed number of attempts regardless of success rate
-            new_remaining = remaining_count - generated_count
+            # Update remaining count based on total REQUESTED in this batch
+            total_requested = batch_generation_tracker[(geom_smiles, sub_smiles)]
+            current_remaining = remaining_conformers[(geom_smiles, sub_smiles)]
+            new_remaining = current_remaining - total_requested
 
             if new_remaining <= 0:
                 # Done with this SMILES (exhausted attempt budget)
                 del remaining_conformers[(geom_smiles, sub_smiles)]
                 logger.debug(
-                    f"  ✓ {geom_smiles}: Complete "
-                    f"({num_generated}/{generated_count} succeeded this batch, attempt budget exhausted)"
+                    f"  ✓ {geom_smiles[:50]} / {sub_smiles[:30]}: Complete "
+                    f"({num_generated}/{total_requested} succeeded this batch, attempt budget exhausted)"
                 )
             else:
                 # Still have attempt budget remaining
                 remaining_conformers[(geom_smiles, sub_smiles)] = new_remaining
                 logger.debug(
-                    f"  → {geom_smiles}: {num_generated}/{generated_count} succeeded this batch, "
+                    f"  → {geom_smiles[:50]} / {sub_smiles[:30]}: {num_generated}/{total_requested} succeeded this batch, "
                     f"{new_remaining} attempts remaining"
                 )
 
