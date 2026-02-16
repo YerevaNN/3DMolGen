@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=torchtitan-qwen3
 #SBATCH --cpus-per-task=64
-#SBATCH --partition=a100
+#SBATCH --partition=h100
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:8
 #SBATCH --mem=200G
@@ -9,7 +9,7 @@
 #SBATCH --output=outputs/slurm_jobs/titan/%j.out
 #SBATCH --error=outputs/slurm_jobs/titan/%j.err
 
-export WANDB_ENTITY=${WANDB_ENTITY:-menuab_team}
+export WANDB_ENTITY=${WANDB_ENTITY:-vover-yerevann}
 export WANDB_PROJECT=${WANDB_PROJECT:-3dmolgen}
 export WANDB_GROUP=${WANDB_GROUP:-pretrain}
 export WANDB_JOB_TYPE=${WANDB_JOB_TYPE:-pretrain}

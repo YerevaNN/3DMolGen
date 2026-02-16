@@ -1,12 +1,15 @@
 base_paths:
   project_root: "."
   data_root:
+    - "/nfs/ap/mnt/sxtn2/chem/GEOM_data"
     - "/data/molgen"
     - "data"
   geom_data_root:
+    - "/nfs/ap/mnt/sxtn2/chem/GEOM_data/geom_processed"
     - "/data/molgen"
     - "/data/molgen/GEOM_data"
   geom_dataset_root:
+    - "/nfs/ap/mnt/sxtn2/chem/GEOM_data/torsional_diff_gdrive/extracted"
     - "/data/molgen/GEOM_data/torsional_diff_gdrive/extracted"
   ckpts_root:
     - "/data/chem-project/checkpoints"
@@ -108,11 +111,14 @@ data:
     - "binned_paired_stripped/processed_strings/test"
 
   binned_grouped_isolated_train:
+    - "binned_grouped_stripped_v2/processed_strings/train"
     - "binned_grouped_isolated_bins/processed_strings/train"
   binned_grouped_isolated_valid:
     - "binned_grouped_isolated_bins/processed_strings/valid"
+    - "binned_grouped_stripped_v2/processed_strings/valid"
   binned_grouped_isolated_test:
     - "binned_grouped_isolated_bins/processed_strings/test"
+    - "binned_grouped_stripped_v2/processed_strings/test"
 
   filtered_conformers_train: 
     - "3DMolGen_data/binned_filtered/processed_strings/train"
