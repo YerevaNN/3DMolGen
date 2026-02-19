@@ -18,7 +18,6 @@ from molgen3D.data_processing.smiles_encoder_decoder import (
     decode_cartesian_v2,
     strip_smiles,
     decode_cartesian_binned_v2,
-    decode_cartesian_binned,
     get_bins_for_coords
 )
 from molgen3D.evaluation.utils import (
@@ -554,11 +553,11 @@ def launch_inference_from_cli(
     if grid_run_inference:
         jobs = []
         param_grid = [
-            ("qw600_pre_binned_grouped", "1e"),
-            ("qw600_pre_binned_grouped", "2e"),
-            ("qw600_pre_binned_grouped", "3e"),
-            ("qw600_pre_binned_grouped", "4e"),
-            ("qw600_pre_binned_grouped", "5e"),
+            ("qw600_pre_binned_grouped_isolated", "1e"),
+            ("qw600_pre_binned_grouped_isolated", "2e"),
+            ("qw600_pre_binned_grouped_isolated", "3e"),
+            ("qw600_pre_binned_grouped_isolated", "4e"),
+            ("qw600_pre_binned_grouped_isolated", "5e"),
 
         ]
         
