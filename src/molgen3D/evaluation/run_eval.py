@@ -277,7 +277,11 @@ def process_generation_pickle(
     return True
 
 
-def run_evaluation(directory_name: str, gen_base: str, eval_base: str, args: argparse.Namespace) -> bool:
+def run_evaluation(directory_name: str, gen_base: str, eval_base: str, args_dict: dict) -> bool:
+    # Convert args_dict back to Namespace for compatibility
+    from types import SimpleNamespace
+    args = SimpleNamespace(**args_dict)
+    
     print(f"Starting evaluation for: {directory_name}")
     
     gens_path = os.path.join(gen_base, directory_name)
@@ -338,17 +342,20 @@ def run_directory_mode(args) -> None:
                 print(f"Failed to evaluate: {directory}")
     else:
         # Use submitit for remote execution
-        executor = create_slurm_executor(device=args.device, job_type="eval", num_gpus=0, num_cpus=args.num_workers)
+        executor = create_slurm_executor(device=args.device, job_type="eval", num_gpus=0, num_cpus=80)
+        # Convert args to dict for better pickling
+        args_dict = vars(args)
         jobs = []
-        for directory in directories:
-            job = executor.submit(
-                run_evaluation,
-                directory_name=directory,
-                gen_base=gen_base,
-                eval_base=eval_base,
-                args=args,
-            )
-            jobs.append((directory, job))
+        with executor.batch():
+            for directory in directories:
+                job = executor.submit(
+                    run_evaluation,
+                    directory_name=directory,
+                    gen_base=gen_base,
+                    eval_base=eval_base,
+                    args_dict=args_dict,
+                )
+                jobs.append((directory, job))
         print(f"Submitted {len(jobs)} jobs to {args.device}")
         for directory, job in jobs:
             print(f"  - {directory}: Job ID {job.job_id}")
@@ -359,7 +366,7 @@ def main() -> None:
     parser.add_argument("--posebusters", type=str, default="None", choices=["mol", "redock", "None"], help="PoseBusters config")
     parser.add_argument("--batch-size", type=int, default=64, help="Batch size of true-conformer rows per worker task")
     parser.add_argument("--device", type=str, choices=["local", "a100", "h100", "all"], default="local", help="Slurm partition")
-    parser.add_argument("--num-workers", type=int, default=10, help="Number of workers for evaluation")
+    parser.add_argument("--num-workers", type=int, default=80, help="Number of workers for evaluation")
     parser.add_argument("--max-recent", type=int, default=3, help="Max recent missing directories to evaluate")
     parser.add_argument("--specific-dir", type=str, default=None, help="Specific directory to evaluate")
     parser.add_argument("--test_set", type=str, default="distinct", choices=["clean", "distinct", "xl", "qm9", "valid"], help="Test set to evaluate")
