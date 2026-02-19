@@ -80,66 +80,10 @@ def _iter_isomer_units(file_path: Path):
         return
 
 
-def _build_isomer_unit_text(iso_smiles: str, confs: List[str]) -> str:
-    smiles_str = f"[SMILES]{iso_smiles}[/SMILES]"
-    conf_strs = [f"[CONFORMER]{conf}[/CONFORMER]" for conf in confs]
-    return smiles_str + "".join(conf_strs)
-
-
-def _serialize_isomer_unit(iso_smiles: str, confs: List[str], tokenizer, ctx_len: int) -> int:
-    full_str = _build_isomer_unit_text(iso_smiles, confs)
-    token_ids = tokenizer.encode(full_str, add_special_tokens=False)
-    return min(len(token_ids), ctx_len)
-
-
 _SMILES_OPEN = "[SMILES]"
 _SMILES_CLOSE = "[/SMILES]"
 _CONF_OPEN = "[CONFORMER]"
 _CONF_CLOSE = "[/CONFORMER]"
-_TAG_OVERHEAD = len(_SMILES_OPEN) + len(_SMILES_CLOSE) + len(_CONF_OPEN) + len(_CONF_CLOSE)
-
-
-def _unit_char_len(iso_smiles: str, confs: List[str]) -> int:
-    total = len(_SMILES_OPEN) + len(iso_smiles) + len(_SMILES_CLOSE)
-    total += sum(len(_CONF_OPEN) + len(conf) + len(_CONF_CLOSE) for conf in confs)
-    return total
-
-
-def _segment_char_lens(iso_smiles: str, confs: List[str]) -> Tuple[int, List[int]]:
-    smiles_len = len(_SMILES_OPEN) + len(iso_smiles) + len(_SMILES_CLOSE)
-    conf_lens = [
-        len(_CONF_OPEN) + len(conf) + len(_CONF_CLOSE) for conf in confs
-    ]
-    return smiles_len, conf_lens
-
-
-def _pack_isomer_unit_len(
-    used: int, unit_len: int, ctx_len: int
-) -> Tuple[int, int, int]:
-    sequences = 0
-    pad_total = 0
-    if used == 0:
-        used = unit_len
-        if used >= ctx_len:
-            sequences += 1
-            used = 0
-        return used, sequences, pad_total
-
-    needed = 1 + unit_len
-    if used + needed <= ctx_len:
-        used += needed
-        if used >= ctx_len:
-            sequences += 1
-            used = 0
-        return used, sequences, pad_total
-
-    pad_total += ctx_len - used
-    sequences += 1
-    used = unit_len
-    if used >= ctx_len:
-        sequences += 1
-        used = 0
-    return used, sequences, pad_total
 
 
 def _encode_segmented_unit(
@@ -204,48 +148,6 @@ def _chunk_segmented_unit(
         chunks.append(current_len)
     return chunks, confs_emitted, confs_dropped
 
-
-def _chunk_estimated_lengths(
-    smiles_len: int, conf_lens: List[int], ctx_len: int, token_per_char: float
-) -> Tuple[List[int], int, int]:
-    if ctx_len <= 0:
-        return [], 0, len(conf_lens)
-    smiles_tokens = max(1, int(round(smiles_len * token_per_char)))
-    smiles_tokens = min(smiles_tokens, ctx_len)
-    if smiles_tokens >= ctx_len:
-        return [ctx_len], 0, len(conf_lens)
-
-    conf_tokens = [max(1, int(round(c * token_per_char))) for c in conf_lens]
-    chunks: List[int] = []
-    confs_emitted = 0
-    confs_dropped = 0
-    current_len = smiles_tokens
-    available = ctx_len - current_len
-
-    for idx, conf_len in enumerate(conf_tokens):
-        if conf_len > available:
-            if current_len == smiles_tokens:
-                chunks.append(ctx_len)
-                confs_emitted += 1
-                remaining = len(conf_tokens) - (idx + 1)
-                confs_dropped += remaining
-                return chunks, confs_emitted, confs_dropped
-            chunks.append(current_len)
-            current_len = smiles_tokens
-            available = ctx_len - current_len
-            if conf_len > available:
-                chunks.append(ctx_len)
-                confs_emitted += 1
-                remaining = len(conf_tokens) - (idx + 1)
-                confs_dropped += remaining
-                return chunks, confs_emitted, confs_dropped
-        current_len += conf_len
-        available -= conf_len
-        confs_emitted += 1
-
-    if current_len:
-        chunks.append(current_len)
-    return chunks, confs_emitted, confs_dropped
 
 
 def _pack_chunk_len_stream(
@@ -476,46 +378,6 @@ def _exact_isomer_scan(
     }
 
 
-def _iter_isomer_unit_texts(
-    files: Iterable[Path], limit: int
-) -> List[str]:
-    samples: List[str] = []
-    if limit <= 0:
-        return samples
-    for file_path in files:
-        for iso_smiles, confs in _iter_isomer_units(file_path):
-            samples.append(_build_isomer_unit_text(iso_smiles, confs))
-            if len(samples) >= limit:
-                return samples
-    return samples
-
-
-def _estimate_tokens_per_char(
-    sample_texts: List[str], tokenizer, batch_size: int, ctx_len: int
-) -> float:
-    if not sample_texts:
-        return 1.0
-    total_chars = 0
-    total_tokens = 0
-    for start in range(0, len(sample_texts), batch_size):
-        batch = sample_texts[start : start + batch_size]
-        encoded = tokenizer(
-            batch,
-            add_special_tokens=False,
-            truncation=True,
-            max_length=ctx_len,
-        )
-        input_ids = encoded["input_ids"]
-        if hasattr(input_ids, "tolist"):
-            input_ids = input_ids.tolist()
-        for text, ids in zip(batch, input_ids):
-            total_chars += max(len(text), 1)
-            total_tokens += max(len(ids), 1)
-    if total_chars == 0:
-        return 1.0
-    return total_tokens / total_chars
-
-
 def _count_tags_in_text(text: str) -> Tuple[int, int]:
     return text.count(_SMILES_OPEN), text.count(_CONF_OPEN)
 
@@ -697,45 +559,66 @@ def _extract_attention_mask(batch):
 def _count_tagged_spans(
     tokens: List[int], tokenizer
 ) -> Tuple[int, int, int, int]:
-    text = tokenizer.decode(tokens, skip_special_tokens=False)
-    smiles_open = "[SMILES]"
-    smiles_close = "[/SMILES]"
-    conf_open = "[CONFORMER]"
-    conf_close = "[/CONFORMER]"
+    """
+    Count tokens within SMILES and CONFORMER tags by working directly with token IDs.
+    This avoids token boundary loss from decode→re-encode cycles.
+    """
+    # Encode special tags to get their token ID sequences
+    smiles_open_ids = tokenizer.encode(_SMILES_OPEN, add_special_tokens=False)
+    smiles_close_ids = tokenizer.encode(_SMILES_CLOSE, add_special_tokens=False)
+    conf_open_ids = tokenizer.encode(_CONF_OPEN, add_special_tokens=False)
+    conf_close_ids = tokenizer.encode(_CONF_CLOSE, add_special_tokens=False)
 
     smiles_tokens = 0
     conf_tokens = 0
     smiles_tags = 0
     conf_tags = 0
     idx = 0
+    n = len(tokens)
 
-    while idx < len(text):
-        next_smiles = text.find(smiles_open, idx)
-        next_conf = text.find(conf_open, idx)
+    def _matches_at(token_list: List[int], position: int, pattern: List[int]) -> bool:
+        """Check if pattern matches token_list starting at position."""
+        if position + len(pattern) > len(token_list):
+            return False
+        return token_list[position:position + len(pattern)] == pattern
+
+    def _find_next(token_list: List[int], start_idx: int, pattern: List[int]) -> int:
+        """Find next occurrence of pattern in token_list starting from start_idx."""
+        pattern_len = len(pattern)
+        for i in range(start_idx, len(token_list) - pattern_len + 1):
+            if _matches_at(token_list, i, pattern):
+                return i
+        return -1
+
+    while idx < n:
+        # Find next SMILES or CONFORMER opening tag
+        next_smiles = _find_next(tokens, idx, smiles_open_ids)
+        next_conf = _find_next(tokens, idx, conf_open_ids)
+
         if next_smiles == -1 and next_conf == -1:
             break
 
+        # Process whichever tag comes first
         if next_smiles != -1 and (next_conf == -1 or next_smiles < next_conf):
             smiles_tags += 1
-            start = next_smiles + len(smiles_open)
-            end = text.find(smiles_close, start)
+            start = next_smiles + len(smiles_open_ids)
+            end = _find_next(tokens, start, smiles_close_ids)
             if end == -1:
                 idx = start
                 continue
-            segment = text[start:end]
-            smiles_tokens += len(tokenizer.encode(segment, add_special_tokens=False))
-            idx = end + len(smiles_close)
-            continue
-
-        conf_tags += 1
-        start = next_conf + len(conf_open)
-        end = text.find(conf_close, start)
-        if end == -1:
-            idx = start
-            continue
-        segment = text[start:end]
-        conf_tokens += len(tokenizer.encode(segment, add_special_tokens=False))
-        idx = end + len(conf_close)
+            # Count tokens between opening and closing tags (exclusive)
+            smiles_tokens += end - start
+            idx = end + len(smiles_close_ids)
+        else:
+            conf_tags += 1
+            start = next_conf + len(conf_open_ids)
+            end = _find_next(tokens, start, conf_close_ids)
+            if end == -1:
+                idx = start
+                continue
+            # Count tokens between opening and closing tags (exclusive)
+            conf_tokens += end - start
+            idx = end + len(conf_close_ids)
 
     return smiles_tokens, conf_tokens, smiles_tags, conf_tags
 
@@ -861,6 +744,12 @@ def sample_dataloader(
                         pad_count += 1
                     else:
                         break
+                # In pairs mode every unit gets a trailing sep_id appended (SequenceState.append_unit).
+                # Since pad_id == sep_id the trailing scan above also absorbs the last *content*
+                # sep token, overcounting pad by 1 and undercounting items by 1 per sequence.
+                # Subtract 1 to exclude that last content sep from the padding total.
+                if pad_count > 0:
+                    pad_count -= 1
                 sep_total = int((sample == sep_id).sum().item())
                 # Given pad_id == sep_id, trailing pad tokens are also counted as seps; subtract them.
                 sep_count = max(sep_total - pad_count, 0)
@@ -951,6 +840,414 @@ def _tokenizer_signature(path: Path) -> Optional[str]:
     return hasher.hexdigest()
 
 
+def _summarize_pairs_mode(
+    *,
+    files: List[Path],
+    file_stats: List[Dict[str, Any]],
+    tokenizer_path: str,
+    tokenizer,
+    tokenizer_info: Dict[str, object],
+    seq_len: int,
+    sample_lines: int,
+    batch_size: int,
+    shuffle: bool,
+    seed: int,
+    serialization_mode: str,
+    total_lines: int,
+    total_bytes: int,
+) -> Optional[Dict[str, Any]]:
+    sum_samples = 0.0
+    sum_items = 0.0
+    sum_pad = 0.0
+    sum_batches = 0.0
+    sum_tokens_produced = 0.0
+    sum_effective = 0.0
+    sum_target_lines = 0.0
+    sum_sample_bytes = 0.0
+    sum_smiles_tokens = 0.0
+    sum_conformer_tokens = 0.0
+    sum_smiles_tags = 0.0
+    sum_conformer_tags = 0.0
+
+    file_line_map = {f["path"]: f.get("lines", 0) for f in file_stats}
+
+    for file_path in files:
+        file_line_count = file_line_map.get(str(file_path))
+        if file_line_count is None:
+            try:
+                with file_path.open("rb") as fh:
+                    file_line_count = sum(1 for _ in fh)
+            except OSError:
+                continue
+
+        target_lines = min(int(sample_lines), int(file_line_count))
+        stats = sample_dataloader(
+            file_path,
+            tokenizer_path,
+            tokenizer,
+            seq_len,
+            target_lines=target_lines,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            seed=seed,
+            serialization_mode=serialization_mode,
+        )
+        if not stats:
+            continue
+
+        sum_samples += stats["samples"]
+        sum_items += stats["lines_consumed"]
+        sum_pad += stats["avg_pad_per_sample"] * stats["samples"]
+        sum_batches += stats["batches"]
+        sum_tokens_produced += stats["tokens_produced"]
+        sum_effective += stats["effective_tokens"]
+        sum_target_lines += stats["lines_target"]
+        sum_smiles_tokens += stats["avg_smiles_tokens_per_sample"] * stats["samples"]
+        sum_conformer_tokens += stats["avg_conformer_tokens_per_sample"] * stats["samples"]
+        sum_smiles_tags += stats["avg_smiles_tags_per_sample"] * stats["samples"]
+        sum_conformer_tags += stats["avg_conformer_tags_per_sample"] * stats["samples"]
+
+        sample_bytes = bytes_for_lines(file_path, int(target_lines))
+        if sample_bytes:
+            sum_sample_bytes += sample_bytes
+
+    if sum_samples == 0 or sum_target_lines == 0:
+        return None
+
+    avg_items_per_sample = sum_items / sum_samples
+    avg_pad_per_sample = sum_pad / sum_samples
+    avg_smiles_per_sample = sum_smiles_tokens / sum_samples
+    avg_conformer_per_sample = sum_conformer_tokens / sum_samples
+    avg_smiles_tags_per_sample = sum_smiles_tags / sum_samples
+    avg_conformer_tags_per_sample = sum_conformer_tags / sum_samples
+    # Fraction of sampled lines that produced usable items.
+    valid_ratio = sum_items / sum_target_lines
+
+    estimated_valid_lines = total_lines * valid_ratio
+    estimated_samples = (
+        int(estimated_valid_lines / avg_items_per_sample) if avg_items_per_sample else 0
+    )
+    estimated_batches = math.ceil(estimated_samples / batch_size) if batch_size else 0
+    estimated_tokens = estimated_samples * seq_len
+    estimated_pad = int(avg_pad_per_sample * estimated_samples)
+    estimated_effective = estimated_tokens - estimated_pad
+    estimated_smiles_tokens = int(avg_smiles_per_sample * estimated_samples)
+    estimated_conformer_tokens = int(avg_conformer_per_sample * estimated_samples)
+    estimated_smiles_tags = int(avg_smiles_tags_per_sample * estimated_samples)
+    estimated_conformer_tags = int(avg_conformer_tags_per_sample * estimated_samples)
+
+    # Byte-size sanity check: scale sampled bytes to total lines.
+    verification = verify_bytes(
+        sum_sample_bytes if sum_sample_bytes else None,
+        int(sum_target_lines),
+        total_lines,
+        total_bytes,
+    )
+
+    return {
+        "batch_size": batch_size,
+        "seq_len": seq_len,
+        "sampled_files": len(files),
+        "lines_target_total": int(sum_target_lines),
+        "lines_consumed_total": int(sum_items),
+        "sample_bytes_total": int(sum_sample_bytes),
+        "batches_sampled": int(sum_batches),
+        "tokens_produced_sampled": int(sum_tokens_produced),
+        "effective_tokens_sampled": int(sum_effective),
+        "avg_items_per_sample": float(avg_items_per_sample),
+        "avg_pad_per_sample": float(avg_pad_per_sample),
+        "avg_smiles_tokens_per_sample": float(avg_smiles_per_sample),
+        "avg_conformer_tokens_per_sample": float(avg_conformer_per_sample),
+        "avg_smiles_tags_per_sample": float(avg_smiles_tags_per_sample),
+        "avg_conformer_tags_per_sample": float(avg_conformer_tags_per_sample),
+        "valid_ratio": float(valid_ratio),
+        "estimated_valid_lines": int(estimated_valid_lines),
+        "estimated_samples": estimated_samples,
+        "estimated_batches": estimated_batches,
+        "estimated_tokens": estimated_tokens,
+        "estimated_pad": estimated_pad,
+        "estimated_effective": estimated_effective,
+        "estimated_smiles_tokens": estimated_smiles_tokens,
+        "estimated_conformer_tokens": estimated_conformer_tokens,
+        "estimated_smiles_tags": estimated_smiles_tags,
+        "estimated_conformer_tags": estimated_conformer_tags,
+        "unique_smiles_tags": 0,
+        "total_smiles_tags": estimated_smiles_tags,
+        "total_conformer_tags": estimated_conformer_tags,
+        "total_units": estimated_valid_lines,
+        "total_samples": estimated_samples,
+        "total_tokens": estimated_tokens,
+        "verification": verification,
+        "tokenizer_path": tokenizer_path,
+        "tokenizer_info": dict(tokenizer_info),
+    }
+
+
+def _summarize_isomer_units_sample_only(
+    *,
+    files: List[Path],
+    tokenizer_path: str,
+    tokenizer,
+    tokenizer_info: Dict[str, object],
+    seq_len: int,
+    unit_batch_size: int,
+    shuffle: bool,
+    seed: int,
+    sample_samples: int,
+    sample_lines_for_units: int,
+    total_lines: int,
+    total_bytes: int,
+) -> Optional[Dict[str, Any]]:
+    avg_units_per_line = _estimate_units_per_line(
+        files, max_lines=max(1, int(sample_lines_for_units))
+    )
+    sample_stats = _sample_isomer_dataloader(
+        files,
+        tokenizer_path,
+        tokenizer,
+        seq_len,
+        batch_size=max(1, int(unit_batch_size)),
+        shuffle=shuffle,
+        seed=seed,
+        max_samples=max(1, int(sample_samples)),
+    )
+    if not sample_stats or int(sample_stats.get("samples", 0)) <= 0:
+        return None
+
+    avg_units_per_sample = float(sample_stats.get("avg_smiles_tags_per_sample", 0.0))
+    if avg_units_per_sample <= 0:
+        return None
+
+    avg_pad_per_sample = float(sample_stats.get("avg_pad_per_sample", 0.0))
+    avg_effective_tokens = float(sample_stats.get("avg_effective_tokens_per_sample", 0.0))
+
+    total_units = total_lines * float(avg_units_per_line)
+    estimated_samples = int(total_units / avg_units_per_sample) if avg_units_per_sample else 0
+    estimated_tokens = estimated_samples * seq_len
+    estimated_pad = int(avg_pad_per_sample * estimated_samples)
+    estimated_effective = estimated_tokens - estimated_pad
+
+    total_smiles_tags = float(sample_stats.get("total_smiles_tags", 0.0))
+    unique_smiles = float(sample_stats.get("unique_smiles", 0.0))
+    unique_ratio = unique_smiles / total_smiles_tags if total_smiles_tags else 0.0
+
+    avg_conformer_tags_per_sample = float(sample_stats.get("avg_conformer_tags_per_sample", 0.0))
+    est_conformer_tags = (
+        int(total_units * avg_conformer_tags_per_sample / avg_units_per_sample)
+        if avg_units_per_sample
+        else 0
+    )
+
+    return {
+        "batch_size": unit_batch_size,
+        "seq_len": seq_len,
+        "sampled_files": len(files),
+        "lines_target_total": total_lines,
+        "lines_consumed_total": total_units,
+        "sample_bytes_total": total_bytes,
+        "batches_sampled": estimated_samples,
+        "tokens_produced_sampled": estimated_tokens,
+        "effective_tokens_sampled": estimated_effective,
+        "avg_items_per_sample": float(avg_units_per_sample),
+        "avg_pad_per_sample": float(avg_pad_per_sample),
+        "avg_smiles_tokens_per_sample": 0.0,
+        "avg_conformer_tokens_per_sample": 0.0,
+        "avg_smiles_tags_per_sample": float(avg_units_per_sample),
+        "avg_conformer_tags_per_sample": float(avg_conformer_tags_per_sample),
+        "valid_ratio": 1.0,
+        "estimated_valid_lines": int(total_units),
+        "estimated_samples": estimated_samples,
+        "estimated_batches": estimated_samples,
+        "estimated_tokens": estimated_tokens,
+        "estimated_pad": estimated_pad,
+        "estimated_effective": estimated_effective,
+        "estimated_smiles_tokens": 0,
+        "estimated_conformer_tokens": 0,
+        "estimated_smiles_tags": int(total_units),
+        "estimated_conformer_tags": est_conformer_tags,
+        "unique_smiles_tags": int(unique_ratio * total_units),
+        "total_smiles_tags": int(total_units),
+        "total_conformer_tags": est_conformer_tags,
+        "total_units": int(total_units),
+        "total_samples": int(estimated_samples),
+        "total_tokens": int(estimated_tokens),
+        "verification": None,
+        "tokenizer_path": tokenizer_path,
+        "tokenizer_info": {
+            **dict(tokenizer_info),
+            "sample_only": True,
+            "avg_units_per_line": avg_units_per_line,
+            "sampled_sequences": int(sample_stats.get("samples", 0)),
+            "sampled_lines_for_units": int(sample_lines_for_units),
+            "avg_effective_tokens_per_sample": avg_effective_tokens,
+        },
+    }
+
+
+def _summarize_isomer_units_fast_estimate(
+    *,
+    files: List[Path],
+    tokenizer_path: str,
+    tokenizer,
+    tokenizer_info: Dict[str, object],
+    seq_len: int,
+    batch_size: int,
+    seed: int,
+    sample_units: int,
+    total_lines: int,
+    total_bytes: int,
+) -> Dict[str, Any]:
+    raw_units, raw_confs, unique_smiles, sampled_units = _scan_isomer_stats(
+        files, sample_units, seed
+    )
+    chunk_lengths, avg_confs_emitted, avg_confs_dropped = _sample_chunk_stats(
+        sampled_units, tokenizer, seq_len
+    )
+    if not chunk_lengths:
+        raise RuntimeError("No sample chunks generated; increase --sample-units.")
+
+    avg_chunks_per_unit = len(chunk_lengths) / max(len(sampled_units), 1)
+    est_chunks_total = int(round(raw_units * avg_chunks_per_unit))
+    target_chunks = max(est_chunks_total, len(chunk_lengths) * 20)
+    (
+        sim_sequences,
+        sim_pad_end,
+        sim_pad_delim,
+        sim_loss_tokens,
+        sim_chunks,
+    ) = _simulate_packing_from_chunks(chunk_lengths, seq_len, target_chunks)
+
+    sequences_per_chunk = sim_sequences / max(sim_chunks, 1)
+    pad_end_per_chunk = sim_pad_end / max(sim_chunks, 1)
+    pad_delim_per_chunk = sim_pad_delim / max(sim_chunks, 1)
+    loss_per_chunk = sim_loss_tokens / max(sim_chunks, 1)
+
+    sequences = int(round(est_chunks_total * sequences_per_chunk))
+    pad_total = int(round(est_chunks_total * pad_end_per_chunk))
+    pad_delim_total = int(round(est_chunks_total * pad_delim_per_chunk))
+    loss_tokens_total = int(round(est_chunks_total * loss_per_chunk))
+    tokens_produced = sequences * seq_len
+    effective_tokens = tokens_produced - pad_total
+
+    confs_emitted = int(round(raw_units * avg_confs_emitted))
+    confs_dropped = int(round(raw_units * avg_confs_dropped))
+    confs_emitted = max(min(confs_emitted, raw_confs), 0)
+    confs_dropped = max(raw_confs - confs_emitted, 0)
+
+    return {
+        "batch_size": batch_size,
+        "seq_len": seq_len,
+        "sampled_files": len(files),
+        "lines_target_total": total_lines,
+        "lines_consumed_total": raw_units,
+        "sample_bytes_total": total_bytes,
+        "batches_sampled": sequences,
+        "tokens_produced_sampled": tokens_produced,
+        "effective_tokens_sampled": effective_tokens,
+        "avg_items_per_sample": float(raw_units / sequences) if sequences else 0.0,
+        "avg_pad_per_sample": float(pad_total / sequences) if sequences else 0.0,
+        "avg_smiles_tokens_per_sample": 0.0,
+        "avg_conformer_tokens_per_sample": 0.0,
+        "avg_smiles_tags_per_sample": float(raw_units / sequences) if sequences else 0.0,
+        "avg_conformer_tags_per_sample": float(confs_emitted / sequences)
+        if sequences
+        else 0.0,
+        "valid_ratio": 1.0,
+        "estimated_valid_lines": raw_units,
+        "estimated_samples": sequences,
+        "estimated_batches": sequences,
+        "estimated_tokens": tokens_produced,
+        "estimated_pad": pad_total,
+        "estimated_effective": effective_tokens,
+        "estimated_smiles_tokens": 0,
+        "estimated_conformer_tokens": 0,
+        "estimated_smiles_tags": raw_units,
+        "estimated_conformer_tags": confs_emitted,
+        "unique_smiles_tags": len(unique_smiles),
+        "total_smiles_tags": raw_units,
+        "total_conformer_tags": raw_confs,
+        "total_units": raw_units,
+        "total_samples": sequences,
+        "total_tokens": tokens_produced,
+        "chunks_total": est_chunks_total,
+        "confs_emitted": confs_emitted,
+        "confs_dropped_oversize": confs_dropped,
+        "pad_end_total": pad_total,
+        "pad_delim_total": pad_delim_total,
+        "loss_tokens_total": loss_tokens_total,
+        "verification": None,
+        "tokenizer_path": tokenizer_path,
+        "tokenizer_info": {
+            **dict(tokenizer_info),
+            "fast_estimate": True,
+            "sample_units": len(sampled_units),
+            "avg_chunks_per_unit": avg_chunks_per_unit,
+        },
+    }
+
+
+def _summarize_isomer_units_exact(
+    *,
+    files: List[Path],
+    tokenizer_path: str,
+    tokenizer,
+    tokenizer_info: Dict[str, object],
+    seq_len: int,
+    batch_size: int,
+    total_lines: int,
+    total_bytes: int,
+) -> Dict[str, Any]:
+    exact = _exact_isomer_scan(files, tokenizer, seq_len)
+    sequences = int(exact["sequences_total"])
+    raw_units = int(exact["raw_units"])
+    return {
+        "batch_size": batch_size,
+        "seq_len": seq_len,
+        "sampled_files": len(files),
+        "lines_target_total": total_lines,
+        "lines_consumed_total": raw_units,
+        "sample_bytes_total": total_bytes,
+        "batches_sampled": sequences,
+        "tokens_produced_sampled": int(exact["tokens_total"]),
+        "effective_tokens_sampled": int(exact["attended_tokens_total"]),
+        "avg_items_per_sample": float(raw_units / sequences) if sequences else 0.0,
+        "avg_pad_per_sample": float(exact["pad_end_total"] / sequences) if sequences else 0.0,
+        "avg_smiles_tokens_per_sample": 0.0,
+        "avg_conformer_tokens_per_sample": 0.0,
+        "avg_smiles_tags_per_sample": float(raw_units / sequences) if sequences else 0.0,
+        "avg_conformer_tags_per_sample": float(exact["confs_emitted"] / sequences)
+        if sequences
+        else 0.0,
+        "valid_ratio": 1.0,
+        "estimated_valid_lines": raw_units,
+        "estimated_samples": sequences,
+        "estimated_batches": sequences,
+        "estimated_tokens": int(exact["tokens_total"]),
+        "estimated_pad": int(exact["pad_end_total"]),
+        "estimated_effective": int(exact["attended_tokens_total"]),
+        "estimated_smiles_tokens": 0,
+        "estimated_conformer_tokens": 0,
+        "estimated_smiles_tags": raw_units,
+        "estimated_conformer_tags": int(exact["confs_emitted"]),
+        "unique_smiles_tags": int(exact["unique_smiles_tags"]),
+        "total_smiles_tags": raw_units,
+        "total_conformer_tags": int(exact["raw_confs"]),
+        "total_units": raw_units,
+        "total_samples": sequences,
+        "total_tokens": int(exact["tokens_total"]),
+        "chunks_total": int(exact["chunks_total"]),
+        "confs_emitted": int(exact["confs_emitted"]),
+        "confs_dropped_oversize": int(exact["confs_dropped_oversize"]),
+        "pad_end_total": int(exact["pad_end_total"]),
+        "pad_delim_total": int(exact["pad_delim_total"]),
+        "loss_tokens_total": int(exact["loss_tokens_total"]),
+        "verification": None,
+        "tokenizer_path": tokenizer_path,
+        "tokenizer_info": {**dict(tokenizer_info), "fast_estimate": False},
+        "exact_mode": True,
+    }
+
+
 def summarize_dataset(
     name: str,
     directory: str,
@@ -986,370 +1283,69 @@ def summarize_dataset(
 
     for alias in tokenizer_aliases:
         tokenizer_path, tokenizer = tokenizer_map[alias]
+        tokenizer_info = tokenizer_info_map.get(alias, {})
+
         if serialization_mode == "isomer_units":
             if sample_only:
-                avg_units_per_line = _estimate_units_per_line(
-                    files, max_lines=max(1, int(sample_lines_for_units))
-                )
-                sample_stats = _sample_isomer_dataloader(
-                    files,
-                    tokenizer_path,
-                    tokenizer,
-                    seq_len,
-                    batch_size=max(1, int(batch_size)),
+                stats = _summarize_isomer_units_sample_only(
+                    files=files,
+                    tokenizer_path=tokenizer_path,
+                    tokenizer=tokenizer,
+                    tokenizer_info=tokenizer_info,
+                    seq_len=seq_len,
+                    unit_batch_size=unit_batch_size,
                     shuffle=shuffle,
                     seed=seed,
-                    max_samples=max(1, int(sample_samples)),
+                    sample_samples=sample_samples,
+                    sample_lines_for_units=sample_lines_for_units,
+                    total_lines=total_lines,
+                    total_bytes=total_bytes,
                 )
-                avg_units_per_sample = sample_stats.get(
-                    "avg_smiles_tags_per_sample", 0.0
-                )
-                avg_pad_per_sample = sample_stats.get("avg_pad_per_sample", 0.0)
-                avg_effective_tokens = sample_stats.get(
-                    "avg_effective_tokens_per_sample", 0.0
-                )
-                total_units = total_lines * float(avg_units_per_line)
-                estimated_samples = (
-                    int(total_units / avg_units_per_sample)
-                    if avg_units_per_sample
-                    else 0
-                )
-                estimated_tokens = estimated_samples * seq_len
-                estimated_pad = int(avg_pad_per_sample * estimated_samples)
-                estimated_effective = estimated_tokens - estimated_pad
-                total_smiles_tags = sample_stats.get("total_smiles_tags", 0.0)
-                unique_smiles = sample_stats.get("unique_smiles", 0.0)
-                unique_ratio = (
-                    unique_smiles / total_smiles_tags if total_smiles_tags else 0.0
-                )
-                dataset_summary["tokenizers"][alias] = {
-                    "batch_size": batch_size,
-                    "seq_len": seq_len,
-                    "sampled_files": len(files),
-                    "lines_target_total": total_lines,
-                    "lines_consumed_total": total_units,
-                    "sample_bytes_total": total_bytes,
-                    "batches_sampled": estimated_samples,
-                    "tokens_produced_sampled": estimated_tokens,
-                    "effective_tokens_sampled": estimated_effective,
-                    "avg_items_per_sample": float(avg_units_per_sample),
-                    "avg_pad_per_sample": float(avg_pad_per_sample),
-                    "avg_smiles_tokens_per_sample": 0.0,
-                    "avg_conformer_tokens_per_sample": 0.0,
-                    "avg_smiles_tags_per_sample": float(avg_units_per_sample),
-                    "avg_conformer_tags_per_sample": float(
-                        sample_stats.get("avg_conformer_tags_per_sample", 0.0)
-                    ),
-                    "valid_ratio": 1.0,
-                    "estimated_valid_lines": int(total_units),
-                    "estimated_samples": estimated_samples,
-                    "estimated_batches": estimated_samples,
-                    "estimated_tokens": estimated_tokens,
-                    "estimated_pad": estimated_pad,
-                    "estimated_effective": estimated_effective,
-                    "estimated_smiles_tokens": 0,
-                    "estimated_conformer_tokens": 0,
-                    "estimated_smiles_tags": int(total_units),
-                    "estimated_conformer_tags": int(
-                        total_units
-                        * sample_stats.get("avg_conformer_tags_per_sample", 0.0)
-                        / avg_units_per_sample
-                    )
-                    if avg_units_per_sample
-                    else 0,
-                    "unique_smiles_tags": int(unique_ratio * total_units),
-                    "total_smiles_tags": int(total_units),
-                    "total_conformer_tags": int(
-                        total_units
-                        * sample_stats.get("avg_conformer_tags_per_sample", 0.0)
-                        / avg_units_per_sample
-                    )
-                    if avg_units_per_sample
-                    else 0,
-                    "total_units": int(total_units),
-                    "total_samples": int(estimated_samples),
-                    "total_tokens": int(estimated_tokens),
-                    "verification": None,
-                    "tokenizer_path": tokenizer_path,
-                    "tokenizer_info": {
-                        **tokenizer_info_map.get(alias, {}),
-                        "sample_only": True,
-                        "avg_units_per_line": avg_units_per_line,
-                        "sampled_sequences": int(sample_stats.get("samples", 0)),
-                        "sampled_lines_for_units": int(sample_lines_for_units),
-                    },
-                }
+                dataset_summary["tokenizers"][alias] = stats
                 continue
-            token_per_char = None
+
             if fast_estimate:
-                raw_units, raw_confs, unique_smiles, sampled_units = _scan_isomer_stats(
-                    files, sample_units, seed
+                dataset_summary["tokenizers"][alias] = _summarize_isomer_units_fast_estimate(
+                    files=files,
+                    tokenizer_path=tokenizer_path,
+                    tokenizer=tokenizer,
+                    tokenizer_info=tokenizer_info,
+                    seq_len=seq_len,
+                    batch_size=batch_size,
+                    seed=seed,
+                    sample_units=sample_units,
+                    total_lines=total_lines,
+                    total_bytes=total_bytes,
                 )
-                chunk_lengths, avg_confs_emitted, avg_confs_dropped = _sample_chunk_stats(
-                    sampled_units, tokenizer, seq_len
-                )
-                if not chunk_lengths:
-                    raise RuntimeError(
-                        "No sample chunks generated; increase --sample-units."
-                    )
-                avg_chunks_per_unit = len(chunk_lengths) / max(len(sampled_units), 1)
-                est_chunks_total = int(round(raw_units * avg_chunks_per_unit))
-                target_chunks = max(est_chunks_total, len(chunk_lengths) * 20)
-                (
-                    sim_sequences,
-                    sim_pad_end,
-                    sim_pad_delim,
-                    sim_loss_tokens,
-                    sim_chunks,
-                ) = _simulate_packing_from_chunks(
-                    chunk_lengths, seq_len, target_chunks
-                )
-                sequences_per_chunk = sim_sequences / max(sim_chunks, 1)
-                pad_end_per_chunk = sim_pad_end / max(sim_chunks, 1)
-                pad_delim_per_chunk = sim_pad_delim / max(sim_chunks, 1)
-                loss_per_chunk = sim_loss_tokens / max(sim_chunks, 1)
-
-                sequences = int(round(est_chunks_total * sequences_per_chunk))
-                pad_total = int(round(est_chunks_total * pad_end_per_chunk))
-                pad_delim_total = int(round(est_chunks_total * pad_delim_per_chunk))
-                loss_tokens_total = int(round(est_chunks_total * loss_per_chunk))
-                tokens_produced = sequences * seq_len
-                effective_tokens = tokens_produced - pad_total
-
-                confs_emitted = int(round(raw_units * avg_confs_emitted))
-                confs_dropped = int(round(raw_units * avg_confs_dropped))
-                confs_emitted = max(min(confs_emitted, raw_confs), 0)
-                confs_dropped = max(raw_confs - confs_emitted, 0)
-
-                dataset_summary["tokenizers"][alias] = {
-                    "batch_size": batch_size,
-                    "seq_len": seq_len,
-                    "sampled_files": len(files),
-                    "lines_target_total": total_lines,
-                    "lines_consumed_total": raw_units,
-                    "sample_bytes_total": total_bytes,
-                    "batches_sampled": sequences,
-                    "tokens_produced_sampled": tokens_produced,
-                    "effective_tokens_sampled": effective_tokens,
-                    "avg_items_per_sample": float(raw_units / sequences) if sequences else 0.0,
-                    "avg_pad_per_sample": float(pad_total / sequences) if sequences else 0.0,
-                    "avg_smiles_tokens_per_sample": 0.0,
-                    "avg_conformer_tokens_per_sample": 0.0,
-                    "avg_smiles_tags_per_sample": float(raw_units / sequences) if sequences else 0.0,
-                    "avg_conformer_tags_per_sample": float(confs_emitted / sequences)
-                    if sequences
-                    else 0.0,
-                    "valid_ratio": 1.0,
-                    "estimated_valid_lines": raw_units,
-                    "estimated_samples": sequences,
-                    "estimated_batches": sequences,
-                    "estimated_tokens": tokens_produced,
-                    "estimated_pad": pad_total,
-                    "estimated_effective": effective_tokens,
-                    "estimated_smiles_tokens": 0,
-                    "estimated_conformer_tokens": 0,
-                    "estimated_smiles_tags": raw_units,
-                    "estimated_conformer_tags": confs_emitted,
-                    "unique_smiles_tags": len(unique_smiles),
-                    "total_smiles_tags": raw_units,
-                    "total_conformer_tags": raw_confs,
-                    "total_units": raw_units,
-                    "total_samples": sequences,
-                    "total_tokens": tokens_produced,
-                    "chunks_total": est_chunks_total,
-                    "confs_emitted": confs_emitted,
-                    "confs_dropped_oversize": confs_dropped,
-                    "pad_end_total": pad_total,
-                    "pad_delim_total": pad_delim_total,
-                    "loss_tokens_total": loss_tokens_total,
-                    "verification": None,
-                    "tokenizer_path": tokenizer_path,
-                    "tokenizer_info": {
-                        **tokenizer_info_map.get(alias, {}),
-                        "fast_estimate": True,
-                        "sample_units": len(sampled_units),
-                        "avg_chunks_per_unit": avg_chunks_per_unit,
-                    },
-                }
                 continue
-            if not fast_estimate:
-                exact = _exact_isomer_scan(files, tokenizer, seq_len)
-                dataset_summary["tokenizers"][alias] = {
-                    "batch_size": batch_size,
-                    "seq_len": seq_len,
-                    "sampled_files": len(files),
-                    "lines_target_total": total_lines,
-                    "lines_consumed_total": exact["raw_units"],
-                    "sample_bytes_total": total_bytes,
-                    "batches_sampled": exact["sequences_total"],
-                    "tokens_produced_sampled": exact["tokens_total"],
-                    "effective_tokens_sampled": exact["attended_tokens_total"],
-                    "avg_items_per_sample": float(exact["raw_units"] / exact["sequences_total"])
-                    if exact["sequences_total"]
-                    else 0.0,
-                    "avg_pad_per_sample": float(exact["pad_end_total"] / exact["sequences_total"])
-                    if exact["sequences_total"]
-                    else 0.0,
-                    "avg_smiles_tokens_per_sample": 0.0,
-                    "avg_conformer_tokens_per_sample": 0.0,
-                    "avg_smiles_tags_per_sample": float(exact["raw_units"] / exact["sequences_total"])
-                    if exact["sequences_total"]
-                    else 0.0,
-                    "avg_conformer_tags_per_sample": float(exact["confs_emitted"] / exact["sequences_total"])
-                    if exact["sequences_total"]
-                    else 0.0,
-                    "valid_ratio": 1.0,
-                    "estimated_valid_lines": exact["raw_units"],
-                    "estimated_samples": exact["sequences_total"],
-                    "estimated_batches": exact["sequences_total"],
-                    "estimated_tokens": exact["tokens_total"],
-                    "estimated_pad": exact["pad_end_total"],
-                    "estimated_effective": exact["attended_tokens_total"],
-                    "estimated_smiles_tokens": 0,
-                    "estimated_conformer_tokens": 0,
-                    "estimated_smiles_tags": exact["raw_units"],
-                    "estimated_conformer_tags": exact["confs_emitted"],
-                    "unique_smiles_tags": exact["unique_smiles_tags"],
-                    "total_smiles_tags": exact["raw_units"],
-                    "total_conformer_tags": exact["raw_confs"],
-                    "total_units": exact["raw_units"],
-                    "total_samples": exact["sequences_total"],
-                    "total_tokens": exact["tokens_total"],
-                    "chunks_total": exact["chunks_total"],
-                    "confs_emitted": exact["confs_emitted"],
-                    "confs_dropped_oversize": exact["confs_dropped_oversize"],
-                    "pad_end_total": exact["pad_end_total"],
-                    "pad_delim_total": exact["pad_delim_total"],
-                    "loss_tokens_total": exact["loss_tokens_total"],
-                    "verification": None,
-                    "tokenizer_path": tokenizer_path,
-                    "tokenizer_info": {
-                        **tokenizer_info_map.get(alias, {}),
-                        "fast_estimate": False,
-                    },
-                }
-                continue
-        sum_samples = 0.0
-        sum_items = 0.0
-        sum_pad = 0.0
-        sum_batches = 0.0
-        sum_tokens_produced = 0.0
-        sum_effective = 0.0
-        sum_target_lines = 0.0
-        sum_sample_bytes = 0.0
-        sum_smiles_tokens = 0.0
-        sum_conformer_tokens = 0.0
-        sum_smiles_tags = 0.0
-        sum_conformer_tags = 0.0
 
-        for file_path in files:
-            file_line_count = next((f["lines"] for f in file_stats if f["path"] == str(file_path)), None)
-            if file_line_count is None:
-                try:
-                    with file_path.open("rb") as fh:
-                        file_line_count = sum(1 for _ in fh)
-                except OSError:
-                    continue
-            target_lines = min(sample_lines, file_line_count)
-
-            stats = sample_dataloader(
-                file_path,
-                tokenizer_path,
-                tokenizer,
-                seq_len,
-                target_lines=target_lines,
+            dataset_summary["tokenizers"][alias] = _summarize_isomer_units_exact(
+                files=files,
+                tokenizer_path=tokenizer_path,
+                tokenizer=tokenizer,
+                tokenizer_info=tokenizer_info,
+                seq_len=seq_len,
                 batch_size=batch_size,
-                shuffle=shuffle,
-                seed=seed,
-                serialization_mode=serialization_mode,
+                total_lines=total_lines,
+                total_bytes=total_bytes,
             )
-            if not stats:
-                continue
-
-            sum_samples += stats["samples"]
-            sum_items += stats["lines_consumed"]
-            sum_pad += stats["avg_pad_per_sample"] * stats["samples"]
-            sum_batches += stats["batches"]
-            sum_tokens_produced += stats["tokens_produced"]
-            sum_effective += stats["effective_tokens"]
-            sum_target_lines += stats["lines_target"]
-            sum_smiles_tokens += stats["avg_smiles_tokens_per_sample"] * stats["samples"]
-            sum_conformer_tokens += stats["avg_conformer_tokens_per_sample"] * stats["samples"]
-            sum_smiles_tags += stats["avg_smiles_tags_per_sample"] * stats["samples"]
-            sum_conformer_tags += stats["avg_conformer_tags_per_sample"] * stats["samples"]
-
-            sample_bytes = bytes_for_lines(file_path, int(target_lines))
-            if sample_bytes:
-                sum_sample_bytes += sample_bytes
-
-        if sum_samples == 0 or sum_target_lines == 0:
-            dataset_summary["tokenizers"][alias] = None
             continue
 
-        avg_items_per_sample = sum_items / sum_samples
-        avg_pad_per_sample = sum_pad / sum_samples
-        avg_smiles_per_sample = sum_smiles_tokens / sum_samples
-        avg_conformer_per_sample = sum_conformer_tokens / sum_samples
-        avg_smiles_tags_per_sample = sum_smiles_tags / sum_samples
-        avg_conformer_tags_per_sample = sum_conformer_tags / sum_samples
-        valid_ratio = sum_items / sum_target_lines  # fraction of sampled lines that produced usable items
-
-        estimated_valid_lines = total_lines * valid_ratio
-        estimated_samples = int(estimated_valid_lines / avg_items_per_sample) if avg_items_per_sample else 0
-        estimated_batches = math.ceil(estimated_samples / batch_size) if batch_size else 0
-        estimated_tokens = estimated_samples * seq_len
-        estimated_pad = int(avg_pad_per_sample * estimated_samples)
-        estimated_effective = estimated_tokens - estimated_pad
-        estimated_smiles_tokens = int(avg_smiles_per_sample * estimated_samples)
-        estimated_conformer_tokens = int(avg_conformer_per_sample * estimated_samples)
-        estimated_smiles_tags = int(avg_smiles_tags_per_sample * estimated_samples)
-        estimated_conformer_tags = int(avg_conformer_tags_per_sample * estimated_samples)
-
-        # Byte-size sanity check: scale sampled bytes to total lines.
-        verification = verify_bytes(
-            sum_sample_bytes if sum_sample_bytes else None,
-            int(sum_target_lines),
-            total_lines,
-            total_bytes,
+        dataset_summary["tokenizers"][alias] = _summarize_pairs_mode(
+            files=files,
+            file_stats=file_stats,
+            tokenizer_path=tokenizer_path,
+            tokenizer=tokenizer,
+            tokenizer_info=tokenizer_info,
+            seq_len=seq_len,
+            sample_lines=sample_lines,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            seed=seed,
+            serialization_mode=serialization_mode,
+            total_lines=total_lines,
+            total_bytes=total_bytes,
         )
-
-        dataset_summary["tokenizers"][alias] = {
-            "batch_size": batch_size,
-            "seq_len": seq_len,
-            "sampled_files": len(files),
-            "lines_target_total": int(sum_target_lines),
-            "lines_consumed_total": int(sum_items),
-            "sample_bytes_total": int(sum_sample_bytes),
-            "batches_sampled": int(sum_batches),
-            "tokens_produced_sampled": int(sum_tokens_produced),
-            "effective_tokens_sampled": int(sum_effective),
-            "avg_items_per_sample": float(avg_items_per_sample),
-            "avg_pad_per_sample": float(avg_pad_per_sample),
-            "avg_smiles_tokens_per_sample": float(avg_smiles_per_sample),
-            "avg_conformer_tokens_per_sample": float(avg_conformer_per_sample),
-            "avg_smiles_tags_per_sample": float(avg_smiles_tags_per_sample),
-            "avg_conformer_tags_per_sample": float(avg_conformer_tags_per_sample),
-            "valid_ratio": float(valid_ratio),
-            "estimated_valid_lines": int(estimated_valid_lines),
-            "estimated_samples": estimated_samples,
-            "estimated_batches": estimated_batches,
-            "estimated_tokens": estimated_tokens,
-            "estimated_pad": estimated_pad,
-            "estimated_effective": estimated_effective,
-            "estimated_smiles_tokens": estimated_smiles_tokens,
-            "estimated_conformer_tokens": estimated_conformer_tokens,
-            "estimated_smiles_tags": estimated_smiles_tags,
-            "estimated_conformer_tags": estimated_conformer_tags,
-            "unique_smiles_tags": 0,
-            "total_smiles_tags": estimated_smiles_tags,
-            "total_conformer_tags": estimated_conformer_tags,
-            "total_units": estimated_valid_lines,
-            "total_samples": estimated_samples,
-            "total_tokens": estimated_tokens,
-            "verification": verification,
-        "tokenizer_path": tokenizer_path,
-            "tokenizer_info": tokenizer_info_map.get(alias, {}),
-        }
 
     return dataset_summary
 
@@ -1359,10 +1355,7 @@ def _debug_print_samples(
 ) -> None:
     if num_samples <= 0:
         return
-
-    print(f"\nDEBUG: _debug_print_samples called with {len(files)} files")
     if not files:
-        print("DEBUG: No files found to print samples from.")
         return
 
     print(f"\nPRINTING {num_samples} DECODED SAMPLES ({serialization_mode} mode):")
@@ -1390,19 +1383,19 @@ def _debug_print_samples(
     for batch in loader:
         input_ids = _extract_inputs(batch)
         attention_mask = _extract_attention_mask(batch)
-        
+
         for i in range(input_ids.size(0)):
             ids = input_ids[i]
             if attention_mask is not None:
                 mask = attention_mask[i]
                 ids = ids[mask == 1]
-            
+
             text = tokenizer.decode(ids, skip_special_tokens=False)
             print(f"\nSAMPLE {count + 1}:")
             print("-" * 40)
             print(text)
             print("-" * 40)
-            
+
             count += 1
             if count >= num_samples:
                 return
@@ -1432,7 +1425,6 @@ def print_train_report(summary: Optional[Dict[str, Any]]) -> None:
             added = tok_info.get("added_tokens")
             signature = tok_info.get("signature")
             fast_est = tok_info.get("fast_estimate")
-            tpc = tok_info.get("token_per_char")
             if vocab is not None:
                 print(f"    vocab_size: {vocab}")
             if added is not None:
@@ -1441,8 +1433,6 @@ def print_train_report(summary: Optional[Dict[str, Any]]) -> None:
                 print(f"    signature: {signature}")
             if fast_est is not None:
                 print(f"    fast_estimate: {fast_est}")
-            if tpc:
-                print(f"    token_per_char: {tpc:.4f}")
         print(
             "    estimates: units≈{estimated_valid_lines:,}, "
             "samples≈{estimated_samples:,}, tokens≈{estimated_tokens:,}, "
@@ -1912,7 +1902,7 @@ def main() -> None:
         unit_batch_size=max(1, int(args.unit_batch_size)),
         fast_estimate=bool(args.fast_estimate)
         if args.fast_estimate is not None
-        else (args.serialization_mode == "isomer_units"),
+        else (serialization_mode == "isomer_units"),
         sample_units=max(0, int(args.sample_units)),
         sample_only=bool(args.sample_only),
         sample_samples=max(1, int(args.sample_samples)),
@@ -1928,7 +1918,7 @@ def main() -> None:
             seq_len=args.seq_len,
             batch_size=args.validation_batch_size,
             num_workers=args.validation_num_workers,
-        serialization_mode=serialization_mode,
+            serialization_mode=serialization_mode,
         )
 
     print_train_report(train_summary)
