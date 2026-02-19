@@ -3,7 +3,7 @@
 #SBATCH --partition=a100
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=154
+#SBATCH --cpus-per-task=96
 #SBATCH --mem=256G
 #SBATCH --time=24:00:00
 #SBATCH --output=/auto/home/vover/3DMolGen/logs/preprocess_%j.out
@@ -14,7 +14,7 @@ cd /auto/home/vover/3DMolGen
 
 export OMP_NUM_THREADS=1   # avoid extra threading per worker
 
-python src/molgen3D/data_processing/preprocess_geom_grouped.py \
+python src/molgen3D/data_processing/data_preprocessing.py \
     --embedding_type cartesian_binned_v2 \
-    --num_workers 154 \
-    --run_name binned_grouped_stripped_v3
+    --num_workers 96 \
+    --run_name binned_paired_stripped

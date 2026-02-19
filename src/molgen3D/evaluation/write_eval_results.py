@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
+import warnings
 from typing import Dict, List, Optional
 from molgen3D.evaluation.utils import format_float
 from pathlib import Path
@@ -248,7 +249,9 @@ def save_evaluation_results(cov_df: pd.DataFrame, matching: Dict[str, float], ag
         avg_rmsd = float(np.mean(valid_rmsd_values)) if len(valid_rmsd_values) > 0 else None
         
         # Get minimum RMSD for each true conformer (row-wise min)
-        min_rmsd_per_true = np.nanmin(rmsd_matrix, axis=1)
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', message='All-NaN slice encountered', category=RuntimeWarning)
+            min_rmsd_per_true = np.nanmin(rmsd_matrix, axis=1)
         # Calculate per-molecule coverage and matching metrics
         cov_r, mat_r, cov_p, mat_p = covmat_metrics(rmsd_matrix, DEFAULT_THRESHOLDS)
         
