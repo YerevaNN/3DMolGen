@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import os
-import warnings
 from typing import Dict, List, Optional
 from molgen3D.evaluation.utils import format_float
 from pathlib import Path
@@ -92,42 +91,7 @@ def write_generation_info(f, gen_stats: Dict[str, int]) -> None:
         f.write("GENERATION RESULTS INFO\n")
         f.write("-" * 40 + "\n")
         f.write(gen_txt_content)
-        f.write("\n")
-
-        # Parse and display generation attempt breakdown if available
-        import ast
-        try:
-            # Extract stats Counter from the text
-            if "stats=Counter(" in gen_txt_content:
-                stats_start = gen_txt_content.find("stats=Counter(")
-                stats_end = gen_txt_content.find(")", stats_start)
-                if stats_end > stats_start:
-                    stats_str = gen_txt_content[stats_start+6:stats_end+1]
-                    stats_dict = ast.literal_eval(stats_str)
-
-                    # Check if we have the new detailed stats
-                    if 'conformers_requested' in stats_dict:
-                        f.write("\nGENERATION ATTEMPT BREAKDOWN\n")
-                        f.write("-" * 40 + "\n")
-                        req = stats_dict.get('conformers_requested', 0)
-                        ext = stats_dict.get('conformers_extracted', 0)
-                        never_gen = stats_dict.get('conformers_never_generated', 0)
-                        success = gen_stats['total_conformers_num']
-                        smiles_mm = stats_dict.get('smiles_mismatch', 0)
-                        parse_fail = stats_dict.get('mol_parse_fail', 0)
-
-                        f.write(f"Conformers requested:        {req:>10,}\n")
-                        f.write(f"Conformers extracted:        {ext:>10,} ({100*ext/max(1,req):.1f}%)\n")
-                        f.write(f"Conformers never generated:  {never_gen:>10,} ({100*never_gen/max(1,req):.1f}%)\n")
-                        f.write("-" * 40 + "\n")
-                        f.write(f"Successfully parsed:         {success:>10,} ({100*success/max(1,ext):.1f}% of extracted)\n")
-                        f.write(f"SMILES mismatch:             {smiles_mm:>10,} ({100*smiles_mm/max(1,ext):.1f}% of extracted)\n")
-                        f.write(f"Mol parse fail:              {parse_fail:>10,} ({100*parse_fail/max(1,ext):.1f}% of extracted)\n")
-                        f.write(f"No EOS tag:                  {stats_dict.get('no_eos', 0):>10,}\n")
-        except Exception:
-            pass  # If parsing fails, just skip the breakdown
-
-        f.write("\n")
+        f.write("\n\n")
 
 def write_posebusters_section(
     f,
@@ -226,16 +190,10 @@ def save_evaluation_results(cov_df: pd.DataFrame, matching: Dict[str, float], ag
         pickle.dump(aggregated_metrics, f)
     print(f"Saved aggregated RMSD metrics to: {rmsd_pickle_path}")
 
-    # Save per-molecule RMSD statistics as CSV
+    # Save RMSD matrix
     rmsd_matrix_path = os.path.join(results_path, "rmsd_matrix.csv")
-
-    # Load ground truth data once outside the loop for better performance.
-    # For the validation set we use the dedicated validation pickle instead
-    # of a non-existent "*_smi" entry.
-    if getattr(args, "test_set", None) == "valid":
-        gt_dict = load_pkl(get_data_path("validation_pickle"))
-    else:
-        gt_dict = load_pkl(get_data_path(f"{args.test_set}_smi"))
+    # Load ground truth data once outside the loop for better performance
+    gt_dict = load_pkl(get_data_path(f"{args.test_set}_smi"))
     per_molecule_rmsd_stats = []
     for smi, res in rmsd_results.items():
         rmsd_matrix = res["rmsd"]
@@ -249,9 +207,7 @@ def save_evaluation_results(cov_df: pd.DataFrame, matching: Dict[str, float], ag
         avg_rmsd = float(np.mean(valid_rmsd_values)) if len(valid_rmsd_values) > 0 else None
         
         # Get minimum RMSD for each true conformer (row-wise min)
-        with warnings.catch_warnings():
-            warnings.filterwarnings('ignore', message='All-NaN slice encountered', category=RuntimeWarning)
-            min_rmsd_per_true = np.nanmin(rmsd_matrix, axis=1)
+        min_rmsd_per_true = np.nanmin(rmsd_matrix, axis=1)
         # Calculate per-molecule coverage and matching metrics
         cov_r, mat_r, cov_p, mat_p = covmat_metrics(rmsd_matrix, DEFAULT_THRESHOLDS)
         
@@ -260,19 +216,9 @@ def save_evaluation_results(cov_df: pd.DataFrame, matching: Dict[str, float], ag
         cov_r_075 = float(cov_r[idx_075]) if len(cov_r) > 0 and idx_075 < len(cov_r) else None
         cov_p_075 = float(cov_p[idx_075]) if len(cov_p) > 0 and idx_075 < len(cov_p) else None
         
-        # Get sub-smiles from ground truth where applicable.
-        # For the "valid" set, the ground truth is a simple {smiles: [mol1, ...]}
-        # mapping, so we leave this field empty.
-        if getattr(args, "test_set", None) == "valid":
-            sub_smiles_str = ""
-        else:
-            record = gt_dict.get(smi, {})
-            if isinstance(record, dict):
-                sub_counts = record.get("sub_smiles_counts", {})
-                sub_smiles_list = list(sub_counts.keys())
-            else:
-                sub_smiles_list = []
-            sub_smiles_str = ";".join(sub_smiles_list) if sub_smiles_list else ""
+        # Get sub smiles from ground truth (loaded once outside loop)
+        sub_smiles_list = list(gt_dict.get(smi, {}).get("sub_smiles_counts", {}).keys())
+        sub_smiles_str = ";".join(sub_smiles_list) if sub_smiles_list else ""
 
         per_molecule_rmsd_stats.append({
             "geom_smiles": smi,
