@@ -191,7 +191,7 @@ def run_inference(inference_config: dict):
         model_path=inference_config["model_path"],
         tokenizer_path=inference_config["tokenizer_path"],
         torch_dtype=inference_config["torch_dtype"],
-        attention_imp=inference_config["attention_imp"],
+        attention_imp=inference_config.get("attention_imp", "sdpa"),
         device=inference_config["device"],
     )
     logger.info(f"model loaded: {model.dtype=}, {model.device=}")
@@ -350,7 +350,7 @@ def launch_inference_from_cli(
         "model_path": get_ckpt("qw600_pre_binned_filtered", "1e"),
         "tokenizer_path": get_tokenizer_path("qwen3_0.6b_binned"),
         "torch_dtype": "bfloat16",
-        "batch_size": 256,
+        "batch_size": 128,
         "num_gens": gen_num_codes["2k_per_conf"],
         "gen_config": sampling_configs["top_p_sampling1"],
         "device": "cuda",
