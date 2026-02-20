@@ -16,7 +16,7 @@ import submitit
 from transformers import AutoTokenizer, AutoModelForCausalLM, GenerationConfig
 
 from molgen3D.config.paths import get_ckpt, get_tokenizer_path, get_data_path, get_base_path
-from molgen3D.config.sampling_config import sampling_configs
+from molgen3D.config.sampling_config import sampling_configs, gen_num_codes
 from molgen3D.data_processing.smiles_encoder_decoder import (
     decode_cartesian_v2,
     strip_smiles,
@@ -346,7 +346,8 @@ def run_multiconf_inference(inference_config: dict):
         test_data = cloudpickle.load(f)
 
     test_set: str = inference_config.get("test_set", "distinct")
-    multiplier = inference_config.get("conformer_multiplier", 2)
+    num_gens = inference_config.get("num_gens", gen_num_codes["2k_per_conf"])
+    multiplier = int(str(num_gens).rstrip("k"))
     max_target = inference_config.get("max_target_per_smiles")
 
     def cap(n):
@@ -469,7 +470,6 @@ def launch_multiconf_inference_from_cli(
     qm9: bool = False,
     smiles_batch_size: int = 32,
     conformers_per_batch: int = 8,
-    conformer_multiplier: int = 2,
     limit: Optional[int] = None,
     binned: bool = False,
     parallel_jobs: int = 1,
@@ -501,12 +501,12 @@ def launch_multiconf_inference_from_cli(
         "tokenizer_path": str(get_tokenizer_path("qwen3_0.6b_binned")),
         "torch_dtype": "bfloat16",
         "gen_config": sampling_configs["top_p_sampling1"].to_dict(),
+        "num_gens": gen_num_codes["2k_per_conf"],
         "device": "cuda",
         "results_path": str(get_base_path("gen_results_root")),
         "run_name": "multiconf_grouped",
         "smiles_batch_size": smiles_batch_size,
         "conformers_per_batch": conformers_per_batch,
-        "conformer_multiplier": conformer_multiplier,
         "limit": limit,
         "binned": binned,
         "max_target_per_smiles": max_target_per_smiles,
@@ -535,7 +535,7 @@ def launch_multiconf_inference_from_cli(
             cfg = dict(base_config)
             cfg["test_data_path"] = _get_test_data_path(test_set_name)
             cfg["test_set"] = test_set_name
-            cfg["run_name"] = f"multiconf_{conformer_multiplier}x_{conformers_per_batch}batch_{test_set_name}"
+            cfg["run_name"] = f"multiconf_2k_{conformers_per_batch}batch_{test_set_name}"
             all_configs.append((cfg, cfg["run_name"]))
 
     if executor is not None:
@@ -572,7 +572,6 @@ if __name__ == "__main__":
     parser.add_argument("--qm9", action="store_true")
     parser.add_argument("--smiles_batch_size", type=int, default=32)
     parser.add_argument("--conformers_per_batch", type=int, default=8)
-    parser.add_argument("--conformer_multiplier", type=int, default=2)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--binned", action="store_true", default=False)
     parser.add_argument("--parallel_jobs", type=int, default=1)
@@ -589,7 +588,6 @@ if __name__ == "__main__":
         qm9=args.qm9,
         smiles_batch_size=args.smiles_batch_size,
         conformers_per_batch=args.conformers_per_batch,
-        conformer_multiplier=args.conformer_multiplier,
         limit=args.limit,
         binned=args.binned,
         parallel_jobs=args.parallel_jobs,
