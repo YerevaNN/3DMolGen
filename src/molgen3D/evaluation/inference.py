@@ -226,6 +226,17 @@ def run_inference(inference_config: dict):
         for geom_smiles, data in test_data.items():
             for sub_smiles, count in data["sub_smiles_counts"].items():
                 mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * count * 2)
+    elif test_set == "valid":
+        logger.info("Processing as validation dataset")
+        # Validation set format: {smiles: [mol_obj1, mol_obj2, ...]}
+        for geom_smiles, mol_list in test_data.items():
+            if isinstance(mol_list, list):
+                # Each entry has a list of ground truth conformers
+                num_ground_truths = len(mol_list)
+                # Generate 2x the ground truth count
+                mols_list.extend([(geom_smiles, f"[SMILES]{geom_smiles}[/SMILES]")] * num_ground_truths * 2)
+            else:
+                logger.warning(f"Unexpected data format for {geom_smiles}, skipping")
     elif test_set == "icl":
         logger.info("Processing as icl dataset")
         for geom_smiles, data in test_data.items():
@@ -273,6 +284,7 @@ def launch_inference_from_cli(
     test_set: str = None,
     xl: bool = False,
     qm9: bool = False,
+    valid: bool = False,
     limit: int = None,
     binned: bool = False,
     icl: bool = False,
@@ -287,6 +299,8 @@ def launch_inference_from_cli(
         test_sets_to_run.append("xl")
     if qm9:
         test_sets_to_run.append("qm9")
+    if valid:
+        test_sets_to_run.append("valid")
     if icl:
         test_sets_to_run.append(f"icl_{icl_n}")
     
@@ -392,7 +406,13 @@ def launch_inference_from_cli(
                         if test_set_name == "qm9":
                             grid_config["batch_size"] = 100
 
-                        grid_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
+                        if test_set_name == "valid":
+                            grid_config["batch_size"] = 128
+
+                        if test_set_name == "valid":
+                            grid_config["test_data_path"] = get_data_path("validation_pickle")
+                        else:
+                            grid_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
                         grid_config["test_set"] = test_set_name
                         # Create a cleaner run name from the model path
                         # Extract the last meaningful directory name or use basename
@@ -414,7 +434,12 @@ def launch_inference_from_cli(
                         inference_config["batch_size"] = 100
                     if test_set_name == "qm9":
                         inference_config["batch_size"] = 100
-                    inference_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
+                    if test_set_name == "valid":
+                        inference_config["batch_size"] = 128
+                    if test_set_name == "valid":
+                        inference_config["test_data_path"] = get_data_path("validation_pickle")
+                    else:
+                        inference_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
                     inference_config["test_set"] = test_set_name
                     inference_config["run_name"] = f"new_data_p1_{test_set_name}"
 
@@ -427,7 +452,12 @@ def launch_inference_from_cli(
                     inference_config["batch_size"] = 100
                 if test_set_name == "qm9":
                     inference_config["batch_size"] = 100
-                inference_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
+                if test_set_name == "valid":
+                    inference_config["batch_size"] = 128
+                if test_set_name == "valid":
+                    inference_config["test_data_path"] = get_data_path("validation_pickle")
+                else:
+                    inference_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
                 inference_config["test_set"] = test_set_name
                 inference_config["run_name"] = f"new_data_p1_{test_set_name}"
 
@@ -443,6 +473,7 @@ if __name__ == "__main__":
     parser.add_argument("--binned", action="store_true", default=False)
     parser.add_argument("--xl", action="store_true")
     parser.add_argument("--qm9", action="store_true")
+    parser.add_argument("--valid", action="store_true", help="Run inference on validation set")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--icl", action="store_true")
     parser.add_argument("--icl_n", type=int, default=5)
@@ -454,6 +485,7 @@ if __name__ == "__main__":
         test_set=args.test_set,
         xl=args.xl,
         qm9=args.qm9,
+        valid=args.valid,
         limit=args.limit,
         binned=args.binned,
         icl=args.icl,
