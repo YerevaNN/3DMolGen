@@ -1,5 +1,4 @@
 import os.path as osp
-import warnings
 from statistics import mode, StatisticsError
 import numpy as np
 import pandas as pd
@@ -104,10 +103,8 @@ def format_float(value: Optional[float], decimals: int = 4) -> str:
 
 
 def covmat_metrics(rmsd: np.ndarray, thresholds: np.ndarray) -> Tuple[np.ndarray, float, np.ndarray, float]:
-    with warnings.catch_warnings():
-        warnings.filterwarnings('ignore', message='All-NaN slice encountered', category=RuntimeWarning)
-        min_true = np.nanmin(rmsd, axis=1)
-        min_gen = np.nanmin(rmsd, axis=0)
+    min_true = np.nanmin(rmsd, axis=1)
+    min_gen = np.nanmin(rmsd, axis=0)
     cov_recall = np.array([(min_true < t).mean() for t in thresholds], dtype=float)
     cov_precision = np.array([(min_gen < t).mean() for t in thresholds], dtype=float)
     amr_recall = float(np.nanmean(min_true))
