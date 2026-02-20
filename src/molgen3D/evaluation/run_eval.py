@@ -184,7 +184,6 @@ def process_generation_pickle(
     gens_path: str,
     results_path: str,
     args: argparse.Namespace,
-    gt_path: Optional[str] = None,
 ) -> bool:
 
     t0 = time.time()
@@ -205,7 +204,6 @@ def process_generation_pickle(
     gt_stats = {
         "total_molecules_num": len(gt_dict),
         "total_conformers_num": sum(_num_confs(value) for value in gt_dict.values()),
-        "gt_path": gt_path if gt_path is not None else get_data_path(f"{args.test_set}_smi"),
     }
     
     t_prep = time.time()
@@ -280,7 +278,6 @@ def run_evaluation(directory_name: str, gen_base: str, eval_base: str, args_dict
         gens_path=gens_path,
         results_path=results_path,
         args=args,
-        gt_path=str(gt_path),
     )
 
 def run_directory_mode(args) -> None:
