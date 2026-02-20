@@ -150,31 +150,6 @@ def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers:
         traceback.print_exc()
         return None, None, None
 
-def normalize_gt_data(gt_dict: Dict, test_set: str) -> Dict:
-    """Normalize ground truth data to have consistent structure with 'confs' key.
-
-    Args:
-        gt_dict: Ground truth dictionary
-        test_set: Name of the test set
-
-    Returns:
-        Normalized dictionary where each value has a 'confs' key with list of molecules
-    """
-    if test_set == "valid":
-        # Validation set format: {smiles: [mol_obj1, mol_obj2, ...]}
-        # Convert to: {smiles: {"confs": [mol_obj1, mol_obj2, ...]}}
-        normalized = {}
-        for smiles, mol_list in gt_dict.items():
-            if isinstance(mol_list, list):
-                normalized[smiles] = {"confs": mol_list}
-            else:
-                # Already in correct format or unexpected format
-                normalized[smiles] = {"confs": [mol_list]} if mol_list else {"confs": []}
-        return normalized
-    else:
-        # Other test sets already have the correct structure
-        return gt_dict
-
 
 def get_missing_evaluation_dirs(gen_base: str, eval_base: str, max_recent: Optional[int]) -> List[str]:
     gen_path = Path(gen_base)
@@ -294,15 +269,8 @@ def run_evaluation(directory_name: str, gen_base: str, eval_base: str, args_dict
         return False
     gens_dict = load_pkl(gen_pickle_path)
 
-    # Load ground truth depending on test_set. For "valid", we use the
-    # dedicated validation pickle and normalize its structure.
-    if args.test_set == "valid":
-        gt_path = get_data_path("validation_pickle")
-    else:
-        gt_path = get_data_path(f"{args.test_set}_smi")
-
-    raw_gt_dict = load_pkl(gt_path)
-    gt_dict = normalize_gt_data(raw_gt_dict, args.test_set)
+    gt_path = get_data_path(f"{args.test_set}_smi")
+    gt_dict = load_pkl(gt_path)
     print(f"Loaded {len(gt_dict)} ground truth geom_smiles from {gt_path}")
     
     results_path = os.path.join(eval_base, f"{directory_name}")
