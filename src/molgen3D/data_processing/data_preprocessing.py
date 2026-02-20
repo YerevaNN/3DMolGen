@@ -261,6 +261,9 @@ def preprocess(
 
                 for result in pool.imap_unordered(read_mol, job_args, chunksize=chunk_size):
                     if result is None:
+                        failure_counts["unhandled_exception"] += 1
+                        processed += 1
+                        pbar.update()
                         continue
 
                     samples, stats = result
