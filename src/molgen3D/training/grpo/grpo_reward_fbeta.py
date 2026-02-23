@@ -13,7 +13,7 @@ import wandb
 from rdkit import Chem
 
 from molgen3D.data_processing.smiles_encoder_decoder import (
-    decode_cartesian_binned,
+    decode_cartesian_binned_v2,
     decode_cartesian_v2,
     get_bins_for_coords,
     strip_smiles,
@@ -94,7 +94,7 @@ def _decode_conformer_block(block: str, binned: bool, bins) -> Optional[Chem.Mol
     if not block:
         return None
     if binned:
-        return decode_cartesian_binned(block, bins)
+        return decode_cartesian_binned_v2(block, bins)
     return decode_cartesian_v2(block)
 
 
@@ -273,6 +273,7 @@ def _compute_completion_reward_from_parsed(
 ) -> Tuple[float, CompletionMetrics, Dict[str, int]]:
     delta = float(_get_config_value(config, "fbeta_delta", DEFAULT_DELTA))
     beta = float(_get_config_value(config, "fbeta_beta", DEFAULT_BETA))
+    reward_mode = str(_get_config_value(config, "fbeta_reward_mode", "fbeta")).lower()
     gamma = float(_get_config_value(config, "fbeta_gamma", DEFAULT_GAMMA))
     dup_tau = float(_get_config_value(config, "fbeta_dup_rmsd_tau", DEFAULT_DUP_RMSD_TAU))
     use_uniq_frac = bool(_get_config_value(config, "fbeta_use_uniq_frac", True))
@@ -324,6 +325,13 @@ def _compute_completion_reward_from_parsed(
             recall_indices=recall_indices,
         )
     fbeta = _f_beta(cov_r, cov_p, beta)
+    if reward_mode == "precision_only":
+        fbeta = cov_p
+    elif reward_mode in ("valid_count", "valid_frac"):
+        if reward_mode == "valid_count":
+            fbeta = float(t_valid)
+        else:
+            fbeta = float(t_valid) / float(max(target_k, 1))
     soft_p = _soft_precision(min_gen, warmup_sigma)
     reward = (fbeta + warmup_lambda * soft_p) * completion_factor * uniq_frac
 

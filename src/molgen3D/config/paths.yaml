@@ -1,12 +1,15 @@
 base_paths:
   project_root: "."
   data_root:
+    - "/nfs/ap/mnt/sxtn2/chem/GEOM_data"
     - "/data/molgen"
     - "data"
   geom_data_root:
+    - "/nfs/ap/mnt/sxtn2/chem/GEOM_data/geom_processed"
     - "/data/molgen"
     - "/data/molgen/GEOM_data"
   geom_dataset_root:
+    - "/nfs/ap/mnt/sxtn2/chem/GEOM_data/torsional_diff_gdrive/extracted"
     - "/data/molgen/GEOM_data/torsional_diff_gdrive/extracted"
   ckpts_root:
     - "/data/chem-project/checkpoints"
@@ -100,19 +103,22 @@ data:
   binned_grouped_conformers_test:
     - "binned_grouped_stripped/processed_strings/test"
 
-  binned_paired_conformers_train:
+  binned_paired_isolated_train:
     - "binned_paired_stripped/processed_strings/train"
-  binned_paired_conformers_valid:
+  binned_paired_isolated_valid:
     - "binned_paired_stripped/processed_strings/valid"
-  binned_paired_conformers_test:
+  binned_paired_isolated_test:
     - "binned_paired_stripped/processed_strings/test"
 
   binned_grouped_isolated_train:
+    - "binned_grouped_stripped_v3/processed_strings/train"
     - "binned_grouped_isolated_bins/processed_strings/train"
   binned_grouped_isolated_valid:
     - "binned_grouped_isolated_bins/processed_strings/valid"
+    - "binned_grouped_stripped_v3/processed_strings/valid"
   binned_grouped_isolated_test:
     - "binned_grouped_isolated_bins/processed_strings/test"
+    - "binned_grouped_stripped_v3/processed_strings/test"
 
   filtered_conformers_train: 
     - "3DMolGen_data/binned_filtered/processed_strings/train"
@@ -292,6 +298,14 @@ models:
       "4e": "step-22000-hf"
       "5e": "step-27500-hf"
 
+  qw600_pre_binned_grouped_isolated:
+    root: "qwen3_06b/260218-1401-758d-qwen3_06b_pre_5e_8e-4_binned_grouped_isolated"
+    steps:
+      "1e": "step-7500-hf"
+      "2e": "step-15000-hf"
+      "3e": "step-22500-hf"
+      "4e": "step-30000-hf"
+      "5e": "step-37500-hf"
   # ---------- GRPO / FINETUNED MODELS (same structure) ----------
 
   m380_1e_1xgrpo_100e_100s:
