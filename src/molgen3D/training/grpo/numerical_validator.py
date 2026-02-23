@@ -523,7 +523,7 @@ class GRPONumericalValidator:
                 validation_batch_size = max(1, validation_batch_size // world_size)
 
             # Determine if sampling is enabled for validation
-            gen_cfg = sampling_configs[self.config.validation.sampling_config]
+            gen_cfg = sampling_configs["numerical_validator"]
             sampling_enabled = bool(getattr(gen_cfg, "do_sample", False))
 
             # Expand prompts (per-molecule conformer requests) without building large lists.
@@ -611,9 +611,7 @@ class GRPONumericalValidator:
                 generate_kwargs = {
                     "input_ids": input_ids,
                     "attention_mask": attention_mask,
-                    "do_sample": sampling_configs[self.config.validation.sampling_config].do_sample,
-                    "top_p": sampling_configs[self.config.validation.sampling_config].top_p,
-                    "temperature": sampling_configs[self.config.validation.sampling_config].temperature,
+                    "generation_config": gen_cfg,
                     "max_new_tokens": max_new_tokens,
                     "pad_token_id": self._pad_id,
                     "eos_token_id": self._conformer_end_id,
@@ -762,7 +760,7 @@ class GRPONumericalValidator:
                         )
 
             for smiles in valid_prompts:
-                prompt_text = f"[SMILES]{smiles}[/SMILES][CONFORMER]"
+                prompt_text = f"[SMILES]{smiles}[/SMILES]"
                 if sampling_enabled:
                     num_ground_truths = len(self._ground_truths.get(smiles, []))
                     num_generations = max(2 * num_ground_truths, 1)

@@ -347,22 +347,25 @@ def launch_inference_from_cli(
     
     # Base configuration template
     base_inference_config = {
-        "model_path": get_ckpt("qw600_pre_binned_filtered", "1e"),
+        "model_path": get_ckpt("qw600_pre_binned_grouped_isolated", "5e"),
         "tokenizer_path": get_tokenizer_path("qwen3_0.6b_binned"),
         "torch_dtype": "bfloat16",
         "batch_size": 128,
         "num_gens": gen_num_codes["2k_per_conf"],
-        "gen_config": sampling_configs["top_p_sampling1"],
+        "gen_config": sampling_configs["numerical_validator"],
         "device": "cuda",
         "results_path": get_base_path("gen_results_root"),
         "run_name": "qwen_pre_binned",
         "limit": limit,
-        "binned": binned,
+        "binned": binned,   
     }
 
     if grid_run_inference:
         param_grid = [
-            "/data/chem-project/checkpoints/qwen3_06b/260126-0653-7cf8-qwen3_06b_pre_5e_8e-4_binned_grouped/step-27500-hf",
+            ("qw600_pre_binned_grouped_isolated", "1e"),
+            ("qw600_pre_binned_grouped_isolated", "2e"),
+            ("qw600_pre_binned_grouped_isolated", "3e"),
+            ("qw600_pre_binned_grouped_isolated", "4e"),
             # "/home/chem-project/checkpoints/conf_grpo/260205-0417_qwen3_fscore_lr8e-05_d075_b10.0_g2.0_w0_warmup0_tau0_noscale_7cf8model_fbeta/model",
             # "/home/chem-project/checkpoints/conf_grpo/260204-1141_qwen3_fscore_lr8e-05_d075_b2.0_g2.0_w0_warmup0_tau0_noscale_7cf8model_fbeta/model",
             # "/home/chem-project/checkpoints/conf_grpo/260204-1143_qwen3_fscore_lr8e-05_d075_b0.0_g2.0_w0_warmup0_tau0_noscale_7cf8model_valid_count/model",
@@ -372,10 +375,10 @@ def launch_inference_from_cli(
         jobs = []
         if executor is not None:
             with executor.batch():
-                for model_path in param_grid:
+                for model_path_entry in param_grid:
+                    model_path = str(get_ckpt(*model_path_entry)) if isinstance(model_path_entry, tuple) else model_path_entry
                     for test_set_name in test_sets_to_run:
                         grid_config = dict(base_inference_config)
-                        # Use direct path (model_path is already a full path string)
                         grid_config["model_path"] = model_path
                         
                         # Auto-select tokenizer based on model path
