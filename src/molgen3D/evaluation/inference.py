@@ -538,7 +538,7 @@ def launch_inference_from_cli(
     
     # Base configuration template
     base_inference_config = {
-        "model_path": str(get_ckpt("m600_qwen_pre_4seq_binned", "4e")),  # Convert Path to str for JSON
+        "model_path": str(get_ckpt("qw600_pre_binned_paired", "5e")),  # Convert Path to str for JSON
         "tokenizer_path": str(get_tokenizer_path("qwen3_0.6b_binned" if binned else "qwen3_0.6b_custom")),
         "torch_dtype": "bfloat16",
         "batch_size": 128,
@@ -546,7 +546,7 @@ def launch_inference_from_cli(
         "gen_config": sampling_configs["top_p_sampling1"].to_dict(),  # Convert to dict for JSON
         "device": "cuda",
         "results_path": str(get_base_path("gen_results_root")),  # Convert Path to str for JSON
-        "run_name": "qwen_pre_5e_grouped",
+        "run_name": "qwen_pre_5e_paired",
         "limit": limit,
         "binned": binned,
     }
@@ -795,7 +795,7 @@ if __name__ == "__main__":
                         choices=["local", "a100", "h100", "all"],
                         help="Device to run on: local (current machine), a100/h100/all (cluster partitions)")
     parser.add_argument("--grid_run_inference", action="store_true")
-    parser.add_argument("--test_set", type=str, choices=["clean", "distinct", "corrected"], default=None)
+    parser.add_argument("--test_set", type=str, choices=["clean", "distinct", "corrected"], default="distinct")
     parser.add_argument("--binned", action="store_true", default=False)
     parser.add_argument("--xl", action="store_true")
     parser.add_argument("--qm9", action="store_true")
