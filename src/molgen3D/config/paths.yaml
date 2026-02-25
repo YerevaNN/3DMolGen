@@ -51,6 +51,7 @@ data:
   distinct_smi: "tmp/distinct_smi_filtered_13.pickle"
   xl_smi: "xl_smi.pickle"
   qm9_smi: "qm9_smi.pickle"
+  valid_smi: "valid_smi.pickle"
   icl_5_smi: "icl_5_smi.pickle"
   icl_10_smi: "icl_10_smi.pickle"
   icl_20_smi: "icl_20_smi.pickle"
@@ -58,6 +59,7 @@ data:
 
   pretokenized_prompts: "3DMolGen_data/pretokenized_prompts.json"
   validation_pickle:
+    - "/nfs/ap/mnt/sxtn2/chem/GEOM_data/3DMolGen_data/valid_set.pickle"
     - "/home/chem-project/mb-3dmolgen/3DMolGen/data/valid_set.pickle"
     - "3DMolGen_data/valid_set.pickle"
 

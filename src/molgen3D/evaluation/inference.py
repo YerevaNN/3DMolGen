@@ -226,6 +226,11 @@ def run_inference(inference_config: dict):
         for geom_smiles, data in test_data.items():
             for sub_smiles, count in data["sub_smiles_counts"].items():
                 mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * count * 2)
+    elif test_set == "valid":
+        logger.info("Processing as valid dataset")
+        for geom_smiles, data in test_data.items():
+            for sub_smiles, count in data["sub_smiles_counts"].items():
+                mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * count * 2)
     elif test_set == "icl":
         logger.info("Processing as icl dataset")
         for geom_smiles, data in test_data.items():
@@ -277,7 +282,7 @@ def launch_inference_from_cli(
     binned: bool = False,
     icl: bool = False,
     icl_n: int = 5,
-    parallel_jobs: int = 1
+    valid: bool = False,
 ) -> None:
     # Determine which test sets to run
     test_sets_to_run = []
@@ -289,7 +294,8 @@ def launch_inference_from_cli(
         test_sets_to_run.append("qm9")
     if icl:
         test_sets_to_run.append(f"icl_{icl_n}")
-    
+    if valid:
+        test_sets_to_run.append("valid")
     if not test_sets_to_run:
         logger.info("No test sets specified. Skipping inference.")
         return
@@ -445,11 +451,11 @@ if __name__ == "__main__":
     parser.add_argument("--test_set", type=str, choices=["clean", "distinct", "corrected"], default=None)
     parser.add_argument("--binned", action="store_true", default=False)
     parser.add_argument("--xl", action="store_true")
+    parser.add_argument("--valid", action="store_true")
     parser.add_argument("--qm9", action="store_true")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--icl", action="store_true")
     parser.add_argument("--icl_n", type=int, default=5)
-    parser.add_argument("--parallel_jobs", type=int, default=1, help="Number of parallel inference jobs for local execution")
     args = parser.parse_args()
     launch_inference_from_cli(
         device=args.device,
@@ -457,9 +463,9 @@ if __name__ == "__main__":
         test_set=args.test_set,
         xl=args.xl,
         qm9=args.qm9,
+        valid=args.valid,
         limit=args.limit,
         binned=args.binned,
         icl=args.icl,
         icl_n=args.icl_n,
-        parallel_jobs=args.parallel_jobs
     )

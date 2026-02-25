@@ -290,7 +290,7 @@ def run_directory_mode(args) -> None:
         print(f"Running {len(directories)} evaluations locally")
         for directory in directories:
             print(f"Processing: {directory}")
-            success = run_evaluation(directory, gen_base, eval_base, args)
+            success = run_evaluation(directory, gen_base, eval_base, vars(args))
             if not success:
                 print(f"Failed to evaluate: {directory}")
     else:
@@ -322,7 +322,7 @@ def main() -> None:
     parser.add_argument("--num-workers", type=int, default=80, help="Number of workers for evaluation")
     parser.add_argument("--max-recent", type=int, default=3, help="Max recent missing directories to evaluate")
     parser.add_argument("--specific-dir", type=str, default=None, help="Specific directory to evaluate")
-    parser.add_argument("--test_set", type=str, default="distinct", choices=["clean", "distinct", "xl", "qm9"], help="Test set to evaluate")
+    parser.add_argument("--test_set", type=str, default="distinct", choices=["clean", "distinct", "xl", "qm9", "valid"], help="Test set to evaluate")
     args = parser.parse_args()
     
     run_directory_mode(args)

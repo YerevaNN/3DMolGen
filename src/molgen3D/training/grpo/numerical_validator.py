@@ -21,6 +21,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 from loguru import logger
+from rdkit.Chem.rdmolops import RemoveHs as _RemoveHs
 
 from molgen3D.data_processing.smiles_encoder_decoder import (
     decode_cartesian_binned_v2,
@@ -28,13 +29,13 @@ from molgen3D.data_processing.smiles_encoder_decoder import (
     get_bins_for_coords,
     strip_smiles,
 )
+from molgen3D.evaluation import rdkit_utils
 from molgen3D.evaluation.utils import (
     DEFAULT_THRESHOLDS,
     covmat_metrics,
     extract_between,
     same_molecular_graph,
 )
-from molgen3D.utils.utils import get_best_rmsd
 from molgen3D.config.sampling_config import sampling_configs
 from molgen3D.config.paths import get_data_path, resolve_data_path
 from molgen3D.training.grpo.utils import load_smiles_mapping, load_ground_truths
@@ -209,18 +210,18 @@ class GRPONumericalValidator:
         """
         Compute RMSD statistics against ground truths.
 
+        Matches the per-column computation in run_eval.py's _compute_key_matrix:
+        generated_mol is the probe (already Hs-removed at decode time, matching
+        process_molecules_remove_hs), each GT is the reference (used as-is).
+
         Returns:
             Tuple of (min_rmsd, max_rmsd, avg_rmsd, rmsd_vector)
             where rmsd_vector has shape (num_ground_truths,) and may contain NaNs.
         """
-        rmsds: List[float] = []
-        for gt in ground_truths:
-            try:
-                rmsd = float(get_best_rmsd(generated_mol, gt, use_alignmol=False))
-                rmsds.append(rmsd)
-            except Exception as e:
-                logger.debug(f"RMSD calculation failed: {e}")
-                rmsds.append(float("nan"))
+        rmsds: List[float] = [
+            rdkit_utils._best_rmsd(generated_mol, gt, use_alignmol=False)
+            for gt in ground_truths
+        ]
 
         arr = np.array(rmsds, dtype=float)
         if arr.size == 0 or np.isnan(arr).all():
@@ -629,7 +630,7 @@ class GRPONumericalValidator:
 
                 sequences = generated_outputs.detach().cpu()
                 decoded_batch = self.tokenizer.batch_decode(
-                    sequences, skip_special_tokens=True
+                    sequences, skip_special_tokens=False
                 )
                 del sequences, generated_outputs
 
@@ -683,11 +684,11 @@ class GRPONumericalValidator:
                     # Try to parse the conformer
                     try:
                         if self._use_binned_decoder:
-                            generated_mol = decode_cartesian_binned_v2(
+                            generated_mol = _RemoveHs(decode_cartesian_binned_v2(
                                 conformer_text, self._binned_bins
-                            )
+                            ))
                         else:
-                            generated_mol = decode_cartesian_v2(conformer_text)
+                            generated_mol = _RemoveHs(decode_cartesian_v2(conformer_text))
                     except Exception as e:
                         failure_counts[FAIL_PARSING_ERROR] += 1
                         all_failed_generations.append(
@@ -726,6 +727,14 @@ class GRPONumericalValidator:
                         generated_mol, gt_confs
                     )
 
+                    # Always accumulate the RMSD vector for covmat metrics, matching
+                    # run_eval.py's _compute_key_matrix which includes all generated
+                    # conformers in the matrix (NaN columns reduce COV-P correctly).
+                    if rmsd_vec.size > 0:
+                        per_smiles_rmsd_vectors.setdefault(smiles, []).append(
+                            rmsd_vec
+                        )
+
                     if np.isnan(min_val):
                         failure_counts[FAIL_RMSD_NAN] += 1
                         all_failed_generations.append(
@@ -739,12 +748,6 @@ class GRPONumericalValidator:
                         min_rmsds.append(min_val)
                         max_rmsds.append(max_val)
                         avg_rmsds.append(avg_val)
-
-                        # Store per-molecule RMSD vector for covmat-style metrics
-                        if rmsd_vec.size > 0:
-                            per_smiles_rmsd_vectors.setdefault(smiles, []).append(
-                                rmsd_vec
-                            )
 
                     # Progress logging (per-rank)
                     rank_processed_count += 1
@@ -822,17 +825,17 @@ class GRPONumericalValidator:
         cov_r_by_threshold = cov_p_by_threshold = None
         if cov_r_list:
             if world_size == 1:
-                # Single-GPU case: compute means directly (matching evaluation pipeline)
+                # Single-GPU case: compute means directly (matching summarize_metrics in run_eval.py)
                 cov_r_matrix = np.vstack(cov_r_list)  # shape: (num_molecules, num_thresholds)
                 cov_p_matrix = np.vstack(cov_p_list)
                 if cov_r_matrix.size > 0:
-                    cov_r_mean = float(np.mean(cov_r_matrix))
-                    cov_r_by_threshold = np.mean(cov_r_matrix, axis=0).tolist()
+                    cov_r_mean = float(np.nanmean(cov_r_matrix))
+                    cov_r_by_threshold = np.nanmean(cov_r_matrix, axis=0).tolist()
                 if cov_p_matrix.size > 0:
-                    cov_p_mean = float(np.mean(cov_p_matrix))
-                    cov_p_by_threshold = np.mean(cov_p_matrix, axis=0).tolist()
-                mat_r_mean = float(np.mean(mat_r_list)) if mat_r_list else None
-                mat_p_mean = float(np.mean(mat_p_list)) if mat_p_list else None
+                    cov_p_mean = float(np.nanmean(cov_p_matrix))
+                    cov_p_by_threshold = np.nanmean(cov_p_matrix, axis=0).tolist()
+                mat_r_mean = float(np.nanmean(mat_r_list)) if mat_r_list else None
+                mat_p_mean = float(np.nanmean(mat_p_list)) if mat_p_list else None
 
         log_min_rmsds = min_rmsds
         log_max_rmsds = max_rmsds

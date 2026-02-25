@@ -166,7 +166,7 @@ class ValidationConfig:
     max_conformer_tokens: int = 2000
     max_ground_truths: int = 30
     num_val_molecules: int = 200
-    sampling_config: str = "top_k_100_t08"
+    sampling_config: str = "numerical_validator"
     max_generations_per_molecule: Optional[int] = None
     stop_after_first_conformer: bool = False
     save_failed_generations: bool = True
