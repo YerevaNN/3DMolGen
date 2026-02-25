@@ -227,10 +227,16 @@ def run_inference(inference_config: dict):
             for sub_smiles, count in data["sub_smiles_counts"].items():
                 mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * count * 2)
     elif test_set == "valid":
-        logger.info("Processing as valid dataset")
-        for geom_smiles, data in test_data.items():
-            for sub_smiles, count in data["sub_smiles_counts"].items():
-                mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * count * 2)
+        logger.info("Processing as validation dataset")
+        # Validation set format: {smiles: [mol_obj1, mol_obj2, ...]}
+        for geom_smiles, mol_list in test_data.items():
+            if isinstance(mol_list, list):
+                # Each entry has a list of ground truth conformers
+                num_ground_truths = len(mol_list)
+                # Generate 2x the ground truth count
+                mols_list.extend([(geom_smiles, f"[SMILES]{geom_smiles}[/SMILES]")] * num_ground_truths * 2)
+            else:
+                logger.warning(f"Unexpected data format for {geom_smiles}, skipping")
     elif test_set == "icl":
         logger.info("Processing as icl dataset")
         for geom_smiles, data in test_data.items():
@@ -283,7 +289,7 @@ def launch_inference_from_cli(
     binned: bool = False,
     icl: bool = False,
     icl_n: int = 5,
-    valid: bool = False,
+    parallel_jobs: int = 1
 ) -> None:
     # Determine which test sets to run
     test_sets_to_run = []
@@ -297,8 +303,7 @@ def launch_inference_from_cli(
         test_sets_to_run.append("valid")
     if icl:
         test_sets_to_run.append(f"icl_{icl_n}")
-    if valid:
-        test_sets_to_run.append("valid")
+    
     if not test_sets_to_run:
         logger.info("No test sets specified. Skipping inference.")
         return
@@ -356,25 +361,22 @@ def launch_inference_from_cli(
     
     # Base configuration template
     base_inference_config = {
-        "model_path": get_ckpt("qw600_pre_binned_grouped_isolated", "5e"),
+        "model_path": get_ckpt("qw600_pre_binned_filtered", "1e"),
         "tokenizer_path": get_tokenizer_path("qwen3_0.6b_binned"),
         "torch_dtype": "bfloat16",
         "batch_size": 128,
         "num_gens": gen_num_codes["2k_per_conf"],
-        "gen_config": sampling_configs["numerical_validator"],
+        "gen_config": sampling_configs["top_p_sampling1"],
         "device": "cuda",
         "results_path": get_base_path("gen_results_root"),
         "run_name": "qwen_pre_binned",
         "limit": limit,
-        "binned": binned,   
+        "binned": binned,
     }
 
     if grid_run_inference:
         param_grid = [
-            ("qw600_pre_binned_grouped_isolated", "1e"),
-            ("qw600_pre_binned_grouped_isolated", "2e"),
-            ("qw600_pre_binned_grouped_isolated", "3e"),
-            ("qw600_pre_binned_grouped_isolated", "4e"),
+            "/data/chem-project/checkpoints/qwen3_06b/260126-0653-7cf8-qwen3_06b_pre_5e_8e-4_binned_grouped/step-27500-hf",
             # "/home/chem-project/checkpoints/conf_grpo/260205-0417_qwen3_fscore_lr8e-05_d075_b10.0_g2.0_w0_warmup0_tau0_noscale_7cf8model_fbeta/model",
             # "/home/chem-project/checkpoints/conf_grpo/260204-1141_qwen3_fscore_lr8e-05_d075_b2.0_g2.0_w0_warmup0_tau0_noscale_7cf8model_fbeta/model",
             # "/home/chem-project/checkpoints/conf_grpo/260204-1143_qwen3_fscore_lr8e-05_d075_b0.0_g2.0_w0_warmup0_tau0_noscale_7cf8model_valid_count/model",
@@ -384,10 +386,10 @@ def launch_inference_from_cli(
         jobs = []
         if executor is not None:
             with executor.batch():
-                for model_path_entry in param_grid:
-                    model_path = str(get_ckpt(*model_path_entry)) if isinstance(model_path_entry, tuple) else model_path_entry
+                for model_path in param_grid:
                     for test_set_name in test_sets_to_run:
                         grid_config = dict(base_inference_config)
+                        # Use direct path (model_path is already a full path string)
                         grid_config["model_path"] = model_path
                         
                         # Auto-select tokenizer based on model path
@@ -470,12 +472,12 @@ if __name__ == "__main__":
     parser.add_argument("--test_set", type=str, choices=["clean", "distinct", "corrected"], default=None)
     parser.add_argument("--binned", action="store_true", default=False)
     parser.add_argument("--xl", action="store_true")
-    parser.add_argument("--valid", action="store_true")
     parser.add_argument("--qm9", action="store_true")
     parser.add_argument("--valid", action="store_true", help="Run inference on validation set")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--icl", action="store_true")
     parser.add_argument("--icl_n", type=int, default=5)
+    parser.add_argument("--parallel_jobs", type=int, default=1, help="Number of parallel inference jobs for local execution")
     args = parser.parse_args()
     launch_inference_from_cli(
         device=args.device,
@@ -488,4 +490,5 @@ if __name__ == "__main__":
         binned=args.binned,
         icl=args.icl,
         icl_n=args.icl_n,
+        parallel_jobs=args.parallel_jobs
     )
