@@ -302,7 +302,7 @@ def run_directory_mode(args) -> None:
         print(f"Running {len(directories)} evaluations locally")
         for directory in directories:
             print(f"Processing: {directory}")
-            success = run_evaluation(directory, gen_base, eval_base, vars(args))
+            success = run_evaluation(directory, gen_base, eval_base, args)
             if not success:
                 print(f"Failed to evaluate: {directory}")
     else:
