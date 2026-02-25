@@ -25,12 +25,32 @@ from molgen3D.data_processing.smiles_encoder_decoder import (
 )
 from molgen3D.utils.utils import load_pkl
 
-random.seed(42)
 RDLogger.DisableLog("rdApp.*")
+
+
 def read_mol(
     args: Tuple[str, int, int, Any, float, List[Tuple[float, float]], bool, str, str]
 ) -> Optional[Tuple[List[str], Dict[str, Any]]]:
-    mol_path, max_confs, precision, embedding_func, bin_size, ranges, filter_ranges, pickle_dir, _geom_root = args
+    mol_path, max_confs, precision, embedding_func, bin_size, ranges, do_filter, pickle_dir, _geom_root = args
+    try:
+        return _read_mol_impl(
+            mol_path, max_confs, precision, embedding_func, bin_size, ranges, do_filter, pickle_dir
+        )
+    except Exception as exc:
+        log.error("Unhandled exception in read_mol | path={} | error={}", mol_path, exc)
+        return None
+
+
+def _read_mol_impl(
+    mol_path: str,
+    max_confs: int,
+    precision: int,
+    embedding_func: Any,
+    bin_size: float,
+    ranges: List[Tuple[float, float]],
+    do_filter: bool,
+    pickle_dir: str,
+) -> Tuple[List[str], Dict[str, Any]]:
     mol_object = load_pkl(mol_path)
     geom_smiles = mol_object["smiles"]
 
@@ -42,8 +62,7 @@ def read_mol(
     filtered_mols: List[Chem.Mol] = []
 
     for mol in mols:
-        if filter_ranges:
-            # Filter conformers with coordinates outside ranges
+        if do_filter:
             pos = mol.GetConformer().GetPositions()
             out_of_range = False
             for i in range(3):
@@ -51,18 +70,9 @@ def read_mol(
                 if np.any(pos[:, i] < min_val) or np.any(pos[:, i] > max_val):
                     out_of_range = True
                     break
-            
             if out_of_range:
                 local_failures["coord_out_of_range"] += 1
                 continue
-
-        try:
-            noniso = Chem.MolToSmiles(Chem.RemoveHs(mol, sanitize=False), canonical=True, isomericSmiles=False)
-            nonisomeric_smiles.add(noniso)
-            if "." in noniso:
-                dotted_smiles.add(noniso)
-        except Exception:
-            pass
 
         try:
             if embedding_func in (encode_cartesian_binned, encode_cartesian_binned_v2):
@@ -73,6 +83,15 @@ def read_mol(
             log.error("Error encoding conformer | path={} | failure={}", mol_path, exc)
             local_failures["encoding_error"] += 1
             continue
+
+        # Compute nonisomeric SMILES only for conformers that encoded successfully
+        try:
+            noniso = Chem.MolToSmiles(Chem.RemoveHs(mol, sanitize=False), canonical=True, isomericSmiles=False)
+            nonisomeric_smiles.add(noniso)
+            if "." in noniso:
+                dotted_smiles.add(noniso)
+        except Exception:
+            pass
 
         samples.append(
             json.dumps(
@@ -107,6 +126,10 @@ def read_mol(
         except Exception as exc:
             log.error("Failed to write processed pickle | path={} | failure={}", mol_path, exc)
 
+    if not samples:
+        log.warning("No samples after filtering | path={}", mol_path)
+        local_failures["no_samples_after_filtering"] += 1
+
     stats = {
         "path": mol_path,
         "geom_smiles": geom_smiles,
@@ -119,10 +142,6 @@ def read_mol(
         "failures": local_failures,
         "processed_pickle_path": processed_pickle_path,
     }
-
-    if not samples:
-        log.warning("No samples after filtering | path={}", mol_path)
-        local_failures["no_samples_after_filtering"] += 1
     return samples, stats
 
 
@@ -242,6 +261,9 @@ def preprocess(
 
                 for result in pool.imap_unordered(read_mol, job_args, chunksize=chunk_size):
                     if result is None:
+                        failure_counts["unhandled_exception"] += 1
+                        processed += 1
+                        pbar.update()
                         continue
 
                     samples, stats = result
@@ -337,6 +359,7 @@ def preprocess(
 
 
 if __name__ == "__main__":
+    random.seed(42)
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--geom_raw_path",

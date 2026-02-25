@@ -48,7 +48,35 @@ def create_slurm_executor(
     if submitit is None:
         raise RuntimeError("submitit is not available")
 
-    folder = str(Path.home() / "slurm_jobs" / job_type / "job_%j")
+    # Set SLURM_CONF if not already set (needed for sbatch to work)
+    if device in ["a100", "h100", "all"]:
+        if not os.environ.get("SLURM_CONF"):
+            # Try common SLURM config paths
+            possible_paths = [
+                "/cm/shared/apps/slurm/etc/slurm/slurm.conf",
+                "/etc/slurm/slurm.conf",
+                "/usr/local/etc/slurm.conf",
+                "/opt/slurm/etc/slurm.conf",
+            ]
+            
+            slurm_conf_found = None
+            for path in possible_paths:
+                if os.path.exists(path):
+                    slurm_conf_found = path
+                    break
+            
+            if slurm_conf_found:
+                os.environ["SLURM_CONF"] = slurm_conf_found
+                logger.info(f"Using SLURM_CONF: {slurm_conf_found}")
+            else:
+                logger.warning(
+                    "SLURM_CONF is not set and no default config found. "
+                    "Tried: " + ", ".join(possible_paths) + ". "
+                    "sbatch may fail to locate slurmctld."
+                )
+
+    # Use project outputs directory for SLURM logs
+    folder = f"outputs/slurm_jobs/{job_type}/job_%j"
 
     if device == "local":
         executor = submitit.LocalExecutor(folder=folder)
@@ -66,6 +94,12 @@ def create_slurm_executor(
     )
 
     executor.update_parameters(**params)
+    
+    # Disable srun to avoid PMIx/MPI plugin issues and srun command not found errors
+    if device in ["a100", "h100", "all"]:
+        logger.info("Disabling srun to avoid PMIx/MPI plugin issues.")
+        executor.update_parameters(slurm_use_srun=False)
+    
     return executor
 
 def find_generation_pickles_path(directory_path: str) -> str:

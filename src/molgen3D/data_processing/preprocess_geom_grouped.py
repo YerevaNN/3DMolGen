@@ -23,7 +23,6 @@ from molgen3D.data_processing.smiles_encoder_decoder import (
 )
 from molgen3D.utils.utils import load_pkl
 
-random.seed(42)
 RDLogger.DisableLog("rdApp.*")
 
 # Data layout inspection (sample file: /home/chem-project/data/rdkit_folder/drugs/...)
@@ -134,7 +133,7 @@ def filter_conformers_keep_dotted(
             continue
 
         num_neighbors = [len(a.GetNeighbors()) for a in mol.GetAtoms()]
-        if np.max(num_neighbors) > 4:
+        if not num_neighbors or np.max(num_neighbors) > 4:
             failures["large_degree"] += 1
             continue
 
@@ -153,6 +152,23 @@ def read_mol(
         Set[str],
         Dict[str, List[Dict[str, Any]]],
     ]
+]:
+    mol_path = args[0]
+    try:
+        return _read_mol_impl(args)
+    except Exception as exc:
+        log.error("Unhandled exception in read_mol | path={} | error={}", mol_path, exc)
+        return None
+
+
+def _read_mol_impl(
+    args: Tuple[str, int, int, Any, float, List[Tuple[float, float]], str]
+) -> Tuple[
+    Optional[str],
+    Dict[str, Any],
+    str,
+    Set[str],
+    Dict[str, List[Dict[str, Any]]],
 ]:
     mol_path, max_confs, precision, embedding_func, bin_size, ranges, sort_by = args
     mol_object = load_pkl(mol_path)
@@ -188,18 +204,6 @@ def read_mol(
 
     for _, _, mol, _conf_meta, energy, weight, conf_id in scored_candidates:
         try:
-            noniso = Chem.MolToSmiles(
-                Chem.RemoveHs(mol, sanitize=False),
-                canonical=True,
-                isomericSmiles=False,
-            )
-            nonisomeric_smiles.add(noniso)
-            if "." in noniso:
-                dotted_smiles.add(noniso)
-        except Exception:
-            pass
-
-        try:
             if embedding_func in (encode_cartesian_binned, encode_cartesian_binned_v2):
                 embedded_smile, iso_smile = embedding_func(
                     mol,
@@ -212,6 +216,19 @@ def read_mol(
             log.error("Error encoding conformer | path={} | failure={}", mol_path, exc)
             local_failures["encoding_error"] += 1
             continue
+
+        # Compute nonisomeric SMILES only for conformers that encoded successfully
+        try:
+            noniso = Chem.MolToSmiles(
+                Chem.RemoveHs(mol, sanitize=False),
+                canonical=True,
+                isomericSmiles=False,
+            )
+            nonisomeric_smiles.add(noniso)
+            if "." in noniso:
+                dotted_smiles.add(noniso)
+        except Exception:
+            pass
 
         isomeric_smiles.add(iso_smile)
 
@@ -280,7 +297,9 @@ def read_mol(
 
 
 def save_grouped_pickle(output_path: str, iso_to_confs: Dict[str, List[Dict[str, Any]]]) -> None:
-    os.makedirs(osp.dirname(output_path), exist_ok=True)
+    parent = osp.dirname(output_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     with open(output_path, "wb") as fh:
         pickle.dump(iso_to_confs, fh)
 
@@ -374,96 +393,99 @@ def preprocess(
         iso_to_geom_path = osp.join(dest_path, f"{split_name}_isomeric_to_geom.jsonl")
         geom_to_iso_fh = open(geom_to_iso_path, "w")
         iso_to_geom_fh = open(iso_to_geom_path, "w")
+        try:
+            job_args = [
+                (
+                    path,
+                    max_confs,
+                    precision,
+                    embedding_func,
+                    bin_size,
+                    parsed_ranges,
+                    sort_by,
+                )
+                for path in mol_paths
+            ]
 
-        job_args = [
-            (
-                path,
-                max_confs,
-                precision,
-                embedding_func,
-                bin_size,
-                parsed_ranges,
-                sort_by,
-            )
-            for path in mol_paths
-        ]
+            with tqdm(total=len(job_args), dynamic_ncols=True, mininterval=0.2) as pbar:
+                with Pool(processes=num_workers) as pool:
+                    chunk_size = max(1, len(job_args) // max(num_workers * 2, 1))
+                    processed = 0
 
-        with tqdm(total=len(job_args), dynamic_ncols=True, mininterval=0.2) as pbar:
-            with Pool(processes=num_workers) as pool:
-                chunk_size = max(1, len(job_args) // max(num_workers * 2, 1))
-                processed = 0
+                    for result in pool.imap_unordered(read_mol, job_args, chunksize=chunk_size):
+                        if result is None:
+                            failure_counts["unhandled_exception"] += 1
+                            processed += 1
+                            pbar.update()
+                            continue
 
-                for result in pool.imap_unordered(read_mol, job_args, chunksize=chunk_size):
-                    if result is None:
-                        continue
+                        json_line, stats, geom_id, iso_set, iso_to_pickle_confs = result
 
-                    json_line, stats, geom_id, iso_set, iso_to_pickle_confs = result
+                        if json_line:
+                            split_writers[split_name].write([json_line])
 
-                    if json_line:
-                        split_writers[split_name].write([json_line])
-
-                    if iso_to_pickle_confs:
-                        processed_pickle_path = osp.join(split_pickle_dirs[split_name], f"{geom_id}.pkl")
-                        try:
-                            save_grouped_pickle(processed_pickle_path, iso_to_pickle_confs)
-                        except Exception as exc:
-                            log.error(
-                                "Failed to write processed pickle | path={} | failure={}",
-                                processed_pickle_path,
-                                exc,
-                            )
-
-                    conf_count_pre += stats["confs_count_pre_filter"]
-                    conf_count_post += stats["confs_count_post_filter"]
-                    overall_total_confs += stats["confs_count_post_filter"]
-                    total_dotted_smiles += stats.get("num_distinct_smiles_with_dot", 0)
-
-                    if stats["nonisomeric_smiles_post_filter"] > 1:
-                        split_num_mol_with_multi_distinct_graphs += 1
-                    if stats.get("has_dotted_smiles", False):
-                        split_num_mol_with_dotted_smiles += 1
-
-                    for reason, count in stats["failures"].items():
-                        failure_counts[reason] += int(count)
-
-                    if stats["confs_count_post_filter"] > 0:
-                        mol_count_post += 1
-                        overall_total_mols += 1
-
-                    geom_smiles = stats.get("geom_smiles")
-                    if geom_smiles and iso_set:
-                        for iso in iso_set:
-                            split_geom_to_iso_map[geom_smiles].add(iso)
-                            geom_to_iso_fh.write(
-                                json.dumps(
-                                    {
-                                        "geom_key": geom_smiles,
-                                        "geom_id": str(geom_id),
-                                        "isomeric_smiles": iso,
-                                    },
-                                    separators=(",", ":"),
+                        if iso_to_pickle_confs:
+                            processed_pickle_path = osp.join(split_pickle_dirs[split_name], f"{geom_id}.pkl")
+                            try:
+                                save_grouped_pickle(processed_pickle_path, iso_to_pickle_confs)
+                            except Exception as exc:
+                                log.error(
+                                    "Failed to write processed pickle | path={} | failure={}",
+                                    processed_pickle_path,
+                                    exc,
                                 )
-                                + "\n"
-                            )
-                            iso_to_geom_fh.write(
-                                json.dumps(
-                                    {
-                                        "isomeric_smiles": iso,
-                                        "geom_key": geom_smiles,
-                                        "geom_id": str(geom_id),
-                                    },
-                                    separators=(",", ":"),
+
+                        conf_count_pre += stats["confs_count_pre_filter"]
+                        conf_count_post += stats["confs_count_post_filter"]
+                        overall_total_confs += stats["confs_count_post_filter"]
+                        total_dotted_smiles += stats.get("num_distinct_smiles_with_dot", 0)
+
+                        if stats["nonisomeric_smiles_post_filter"] > 1:
+                            split_num_mol_with_multi_distinct_graphs += 1
+                        if stats.get("has_dotted_smiles", False):
+                            split_num_mol_with_dotted_smiles += 1
+
+                        for reason, count in stats["failures"].items():
+                            failure_counts[reason] += int(count)
+
+                        if stats["confs_count_post_filter"] > 0:
+                            mol_count_post += 1
+                            overall_total_mols += 1
+
+                        geom_smiles = stats.get("geom_smiles")
+                        if geom_smiles and iso_set:
+                            for iso in iso_set:
+                                split_geom_to_iso_map[geom_smiles].add(iso)
+                                geom_to_iso_fh.write(
+                                    json.dumps(
+                                        {
+                                            "geom_key": geom_smiles,
+                                            "geom_id": str(geom_id),
+                                            "isomeric_smiles": iso,
+                                        },
+                                        separators=(",", ":"),
+                                    )
+                                    + "\n"
                                 )
-                                + "\n"
-                            )
+                                iso_to_geom_fh.write(
+                                    json.dumps(
+                                        {
+                                            "isomeric_smiles": iso,
+                                            "geom_key": geom_smiles,
+                                            "geom_id": str(geom_id),
+                                        },
+                                        separators=(",", ":"),
+                                    )
+                                    + "\n"
+                                )
 
-                    processed += 1
-                    pbar.update()
-                    if (processed & 63) == 0:
-                        pbar.refresh()
-
-        geom_to_iso_fh.close()
-        iso_to_geom_fh.close()
+                        processed += 1
+                        pbar.update()
+                        if (processed & 63) == 0:
+                            pbar.refresh()
+        finally:
+            geom_to_iso_fh.close()
+            iso_to_geom_fh.close()
 
         total_distinct_isos = sum(len(v) for v in split_geom_to_iso_map.values())
         avg_confs_per_mol = conf_count_post / mol_count_post if mol_count_post else 0.0
@@ -602,6 +624,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    random.seed(42)
     dest_path = osp.join(args.dest, args.run_name)
     os.makedirs(dest_path, exist_ok=True)
     enqueue_logs = os.environ.get("LOGURU_ENQUEUE", "1") not in {"0", "false", "False"}

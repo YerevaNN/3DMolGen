@@ -41,9 +41,6 @@ GEOM_DATA_KEYS = {
     "binned_stripped_conformers_train",
     "binned_stripped_conformers_valid",
     "binned_stripped_conformers_test",
-    "binned_grouped_isolated_train",
-    "binned_grouped_isolated_valid",
-    "binned_grouped_isolated_test",
 }
 
 

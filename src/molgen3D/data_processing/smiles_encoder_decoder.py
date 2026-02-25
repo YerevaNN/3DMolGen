@@ -777,7 +777,7 @@ def encode_cartesian_binned_v2(mol, bin_size, ranges=None):
             iy_txt = f"{iy:0{digit_width}d}"
             iz_txt = f"{iz:0{digit_width}d}"
 
-            out_parts.append(f"{atom_descriptor}{ix_txt}{iy_txt}{iz_txt};")
+            out_parts.append(f"{atom_descriptor}{ix_txt}{iy_txt}{iz_txt}")
             atom_idx_in_smiles += 1
         else:
             out_parts.append(token["text"])
