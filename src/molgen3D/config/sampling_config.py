@@ -181,6 +181,13 @@ min_p_sampling_config12= GenerationConfig(
     temperature=0.8,
     min_p = 0.05,
 )
+
+numerical_validator_config = GenerationConfig(
+    do_sample=True,
+    temperature=0.8,
+    top_k=100,
+)
+
 sampling_configs = {
     "greedy": greedy_config,
     "top_p_low_temperature": top_p_low_temperature_config,
@@ -213,6 +220,7 @@ sampling_configs = {
     "min_p_sampling10": min_p_sampling_config10,
     "min_p_sampling11": min_p_sampling_config11,
     "min_p_sampling12": min_p_sampling_config12,
+    "numerical_validator": numerical_validator_config,
 }
 
 gen_num_codes = {
