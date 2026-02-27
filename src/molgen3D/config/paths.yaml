@@ -15,6 +15,7 @@ base_paths:
     - "/data/chem-project/checkpoints/hf/yerevann"
   qwen_yerevann_root:
     - "/data/chem-project/checkpoints"
+    - "/home/chem-project/checkpoints"
     - "/data/chem-project/checkpoints/yerevann"
     - "/nfs/h100/raid/chem/checkpoints/yerevann"
   grpo_root:
@@ -277,7 +278,7 @@ models:
       "5e": "step-27500-hf"
 
   qw600_pre_binned_paired:
-    root: "qwen3_06b/260126-1354-3b2e-qwen3_06b_pre_5e_8e-4_binned_grouped"
+    root: "qwen3_06b/260126-0653-7cf8-qwen3_06b_pre_5e_8e-4_binned_grouped"
     steps:
       "1e": "step-5500-hf"
       "2e": "step-11000-hf"

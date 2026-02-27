@@ -1,6 +1,9 @@
 import ast
+import json
 import math
 import re
+from dataclasses import dataclass
+
 from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit.Chem.rdchem import ChiralType
@@ -585,36 +588,288 @@ def coords_to_bins(coords, bins):
 
 def bins_to_coords(bin_indices, bins, use_bin_center=False):
     """
-    Convert bin indices to coordinates by choosing a value within the bin interval for each bin.
-    
+    Convert bin indices to coordinates.
+
+    Tail indices (out-of-range) are snapped to the range boundaries:
+      - index <= 0  (BIN_L) -> bins[0]           (= -R, range start)
+      - index >= N  (BIN_H) -> bins[-1] + step    (= +R, range end)
+
+    Interior indices decode to the midpoint (use_bin_center=True) or a
+    uniformly sampled point within the bin.
+
     Parameters:
-        bin_indices (array-like): Indices of the bins.
-        bins (array-like): The bin edges as used in np.digitize (e.g., output from np.arange).
-        use_bin_center (bool): If True, use the center of the bin; if False, uniformly sample within the bin.
-    
+        bin_indices (array-like): Indices of the bins (np.digitize output).
+        bins (array-like): The bin edges (e.g., output from np.arange).
+        use_bin_center (bool): If True, use the center of the bin;
+            if False, uniformly sample within the bin.
+
     Returns:
-        np.ndarray: Coordinates either as bin centers or randomly sampled within each bin.
+        np.ndarray: Decoded coordinates.
     """
+    step = float(bins[-1] - bins[-2]) if len(bins) > 1 else 1.0
     coords = []
     for bin_idx in bin_indices:
-        # Find the left and right edges of the bin
         if bin_idx <= 0:
-            left = bins[0]
-            right = bins[1] if len(bins) > 1 else bins[0]
+            # Tail low (BIN_L): snap to range start
+            coords.append(float(bins[0]))
         elif bin_idx >= len(bins):
-            left = bins[-1]
-            right = bins[-1] + (bins[-1] - bins[-2]) if len(bins) > 1 else bins[-1] + 1.0
+            # Tail high (BIN_H): snap to range end
+            coords.append(float(bins[-1] + step))
         else:
             left = bins[bin_idx - 1]
             right = bins[bin_idx]
-        # Choose value: random within [left, right) or use center
-        if use_bin_center:
-            coord = (left + right) / 2.0
-        else:
-            coord = np.random.uniform(left, right)
-        coords.append(coord)
+            if use_bin_center:
+                coords.append((left + right) / 2.0)
+            else:
+                coords.append(np.random.uniform(left, right))
     return np.array(coords)
 
+
+# ---------------------------------------------------------------------------
+# BinConfig — unified configuration for uniform / quantile binning
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BinConfig:
+    """Parameters for binned coordinate encoding/decoding.
+
+    Attributes:
+        mode: ``"uniform"`` or ``"quantile"``.
+        L: Lower tail boundary.  Coords < L map to BIN_L.
+        H: Upper tail boundary.  Coords > H map to BIN_H.
+        n_bins: Number of interior bins (B).
+        edges: 1-D array of B+1 edge values ``[e0=L, e1, …, eB=H]``.
+            Used as the argument to ``np.searchsorted``.
+        digit_width: Zero-padding width for serialized bin indices.
+    """
+    mode: str
+    L: float
+    H: float
+    n_bins: int
+    edges: np.ndarray
+    digit_width: int = 3
+
+    def __post_init__(self):
+        self.digit_width = max(3, len(str(self.n_bins + 1)))
+
+    # -- persistence ---------------------------------------------------------
+    def save(self, path: str) -> None:
+        obj = {
+            "mode": self.mode,
+            "L": self.L,
+            "H": self.H,
+            "n_bins": self.n_bins,
+            "edges": self.edges.tolist(),
+        }
+        with open(path, "w") as f:
+            json.dump(obj, f, indent=2)
+
+    @classmethod
+    def load(cls, path: str) -> "BinConfig":
+        with open(path) as f:
+            obj = json.load(f)
+        return cls(
+            mode=obj["mode"],
+            L=obj["L"],
+            H=obj["H"],
+            n_bins=obj["n_bins"],
+            edges=np.array(obj["edges"], dtype=np.float64),
+        )
+
+
+def fit_uniform_bins(
+    values: np.ndarray,
+    n_bins: int = 256,
+    q_low: float = 0.01,
+    q_high: float = 0.99,
+) -> BinConfig:
+    """Fit equal-width bins on the central ``[q_low, q_high]`` of *values*.
+
+    Parameters:
+        values: 1-D array of pooled scalar coordinates (all axes, train only).
+        n_bins: Number of interior bins (B).
+        q_low / q_high: Quantile levels for L and H.
+
+    Returns:
+        A :class:`BinConfig` with ``mode="uniform"``.
+    """
+    L = float(np.quantile(values, q_low))
+    H = float(np.quantile(values, q_high))
+    edges = np.linspace(L, H, n_bins + 1)
+    return BinConfig(mode="uniform", L=L, H=H, n_bins=n_bins, edges=edges)
+
+
+def fit_quantile_bins(
+    values: np.ndarray,
+    n_bins: int = 256,
+    q_low: float = 0.01,
+    q_high: float = 0.99,
+) -> BinConfig:
+    """Fit equal-frequency bins on the central ``[q_low, q_high]`` of *values*.
+
+    Parameters:
+        values: 1-D array of pooled scalar coordinates (all axes, train only).
+        n_bins: Number of interior bins (B).
+        q_low / q_high: Quantile levels for L and H.
+
+    Returns:
+        A :class:`BinConfig` with ``mode="quantile"``.
+    """
+    L = float(np.quantile(values, q_low))
+    H = float(np.quantile(values, q_high))
+    clipped = np.clip(values, L, H)
+    edges = np.quantile(clipped, np.linspace(0, 1, n_bins + 1))
+    return BinConfig(mode="quantile", L=L, H=H, n_bins=n_bins, edges=edges)
+
+
+# ---------------------------------------------------------------------------
+# Encode / decode helpers that use BinConfig
+# ---------------------------------------------------------------------------
+
+def _encode_scalar(c: float, config: BinConfig) -> int:
+    """Map a single scalar coordinate to a bin index.
+
+    Returns:
+        0            for BIN_L  (c < L)
+        1 … n_bins   for interior bins
+        n_bins + 1   for BIN_H  (c > H)
+    """
+    if c < config.L:
+        return 0
+    if c > config.H:
+        return config.n_bins + 1
+    i = int(np.searchsorted(config.edges, c, side="right")) - 1
+    i = max(0, min(i, config.n_bins - 1))
+    return i + 1  # 1-based interior index
+
+
+def _decode_scalar(idx: int, config: BinConfig) -> float:
+    """Map a bin index back to a coordinate value (midpoint decoding).
+
+    Returns:
+        L                                for BIN_L  (idx <= 0)
+        H                                for BIN_H  (idx > n_bins)
+        midpoint(edges[i-1], edges[i])   for interior bin i
+    """
+    if idx <= 0:
+        return config.L
+    if idx > config.n_bins:
+        return config.H
+    return float((config.edges[idx - 1] + config.edges[idx]) / 2.0)
+
+
+def encode_cartesian_with_config(mol, config: BinConfig):
+    """Encode a 3-D conformer using a :class:`BinConfig` (uniform or quantile).
+
+    Same string format as ``encode_cartesian_binned_v2`` — the only
+    difference is how bin indices are computed.
+
+    Returns:
+        (enriched_string, smiles)
+    """
+    mol_no_h = Chem.RemoveHs(mol)
+    if mol_no_h.GetNumConformers() == 0:
+        raise ValueError("Molecule has no conformer / 3D coordinates.")
+
+    smiles = Chem.MolToSmiles(
+        mol_no_h,
+        canonical=True,
+        isomericSmiles=True,
+        allHsExplicit=False,
+        allBondsExplicit=False,
+    )
+
+    if not mol_no_h.HasProp("_smilesAtomOutputOrder"):
+        raise ValueError("Mol is missing _smilesAtomOutputOrder after MolToSmiles.")
+
+    atom_order_raw = mol_no_h.GetProp("_smilesAtomOutputOrder")
+    atom_order = list(map(int, ast.literal_eval(atom_order_raw)))
+
+    expected_atom_tokens = [
+        _expected_plain_token(mol_no_h.GetAtomWithIdx(idx)) for idx in atom_order
+    ]
+
+    tokens = tokenize_smiles(smiles, expected_atom_tokens=expected_atom_tokens)
+    dw = config.digit_width
+
+    out_parts = []
+    atom_idx_in_smiles = 0
+    conformer = mol_no_h.GetConformer()
+
+    for token in tokens:
+        if token["type"] == "atom":
+            if atom_idx_in_smiles >= len(atom_order):
+                raise ValueError("SMILES atom tokens exceed atom order mapping.")
+
+            rd_idx = atom_order[atom_idx_in_smiles]
+            atom_text = token["text"]
+            atom_descriptor = atom_text if atom_text.startswith("[") else f"[{atom_text}]"
+
+            pos = conformer.GetAtomPosition(rd_idx)
+            ix = _encode_scalar(pos.x, config)
+            iy = _encode_scalar(pos.y, config)
+            iz = _encode_scalar(pos.z, config)
+
+            out_parts.append(
+                f"{atom_descriptor}{ix:0{dw}d}{iy:0{dw}d}{iz:0{dw}d};"
+            )
+            atom_idx_in_smiles += 1
+        else:
+            out_parts.append(token["text"])
+
+    if atom_idx_in_smiles != len(atom_order):
+        raise ValueError(
+            f"Atom count mismatch: mapped {atom_idx_in_smiles} atoms "
+            f"but expected {len(atom_order)}."
+        )
+
+    return "".join(out_parts), smiles
+
+
+def decode_cartesian_with_config(enriched_string: str, config: BinConfig):
+    """Decode an enriched string produced by :func:`encode_cartesian_with_config`.
+
+    Returns an RDKit Mol with a 3-D conformer.
+    """
+    normalized = enriched_string.replace(";", "")
+    tokens = tokenize_enriched_v2(normalized, config.digit_width)
+
+    smiles_parts = []
+    coords = []
+    for token in tokens:
+        if token["type"] == "atom_with_coords":
+            desc = token["atom_desc"]
+            desc_inner = desc[1:-1]
+            if desc_inner in _ORGANIC_SUBSET:
+                smiles_parts.append(desc_inner)
+            else:
+                smiles_parts.append(desc)
+
+            ix, iy, iz = (int(round(v)) for v in token["coords"])
+            x = _decode_scalar(ix, config)
+            y = _decode_scalar(iy, config)
+            z = _decode_scalar(iz, config)
+            coords.append((x, y, z))
+        else:
+            smiles_parts.append(token["text"])
+
+    smiles = "".join(smiles_parts)
+    mol = Chem.MolFromSmiles(smiles, sanitize=False)
+    if mol is None:
+        raise ValueError(f"Failed to parse rebuilt SMILES: {smiles}")
+    if mol.GetNumAtoms() != len(coords):
+        raise ValueError(
+            f"Atom count mismatch: mol has {mol.GetNumAtoms()} atoms, "
+            f"coords list has {len(coords)} entries."
+        )
+
+    Chem.SanitizeMol(mol)
+
+    conformer = Chem.Conformer(mol.GetNumAtoms())
+    for idx, (x, y, z) in enumerate(coords):
+        conformer.SetAtomPosition(idx, Point3D(x, y, z))
+    mol.AddConformer(conformer, assignId=True)
+    return mol
 
 
 def encode_cartesian_binned(mol, bin_size, ranges=None):
@@ -625,8 +880,6 @@ def encode_cartesian_binned(mol, bin_size, ranges=None):
     Returns:
         enriched_string (str): SMILES-like string with [atom]<ix,iy,iz> tokens.
         smiles (str): Canonical SMILES of the heavy-atom molecule.
-        bins (list[np.ndarray]): [bins_x, bins_y, bins_z] used for binning.
-        ranges (list[tuple[float, float]]): Axis ranges used to construct bins.
     """
     mol_no_h = Chem.RemoveHs(mol)
     if mol_no_h.GetNumConformers() == 0:
@@ -653,7 +906,7 @@ def encode_cartesian_binned(mol, bin_size, ranges=None):
     tokens = tokenize_smiles(smiles, expected_atom_tokens=expected_atom_tokens)
 
     if ranges is None:
-        ranges = [(-13.0, 13.0), (-13.0, 13.0), (-13.0, 13.0)]
+        ranges = [(-11.0, 11.0), (-11.0, 11.0), (-11.0, 11.0)]
     if len(ranges) != 3:
         raise ValueError("ranges must be a sequence of three (start, end) tuples.")
     bins = get_bins_for_coords(ranges, bin_size=bin_size)
@@ -707,13 +960,12 @@ def encode_cartesian_binned(mol, bin_size, ranges=None):
 def encode_cartesian_binned_v2(mol, bin_size, ranges=None):
     """
     Serialize a 3D RDKit Mol into an enriched text representation where
-    the Cartesian coordinates are replaced by bin indices.
+    the Cartesian coordinates are replaced by bin indices (v2 format:
+    concatenated digits with semicolon delimiter, uniform digit width).
 
     Returns:
-        enriched_string (str): SMILES-like string with [atom]<ix,iy,iz> tokens.
+        enriched_string (str): SMILES-like string with [atom]XXXXXXXXX; tokens.
         smiles (str): Canonical SMILES of the heavy-atom molecule.
-        bins (list[np.ndarray]): [bins_x, bins_y, bins_z] used for binning.
-        ranges (list[tuple[float, float]]): Axis ranges used to construct bins.
     """
     mol_no_h = Chem.RemoveHs(mol)
     if mol_no_h.GetNumConformers() == 0:
@@ -740,7 +992,7 @@ def encode_cartesian_binned_v2(mol, bin_size, ranges=None):
     tokens = tokenize_smiles(smiles, expected_atom_tokens=expected_atom_tokens)
 
     if ranges is None:
-        ranges = [(-13.0, 13.0), (-13.0, 13.0), (-13.0, 13.0)]
+        ranges = [(-11.0, 11.0), (-11.0, 11.0), (-11.0, 11.0)]
     if len(ranges) != 3:
         raise ValueError("ranges must be a sequence of three (start, end) tuples.")
     bins = get_bins_for_coords(ranges, bin_size=bin_size)
@@ -777,7 +1029,7 @@ def encode_cartesian_binned_v2(mol, bin_size, ranges=None):
             iy_txt = f"{iy:0{digit_width}d}"
             iz_txt = f"{iz:0{digit_width}d}"
 
-            out_parts.append(f"{atom_descriptor}{ix_txt}{iy_txt}{iz_txt}")
+            out_parts.append(f"{atom_descriptor}{ix_txt}{iy_txt}{iz_txt};")
             atom_idx_in_smiles += 1
         else:
             out_parts.append(token["text"])
