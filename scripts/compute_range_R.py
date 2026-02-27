@@ -1,15 +1,3 @@
-"""
-Compute the binning range R from training data.
-
-For each conformer, computes the radius proxy:
-    m = max(|Xc|)   over all atoms and all three axes
-
-Then picks R = quantile(m_train, 0.9999), rounded up to the nearest 0.5 A.
-
-Usage:
-    python scripts/compute_range_R.py [--data_dir /path/to/pickles]
-"""
-
 import argparse
 import math
 import pickle
@@ -30,7 +18,6 @@ def load_split(data_dir, name):
 
 
 def conformer_radius_proxies(data):
-    """Compute m = max(|Xc|) for every conformer. Returns 1-D array."""
     radii = []
     for _smiles, confs in data:
         for mol in confs:
@@ -40,12 +27,10 @@ def conformer_radius_proxies(data):
 
 
 def round_up(value, step=0.5):
-    """Round *up* to the nearest multiple of step."""
     return math.ceil(value / step) * step
 
 
 def count_overflow(data, R, label):
-    """Count conformers with any coordinate outside [-R, R]."""
     n_confs = 0
     n_overflow = 0
     for _smiles, confs in data:

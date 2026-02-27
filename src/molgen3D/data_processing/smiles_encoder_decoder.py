@@ -12,7 +12,6 @@ import numpy as np
 
 
 def truncate(x, precision=4):
-    """Format a float with exactly ``precision`` decimal places (truncation, not rounding)."""
     if precision < 0:
         raise ValueError("precision must be non-negative")
 
@@ -65,23 +64,6 @@ _WHITESPACE_RE = re.compile(r"\s+")
 _ORGANIC_SUBSET = {"B", "C", "N", "O", "P", "S", "F", "Cl", "Br", "I", "b", "c", "n", "o", "p", "s"}
 
 def strip_smiles(s: str) -> str:
-    """
-    Normalize enriched SMILES strings into a 'canonical-ish' comparison form.
-
-    Supported inputs:
-      - Legacy enriched strings:  C<...>N<...> (atoms without brackets + coords)
-      - Current enriched strings: [C]<...>[N]<...> (atoms wrapped in brackets)
-      - Binned enriched strings: [C]123456789[N]123456789 (atoms wrapped in brackets + digits)
-      - Plain SMILES:            C[NH2+]Cc1...
-
-    Steps:
-      1. Remove every <...> coordinate block.
-      2. Remove binned coordinate digits: [C]123456789 -> [C].
-      3. Collapse decorative carbon H-counts: [CH3],[CH2],[CH],[cH] -> C/c.
-      4. Drop brackets around simple atoms: [C]->C, [c]->c, [N]->N, ...
-      5. Keep chemically meaningful brackets: [NH2+], [nH], [H], [Pt+2], etc.
-    """
-
     if not s:
         return ""
 
@@ -140,7 +122,6 @@ def _expected_plain_token(atom) -> str:
 
 
 def tokenize_smiles(smiles_str, expected_atom_tokens=None):
-    """Tokenize a canonical SMILES string into atom/non-atom tokens."""
     tokens = []
     i = 0
     n = len(smiles_str)
@@ -239,7 +220,6 @@ def tokenize_smiles(smiles_str, expected_atom_tokens=None):
 
 
 def _format_atom_descriptor(atom, *, allow_chirality: bool = True):
-    """Return a bracketed atom descriptor that preserves valence information."""
     symbol = atom.GetSymbol()
     aromatic = atom.GetIsAromatic()
     if aromatic and len(symbol) == 1:
@@ -279,9 +259,6 @@ _CARBON_DECORATIVE_TAIL_RE = re.compile(r"^H\d*$")
 
 
 def _normalize_atom_descriptor(descriptor: str) -> str:
-    """
-    Collapse decorative hydrogen counts on neutral carbon descriptors.
-    """
     match = _CARBON_DESCRIPTOR_RE.match(descriptor)
     if not match or match.group("iso"):
         return descriptor
@@ -300,7 +277,6 @@ def _normalize_atom_descriptor(descriptor: str) -> str:
 
 
 def encode_cartesian_v2(mol, precision=4):
-    """Serialize a 3D RDKit Mol into the enriched text representation."""
     mol_no_h = Chem.RemoveHs(mol)
     if mol_no_h.GetNumConformers() == 0:
         raise ValueError("Molecule has no conformer / 3D coordinates.")
@@ -367,7 +343,6 @@ _ENRICHED_TOKEN_PATTERN = re.compile(
 )
 
 def tokenize_enriched(enriched):
-    """Tokenize the enriched representation back into atoms (with coords) and other tokens."""
     tokens = []
     pos = 0
     for match in _ENRICHED_TOKEN_PATTERN.finditer(enriched):
@@ -472,7 +447,6 @@ def tokenize_enriched_v2(enriched, digit_width):
 
 
 def decode_cartesian_v2(enriched_string):
-    """Reconstruct an RDKit Mol (with conformer) from the enriched string produced by the encoder."""
     tokens = tokenize_enriched(enriched_string)
 
     smiles_parts = []
@@ -508,7 +482,6 @@ def decode_cartesian_v2(enriched_string):
 
 
 def embed_3d_conformer_from_smiles(smiles, seed=0):
-    """Generate a 3D conformer for a SMILES, drop implicit hydrogens, and return the resulting Mol."""
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         raise ValueError(f"Could not parse SMILES: {smiles}")
@@ -546,7 +519,6 @@ def embed_3d_conformer_from_smiles(smiles, seed=0):
 
 
 def coords_rmsd(mol_a, mol_b):
-    """Compute RMSD between conformer-0 coordinates assuming identical atom order."""
     if mol_a.GetNumAtoms() != mol_b.GetNumAtoms():
         raise ValueError("Cannot compare coordinates for molecules with different atom counts.")
 
@@ -569,7 +541,6 @@ def coords_rmsd(mol_a, mol_b):
     return min(math.sqrt(sse / n), rmsd_rdkit)
 
 def get_bins_for_coords(ranges, bin_size=0.104):
-    """Get bins for coordinates based on the ranges and bin size."""
     bins = []
     for start, end in ranges:
         bins.append(np.arange(start, end, bin_size))
@@ -577,35 +548,14 @@ def get_bins_for_coords(ranges, bin_size=0.104):
 
 
 def get_digit_width(bins):
-    """Determine the zero-padding width based on the maximum number of bins."""
     max_bin_len = max(len(b) for b in bins)
     return max(3, len(str(max_bin_len)))
 
 def coords_to_bins(coords, bins):
-    """Convert coordinates to bins."""
     return np.digitize(coords, bins)
 
 
 def bins_to_coords(bin_indices, bins, use_bin_center=False):
-    """
-    Convert bin indices to coordinates.
-
-    Tail indices (out-of-range) are snapped to the range boundaries:
-      - index <= 0  (BIN_L) -> bins[0]           (= -R, range start)
-      - index >= N  (BIN_H) -> bins[-1] + step    (= +R, range end)
-
-    Interior indices decode to the midpoint (use_bin_center=True) or a
-    uniformly sampled point within the bin.
-
-    Parameters:
-        bin_indices (array-like): Indices of the bins (np.digitize output).
-        bins (array-like): The bin edges (e.g., output from np.arange).
-        use_bin_center (bool): If True, use the center of the bin;
-            if False, uniformly sample within the bin.
-
-    Returns:
-        np.ndarray: Decoded coordinates.
-    """
     step = float(bins[-1] - bins[-2]) if len(bins) > 1 else 1.0
     coords = []
     for bin_idx in bin_indices:
@@ -625,23 +575,8 @@ def bins_to_coords(bin_indices, bins, use_bin_center=False):
     return np.array(coords)
 
 
-# ---------------------------------------------------------------------------
-# BinConfig — unified configuration for uniform / quantile binning
-# ---------------------------------------------------------------------------
-
 @dataclass
 class BinConfig:
-    """Parameters for binned coordinate encoding/decoding.
-
-    Attributes:
-        mode: ``"uniform"`` or ``"quantile"``.
-        L: Lower tail boundary.  Coords < L map to BIN_L.
-        H: Upper tail boundary.  Coords > H map to BIN_H.
-        n_bins: Number of interior bins (B).
-        edges: 1-D array of B+1 edge values ``[e0=L, e1, …, eB=H]``.
-            Used as the argument to ``np.searchsorted``.
-        digit_width: Zero-padding width for serialized bin indices.
-    """
     mode: str
     L: float
     H: float
@@ -683,16 +618,6 @@ def fit_uniform_bins(
     q_low: float = 0.01,
     q_high: float = 0.99,
 ) -> BinConfig:
-    """Fit equal-width bins on the central ``[q_low, q_high]`` of *values*.
-
-    Parameters:
-        values: 1-D array of pooled scalar coordinates (all axes, train only).
-        n_bins: Number of interior bins (B).
-        q_low / q_high: Quantile levels for L and H.
-
-    Returns:
-        A :class:`BinConfig` with ``mode="uniform"``.
-    """
     L = float(np.quantile(values, q_low))
     H = float(np.quantile(values, q_high))
     edges = np.linspace(L, H, n_bins + 1)
@@ -705,16 +630,6 @@ def fit_quantile_bins(
     q_low: float = 0.01,
     q_high: float = 0.99,
 ) -> BinConfig:
-    """Fit equal-frequency bins on the central ``[q_low, q_high]`` of *values*.
-
-    Parameters:
-        values: 1-D array of pooled scalar coordinates (all axes, train only).
-        n_bins: Number of interior bins (B).
-        q_low / q_high: Quantile levels for L and H.
-
-    Returns:
-        A :class:`BinConfig` with ``mode="quantile"``.
-    """
     L = float(np.quantile(values, q_low))
     H = float(np.quantile(values, q_high))
     clipped = np.clip(values, L, H)
@@ -722,18 +637,7 @@ def fit_quantile_bins(
     return BinConfig(mode="quantile", L=L, H=H, n_bins=n_bins, edges=edges)
 
 
-# ---------------------------------------------------------------------------
-# Encode / decode helpers that use BinConfig
-# ---------------------------------------------------------------------------
-
 def _encode_scalar(c: float, config: BinConfig) -> int:
-    """Map a single scalar coordinate to a bin index.
-
-    Returns:
-        0            for BIN_L  (c < L)
-        1 … n_bins   for interior bins
-        n_bins + 1   for BIN_H  (c > H)
-    """
     if c < config.L:
         return 0
     if c > config.H:
@@ -744,13 +648,6 @@ def _encode_scalar(c: float, config: BinConfig) -> int:
 
 
 def _decode_scalar(idx: int, config: BinConfig) -> float:
-    """Map a bin index back to a coordinate value (midpoint decoding).
-
-    Returns:
-        L                                for BIN_L  (idx <= 0)
-        H                                for BIN_H  (idx > n_bins)
-        midpoint(edges[i-1], edges[i])   for interior bin i
-    """
     if idx <= 0:
         return config.L
     if idx > config.n_bins:
@@ -759,14 +656,6 @@ def _decode_scalar(idx: int, config: BinConfig) -> float:
 
 
 def encode_cartesian_with_config(mol, config: BinConfig):
-    """Encode a 3-D conformer using a :class:`BinConfig` (uniform or quantile).
-
-    Same string format as ``encode_cartesian_binned_v2`` — the only
-    difference is how bin indices are computed.
-
-    Returns:
-        (enriched_string, smiles)
-    """
     mol_no_h = Chem.RemoveHs(mol)
     if mol_no_h.GetNumConformers() == 0:
         raise ValueError("Molecule has no conformer / 3D coordinates.")
@@ -827,10 +716,6 @@ def encode_cartesian_with_config(mol, config: BinConfig):
 
 
 def decode_cartesian_with_config(enriched_string: str, config: BinConfig):
-    """Decode an enriched string produced by :func:`encode_cartesian_with_config`.
-
-    Returns an RDKit Mol with a 3-D conformer.
-    """
     normalized = enriched_string.replace(";", "")
     tokens = tokenize_enriched_v2(normalized, config.digit_width)
 
@@ -873,14 +758,6 @@ def decode_cartesian_with_config(enriched_string: str, config: BinConfig):
 
 
 def encode_cartesian_binned(mol, bin_size, ranges=None):
-    """
-    Serialize a 3D RDKit Mol into an enriched text representation where
-    the Cartesian coordinates are replaced by bin indices.
-
-    Returns:
-        enriched_string (str): SMILES-like string with [atom]<ix,iy,iz> tokens.
-        smiles (str): Canonical SMILES of the heavy-atom molecule.
-    """
     mol_no_h = Chem.RemoveHs(mol)
     if mol_no_h.GetNumConformers() == 0:
         raise ValueError("Molecule has no conformer / 3D coordinates.")
@@ -958,15 +835,6 @@ def encode_cartesian_binned(mol, bin_size, ranges=None):
 
 
 def encode_cartesian_binned_v2(mol, bin_size, ranges=None):
-    """
-    Serialize a 3D RDKit Mol into an enriched text representation where
-    the Cartesian coordinates are replaced by bin indices (v2 format:
-    concatenated digits with semicolon delimiter, uniform digit width).
-
-    Returns:
-        enriched_string (str): SMILES-like string with [atom]XXXXXXXXX; tokens.
-        smiles (str): Canonical SMILES of the heavy-atom molecule.
-    """
     mol_no_h = Chem.RemoveHs(mol)
     if mol_no_h.GetNumConformers() == 0:
         raise ValueError("Molecule has no conformer / 3D coordinates.")
@@ -1044,20 +912,6 @@ def encode_cartesian_binned_v2(mol, bin_size, ranges=None):
 
 
 def decode_cartesian_binned_v2(enriched_string, bins, use_bin_center=True):
-    """
-    Reconstruct an RDKit Mol (with conformer) from a v2 binned enriched string.
-
-    Supports both schemas:
-        - With semicolons: [c]123123123;[n]456456456;
-        - Without semicolons: [c]123123123[n]456456456
-
-    The string must have been produced by ``encode_cartesian_binned_v2`` using
-    the same set of ``bins`` (one array per axis).
-
-    Semicolons (';') are treated as optional delimiters and are stripped
-    before parsing, so both ``[c]123123123;`` and ``[c]123123123`` decode
-    identically here, while upstream code can still see the raw schema.
-    """
     if len(bins) != 3:
         raise ValueError("bins must be a sequence of three bin arrays (x, y, z).")
 

@@ -1,16 +1,3 @@
-"""
-Fit bin configurations from training data.
-
-Produces two BinConfig JSON files (uniform + quantile) that can be passed
-to ``encode_cartesian_with_config`` / ``decode_cartesian_with_config``.
-
-Usage:
-    python scripts/fit_bins.py \
-        --data_dir /data/molgen/geom_revisited \
-        --out_dir  src/molgen3D/config/bin_configs \
-        --n_bins 256 --q_low 0.01 --q_high 0.99
-"""
-
 import argparse
 import os
 import pickle
@@ -40,15 +27,6 @@ def load_split(data_dir, name):
 
 
 def pool_coords(data, x_only=True):
-    """Pool scalar coordinate values into a single 1-D array.
-
-    Args:
-        data: list of (smiles, [mol, ...]) tuples.
-        x_only: if True, pool only the X coordinate (column 0).
-            The X-axis distribution is representative of all axes
-            (random molecular orientations), so quantile edges
-            computed from X alone can be reused for Y and Z.
-    """
     all_vals = []
     for _smiles, confs in data:
         for mol in confs:
@@ -61,7 +39,6 @@ def pool_coords(data, x_only=True):
 
 
 def overflow_stats(data, L, H, label):
-    """Count conformers with any coordinate outside [L, H]."""
     n_confs = n_overflow = 0
     for _smiles, confs in data:
         for mol in confs:
