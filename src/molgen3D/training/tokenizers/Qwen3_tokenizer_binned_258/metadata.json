@@ -1,0 +1,12 @@
+{
+  "base_vocab_size": 151673,
+  "num_bin_tokens_added": 258,
+  "new_vocab_size": 151931,
+  "n_interior_bins": 256,
+  "bin_l_token": "000",
+  "bin_h_token": "257",
+  "bin_token_id_range": [
+    151673,
+    151930
+  ]
+}
