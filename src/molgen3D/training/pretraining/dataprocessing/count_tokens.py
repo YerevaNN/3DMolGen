@@ -1857,7 +1857,7 @@ def main() -> None:
     for alias in args.tokenizers:
         tok_path = str(get_tokenizer_path(alias))
         tokenizer = AutoTokenizer.from_pretrained(
-            tok_path, use_fast=True, fix_mistral_regex=True
+            tok_path, use_fast=True,
         )
         tokenizer_map[alias] = (tok_path, tokenizer)
         tokenizer_info_map[alias] = {
