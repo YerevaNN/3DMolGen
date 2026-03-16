@@ -15,6 +15,8 @@ base_paths:
     - "/data/chem-project/checkpoints/hf/yerevann"
   qwen_yerevann_root:
     - "/data/chem-project/checkpoints"
+    - "/mnt/weka/data/chem-project/checkpoints"
+    - "/home/chem-project/checkpoints"
     - "/data/chem-project/checkpoints/yerevann"
     - "/nfs/h100/raid/chem/checkpoints/yerevann"
   grpo_root:
@@ -29,6 +31,7 @@ base_paths:
   pretrain_logs_root: "outputs/pretrain_logs"
   wandb_root: "wandb_runs"
   qwen3_0.6b_base_model:
+    - "/mnt/weka/vtarasov/Qwen3-0.6B-Base"
     - "/data/chem-project/checkpoints/Qwen3-0.6B-Base"
     - "/nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b/Qwen3-0.6B-Base"
     - "/data/chem-project/checkpoints/yerevann/qwen3_06b/Qwen3-0.6B-Base"
@@ -48,6 +51,7 @@ data:
   distinct_smi: "tmp/distinct_smi_filtered_13.pickle"
   xl_smi: "xl_smi.pickle"
   qm9_smi: "qm9_smi.pickle"
+  revisited_smi: "revisited_smi.pickle"
   icl_5_smi: "icl_5_smi.pickle"
   icl_10_smi: "icl_10_smi.pickle"
   icl_20_smi: "icl_20_smi.pickle"
@@ -117,11 +121,54 @@ data:
     - "3DMolGen_data/binned_filtered/processed_strings/test"
     - "binned_filtered/processed_strings/test"
 
+  revisited_cartesian_train:
+    - "geom_revisited_cartesian/processed_strings/train"
+  revisited_cartesian_valid:
+    - "geom_revisited_cartesian/processed_strings/valid"
+  revisited_cartesian_test:
+    - "geom_revisited_cartesian/processed_strings/test"
+
+  revisited_quantile_binned_train:
+    - "geom_revisited_quantile_binned/processed_strings/train"
+  revisited_quantile_binned_valid:
+    - "geom_revisited_quantile_binned/processed_strings/valid"
+  revisited_quantile_binned_test:
+    - "geom_revisited_quantile_binned/processed_strings/test"
+
+  revisited_uniform_binned_train:
+    - "geom_revisited_uniform_binned/processed_strings/train"
+  revisited_uniform_binned_valid:
+    - "geom_revisited_uniform_binned/processed_strings/valid"
+  revisited_uniform_binned_test:
+    - "geom_revisited_uniform_binned/processed_strings/test"
+
+  revisited_cartesian_isomeric_train:
+    - "geom_revisited_cartesian_isomeric/processed_strings/train"
+  revisited_cartesian_isomeric_valid:
+    - "geom_revisited_cartesian_isomeric/processed_strings/valid"
+  revisited_cartesian_isomeric_test:
+    - "geom_revisited_cartesian_isomeric/processed_strings/test"
+
+  revisited_quantile_binned_isomeric_train:
+    - "geom_revisited_quantile_binned_isomeric/processed_strings/train"
+  revisited_quantile_binned_isomeric_valid:
+    - "geom_revisited_quantile_binned_isomeric/processed_strings/valid"
+  revisited_quantile_binned_isomeric_test:
+    - "geom_revisited_quantile_binned_isomeric/processed_strings/test"
+
+  revisited_uniform_binned_isomeric_train:
+    - "geom_revisited_uniform_binned_isomeric/processed_strings/train"
+  revisited_uniform_binned_isomeric_valid:
+    - "geom_revisited_uniform_binned_isomeric/processed_strings/valid"
+  revisited_uniform_binned_isomeric_test:
+    - "geom_revisited_uniform_binned_isomeric/processed_strings/test"
+
 tokenizers:
   llama3_chem_v1: "src/molgen3D/training/tokenizers/Llama-3.2-chem-1B-v1"
   qwen3_0.6b_custom: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_custom"
   qwen3_0.6b_origin: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_original"
   qwen3_0.6b_binned: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_binned"
+  qwen3_0.6b_binned_258: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_binned_258"
 
 models:
   # ---------- BASE MODELS ----------
@@ -277,13 +324,37 @@ models:
       "5e": "step-27500-hf"
 
   qw600_pre_binned_paired:
-    root: "qwen3_06b/260126-1354-3b2e-qwen3_06b_pre_5e_8e-4_binned_grouped"
+    root: "qwen3_06b/260126-0653-7cf8-qwen3_06b_pre_5e_8e-4_binned_grouped"
     steps:
       "1e": "step-5500-hf"
       "2e": "step-11000-hf"
       "3e": "step-16500-hf"
       "4e": "step-22000-hf"
       "5e": "step-27500-hf"
+
+  qw600_pre_binned_revisited_uniform_isomeric:
+    root: "qwen3_06b/260308-0317-2013-qwen3_06b_pre_4e_revisited_uniform_binned_isomeric/"
+    steps:
+      "1e": "step-6800-hf"
+      "2e": "step-13600-hf"
+      "3e": "step-20400-hf"
+      "4e": "step-27200-hf"
+    
+  qw600_pre_binned_revisited_quantile_isomeric:
+    root: "qwen3_06b/260308-0316-a956-qwen3_06b_pre_4e_revisited_quantile_binned_isomeric/"
+    steps:
+      "1e": "step-6800-hf"
+      "2e": "step-13600-hf"
+      "3e": "step-20400-hf"
+      "4e": "step-27200-hf"
+
+  qw600_pre_binned_revisited_cartesian_isomeric:
+    root: "qwen3_06b/260308-0316-05c6-qwen3_06b_pre_4e_revisited_cartesian_isomeric/"
+    steps:
+      "1e": "step-20500-hf"
+      "2e": "step-41000-hf"
+      "3e": "step-61500-hf"
+      "4e": "step-82000-hf"
 
   # ---------- GRPO / FINETUNED MODELS (same structure) ----------
 
