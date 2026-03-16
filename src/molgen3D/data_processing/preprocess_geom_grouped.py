@@ -17,9 +17,11 @@ from tqdm.auto import tqdm
 
 from molgen3D.data_processing.utils import JsonlSplitWriter
 from molgen3D.data_processing.smiles_encoder_decoder import (
+    BinConfig,
     encode_cartesian_binned,
     encode_cartesian_v2,
     encode_cartesian_binned_v2,
+    encode_cartesian_with_config,
 )
 from molgen3D.utils.utils import load_pkl
 
@@ -171,6 +173,8 @@ def _read_mol_impl(
     Dict[str, List[Dict[str, Any]]],
 ]:
     mol_path, max_confs, precision, embedding_func, bin_size, ranges, sort_by = args
+    bin_config = args[7] if len(args) > 7 else None
+    use_isomeric_smiles = args[8] if len(args) > 8 else False
     mol_object = load_pkl(mol_path)
     geom_key = mol_object.get("smiles")
     geom_id = infer_geom_id(mol_path)
@@ -204,7 +208,9 @@ def _read_mol_impl(
 
     for _, _, mol, _conf_meta, energy, weight, conf_id in scored_candidates:
         try:
-            if embedding_func in (encode_cartesian_binned, encode_cartesian_binned_v2):
+            if embedding_func is encode_cartesian_with_config:
+                embedded_smile, iso_smile = embedding_func(mol, bin_config)
+            elif embedding_func in (encode_cartesian_binned, encode_cartesian_binned_v2):
                 embedded_smile, iso_smile = embedding_func(
                     mol,
                     bin_size=bin_size,
@@ -217,6 +223,7 @@ def _read_mol_impl(
             local_failures["encoding_error"] += 1
             continue
 
+        noniso = None
         # Compute nonisomeric SMILES only for conformers that encoded successfully
         try:
             noniso = Chem.MolToSmiles(
@@ -230,7 +237,8 @@ def _read_mol_impl(
         except Exception:
             pass
 
-        isomeric_smiles.add(iso_smile)
+        canonical_smiles = iso_smile if use_isomeric_smiles else (noniso or iso_smile)
+        isomeric_smiles.add(canonical_smiles)
 
         sample_entry: Dict[str, Any] = {
             "embedded_smiles": embedded_smile,
@@ -240,7 +248,7 @@ def _read_mol_impl(
         }
         if conf_id is not None:
             sample_entry["conf_id"] = conf_id
-        sample_isomers[iso_smile].append(sample_entry)
+        sample_isomers[canonical_smiles].append(sample_entry)
 
         pickle_entry: Dict[str, Any] = {
             "mol": copy_single_conformer_mol(mol),
@@ -251,7 +259,7 @@ def _read_mol_impl(
         }
         if conf_id is not None:
             pickle_entry["conf_id"] = conf_id
-        pickle_isomers[iso_smile].append(pickle_entry)
+        pickle_isomers[canonical_smiles].append(pickle_entry)
 
     if len(nonisomeric_smiles) > 1:
         log.info(
@@ -317,6 +325,8 @@ def preprocess(
     bin_size: float = 0.104,
     ranges: str = "[-13.0, 13.0], [-13.0, 13.0], [-13.0, 13.0]",
     sort_by: str = "energy",
+    bin_config_path: Optional[str] = None,
+    isomeric: bool = False,
 ) -> None:
     if dest_path is None:
         raise ValueError("dest_path must be provided for preprocessing output")
@@ -326,7 +336,25 @@ def preprocess(
         "cartesian": encode_cartesian_v2,
         "cartesian_binned": encode_cartesian_binned,
         "cartesian_binned_v2": encode_cartesian_binned_v2,
+        "uniform_binned": encode_cartesian_with_config,
+        "quantile_binned": encode_cartesian_with_config,
     }
+    bin_config = None
+    if embedding_type in ("uniform_binned", "quantile_binned"):
+        if bin_config_path is None:
+            raise ValueError(
+                f"--bin_config_path is required for embedding_type={embedding_type!r}. "
+                f"Generate one with: python scripts/fit_bins.py"
+            )
+        bin_config = BinConfig.load(bin_config_path)
+        log.info(
+            "Loaded BinConfig from {} | mode={} L={:.4f} H={:.4f} n_bins={}",
+            bin_config_path,
+            bin_config.mode,
+            bin_config.L,
+            bin_config.H,
+            bin_config.n_bins,
+        )
     if embedding_type not in embedding_registry:
         raise ValueError(f"Unsupported embedding_type '{embedding_type}'. Options: {sorted(embedding_registry)}")
     embedding_func = embedding_registry[embedding_type]
@@ -403,6 +431,8 @@ def preprocess(
                     bin_size,
                     parsed_ranges,
                     sort_by,
+                    bin_config,
+                    isomeric,
                 )
                 for path in mol_paths
             ]
@@ -553,7 +583,14 @@ if __name__ == "__main__":
         "--embedding_type",
         "-et",
         type=str,
-        choices=["cartesian", "cartesian_v2", "cartesian_binned", "cartesian_binned_v2"],
+        choices=[
+            "cartesian",
+            "cartesian_v2",
+            "cartesian_binned",
+            "cartesian_binned_v2",
+            "uniform_binned",
+            "quantile_binned",
+        ],
         default="cartesian_v2",
         help="Embedding type to use for enrichment.",
     )
@@ -621,6 +658,17 @@ if __name__ == "__main__":
         default="energy",
         help="Sort conformers by energy, weight, or keep original order.",
     )
+    parser.add_argument(
+        "--bin_config_path",
+        type=str,
+        default=None,
+        help="Path to BinConfig JSON (required for uniform_binned / quantile_binned).",
+    )
+    parser.add_argument(
+        "--isomeric",
+        action="store_true",
+        help="If set, use isomeric SMILES keys; otherwise use non-isomeric keys when available.",
+    )
 
     args = parser.parse_args()
 
@@ -649,4 +697,6 @@ if __name__ == "__main__":
         sort_by=args.sort_by,
         bin_size=args.bin_size,
         ranges=args.ranges,
+        bin_config_path=args.bin_config_path,
+        isomeric=args.isomeric,
     )
