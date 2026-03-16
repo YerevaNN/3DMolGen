@@ -25,7 +25,10 @@ def _compute_key_matrix(key: str, true_confs: List, gen_mols: List, use_alignmol
     n_true = len(true_confs)
     n_gen = len(gen_mols)
     mat = np.full((n_true, n_gen), np.nan, dtype=float)
-    for i_true, ref_mol in enumerate(true_confs):
+    # Generated molecules are preprocessed with RemoveHs; normalize references
+    # the same way so RMSD compares equivalent graph representations.
+    ref_confs = [rdkit_utils.RemoveHs(ref_mol) for ref_mol in true_confs]
+    for i_true, ref_mol in enumerate(ref_confs):
         row = np.array([rdkit_utils._best_rmsd(gen_mol, ref_mol, use_alignmol) for gen_mol in gen_mols], dtype=float)
         if row.shape == (n_gen,):
             mat[i_true] = row
@@ -204,6 +207,7 @@ def process_generation_pickle(
     gt_stats = {
         "total_molecules_num": len(gt_dict),
         "total_conformers_num": sum(_num_confs(value) for value in gt_dict.values()),
+        "gt_path": get_data_path(f"{args.test_set}_smi"),
     }
     
     t_prep = time.time()
@@ -334,7 +338,13 @@ def main() -> None:
     parser.add_argument("--num-workers", type=int, default=80, help="Number of workers for evaluation")
     parser.add_argument("--max-recent", type=int, default=3, help="Max recent missing directories to evaluate")
     parser.add_argument("--specific-dir", type=str, default=None, help="Specific directory to evaluate")
-    parser.add_argument("--test_set", type=str, default="distinct", choices=["clean", "distinct", "xl", "qm9", "valid"], help="Test set to evaluate")
+    parser.add_argument(
+        "--test_set",
+        type=str,
+        default="distinct",
+        choices=["clean", "distinct", "xl", "qm9", "valid", "revisited"],
+        help="Test set to evaluate",
+    )
     args = parser.parse_args()
     
     run_directory_mode(args)

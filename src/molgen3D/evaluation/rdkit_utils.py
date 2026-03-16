@@ -52,12 +52,43 @@ def process_molecules_remove_hs(model_preds):
 def _best_rmsd(probe, ref, use_alignmol: bool):
     """Calculate RMSD between two molecules."""
     from rdkit.Chem import rdMolAlign as MA
+    from rdkit import Chem
 
     try:
         if use_alignmol:
             return float(MA.AlignMol(probe, ref))
         return float(MA.GetBestRMS(probe, ref))
     except Exception:
-        import numpy as np
-        return np.nan
+        # Fallback: strip stereochemistry and retry. This rescues cases where
+        # molecules share the same graph but stereo labels prevent matching.
+        try:
+            probe_no_stereo = Chem.Mol(probe)
+            ref_no_stereo = Chem.Mol(ref)
+            Chem.RemoveStereochemistry(probe_no_stereo)
+            Chem.RemoveStereochemistry(ref_no_stereo)
+
+            if use_alignmol:
+                return float(MA.AlignMol(probe_no_stereo, ref_no_stereo))
+
+            # Try explicit atom maps with chirality disabled.
+            matches = probe_no_stereo.GetSubstructMatches(
+                ref_no_stereo,
+                uniquify=False,
+                useChirality=False,
+                maxMatches=2048,
+            )
+            if matches:
+                best = None
+                for match in matches:
+                    atom_map = [(int(match[i]), i) for i in range(len(match))]
+                    rms = float(MA.GetBestRMS(probe_no_stereo, ref_no_stereo, map=atom_map))
+                    if best is None or rms < best:
+                        best = rms
+                if best is not None:
+                    return best
+
+            return float(MA.GetBestRMS(probe_no_stereo, ref_no_stereo))
+        except Exception:
+            import numpy as np
+            return np.nan
 

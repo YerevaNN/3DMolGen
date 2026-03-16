@@ -22,7 +22,12 @@ torch.backends.cuda.matmul.allow_tf32 = True
 
 # from utils import parse_molecule_with_coordinates
 from molgen3D.data_processing.utils import decode_cartesian_raw
-from molgen3D.data_processing.smiles_encoder_decoder import decode_cartesian_v2, strip_smiles, decode_cartesian_binned_v2, get_bins_for_coords
+from molgen3D.data_processing.smiles_encoder_decoder import (
+    decode_conformer_by_serialization,
+    normalize_serialization_tag,
+    strip_smiles,
+    get_bins_for_coords,
+)
 from molgen3D.evaluation.utils import (
     extract_between,
     same_molecular_graph,
@@ -98,7 +103,17 @@ def save_results(results_path, generations, stats):
     with open(os.path.join(results_path, "generation_results.txt"), 'w') as results_file_txt:
         results_file_txt.write(f"{stats=}")
 
-def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id, binned: bool):
+def process_batch(
+    model,
+    tokenizer,
+    batch: list[list],
+    gen_config,
+    eos_token_id,
+    binned: bool,
+    serialization_tag: str = "cartesian",
+    uniform_bin_config_path: str = None,
+    quantile_bin_config_path: str = None,
+):
     # Create bins for binned decoding (must match encoding bins)
     bins = None
     if binned:
@@ -155,10 +170,13 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id,
                 stats["smiles_mismatch"] += 1
             else:
                 try:
-                    if binned:
-                        mol_obj = decode_cartesian_binned_v2(generated_conformer, bins)
-                    else:
-                        mol_obj = decode_cartesian_v2(generated_conformer)
+                    mol_obj = decode_conformer_by_serialization(
+                        generated_conformer,
+                        serialization_tag,
+                        bins=bins,
+                        uniform_config_path=uniform_bin_config_path,
+                        quantile_config_path=quantile_bin_config_path,
+                    )
                     generations[geom_smiles].append(mol_obj)
                 except Exception as e:
                     logger.info(f"smiles fails parsing: \n{canonical_smiles=}\n{generated_smiles=}\n{generated_conformer=}")
@@ -230,19 +248,19 @@ def run_inference(inference_config: dict):
         logger.info("Processing as validation dataset")
         # Validation set format: {smiles: [mol_obj1, mol_obj2, ...]}
         for geom_smiles, mol_list in test_data.items():
-            if isinstance(mol_list, list):
-                # Each entry has a list of ground truth conformers
-                num_ground_truths = len(mol_list)
-                # Generate 2x the ground truth count
-                mols_list.extend([(geom_smiles, f"[SMILES]{geom_smiles}[/SMILES]")] * num_ground_truths * 2)
-            else:
-                logger.warning(f"Unexpected data format for {geom_smiles}, skipping")
+            for sub_smiles, count in data["sub_smiles_counts"].items():
+                mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * count * 2)
     elif test_set == "icl":
         logger.info("Processing as icl dataset")
         for geom_smiles, data in test_data.items():
             icl_prompt = data.get('icl_prompt')
             if icl_prompt:
                 mols_list.extend([(geom_smiles, icl_prompt)] * data.get("num_confs", 1) * 2)
+    elif test_set == "revisited":
+        logger.info("Processing as revisited dataset")
+        for geom_smiles, data in test_data.items():
+            for sub_smiles, count in data["sub_smiles_counts"].items():
+                mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * count * 2)
     logger.info(f"mols_list length: {len(mols_list)}, mols_list_distinct: {len(set(mols_list))}, mols_list: {mols_list[:10]}")
 
     mols_list.sort(key=lambda x: len(x[0]))
@@ -258,6 +276,13 @@ def run_inference(inference_config: dict):
         logger.info("Auto-detecting binned=True based on model path")
         binned = True
 
+    serialization_tag = normalize_serialization_tag(
+        inference_config.get("serialization_tag", "cartesian")
+    )
+    if serialization_tag == "cartesian_binned":
+        binned = True
+    logger.info(f"Using serialization_tag={serialization_tag}")
+
     for start in tqdm(range(0, len(mols_list), batch_size), desc="generating"):
         batch = mols_list[start:start + batch_size]
         for sub_batch in split_batch_on_geom_size(batch, max_geom_len=80):
@@ -268,6 +293,9 @@ def run_inference(inference_config: dict):
                 gen_config=inference_config["gen_config"],
                 eos_token_id=eos_token_id,
                 binned=binned,
+                serialization_tag=serialization_tag,
+                uniform_bin_config_path=inference_config.get("uniform_bin_config_path"),
+                quantile_bin_config_path=inference_config.get("quantile_bin_config_path"),
             )
             stats.update(stats_)
             for k, v in outputs.items():
@@ -287,6 +315,9 @@ def launch_inference_from_cli(
     valid: bool = False,
     limit: int = None,
     binned: bool = False,
+    serialization_tag: str = "cartesian",
+    uniform_bin_config_path: str = None,
+    quantile_bin_config_path: str = None,
     icl: bool = False,
     icl_n: int = 5,
     parallel_jobs: int = 1
@@ -361,8 +392,8 @@ def launch_inference_from_cli(
     
     # Base configuration template
     base_inference_config = {
-        "model_path": get_ckpt("qw600_pre_binned_filtered", "1e"),
-        "tokenizer_path": get_tokenizer_path("qwen3_0.6b_binned"),
+        "model_path": get_ckpt("qw600_pre_binned_revisited_cartesian_isomeric", "4e"),
+        "tokenizer_path": get_tokenizer_path("qwen3_0.6b_custom"),
         "torch_dtype": "bfloat16",
         "batch_size": 128,
         "num_gens": gen_num_codes["2k_per_conf"],
@@ -372,6 +403,9 @@ def launch_inference_from_cli(
         "run_name": "qwen_pre_binned",
         "limit": limit,
         "binned": binned,
+        "serialization_tag": serialization_tag,
+        "uniform_bin_config_path": uniform_bin_config_path,
+        "quantile_bin_config_path": quantile_bin_config_path,
     }
 
     if grid_run_inference:
@@ -469,8 +503,32 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, choices=["local", "a100", "h100", "all"], default="local")
     parser.add_argument("--grid_run_inference", action="store_true")
-    parser.add_argument("--test_set", type=str, choices=["clean", "distinct", "corrected"], default=None)
+    parser.add_argument(
+        "--test_set",
+        type=str,
+        choices=["clean", "distinct", "corrected", "xl", "qm9", "valid", "revisited"],
+        default=None,
+    )
     parser.add_argument("--binned", action="store_true", default=False)
+    parser.add_argument(
+        "--serialization_tag",
+        type=str,
+        choices=["cartesian" ,"uniform", "quantile"],
+        default="cartesian",
+        help="Select decoding scheme.",
+    )
+    parser.add_argument(
+        "--uniform_bin_config_path",
+        type=str,
+        default=None,
+        help="Optional BinConfig path for uniform decoding.",
+    )
+    parser.add_argument(
+        "--quantile_bin_config_path",
+        type=str,
+        default=None,
+        help="Optional BinConfig path for quantile decoding.",
+    )
     parser.add_argument("--xl", action="store_true")
     parser.add_argument("--qm9", action="store_true")
     parser.add_argument("--valid", action="store_true", help="Run inference on validation set")
@@ -488,6 +546,9 @@ if __name__ == "__main__":
         valid=args.valid,
         limit=args.limit,
         binned=args.binned,
+        serialization_tag=args.serialization_tag,
+        uniform_bin_config_path=args.uniform_bin_config_path,
+        quantile_bin_config_path=args.quantile_bin_config_path,
         icl=args.icl,
         icl_n=args.icl_n,
         parallel_jobs=args.parallel_jobs
