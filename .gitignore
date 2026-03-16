@@ -1,4 +1,7 @@
 venv
+.venv
+.venv_metrics
+
 .cursorignore
 .cursorrules   
 .cursor/ 

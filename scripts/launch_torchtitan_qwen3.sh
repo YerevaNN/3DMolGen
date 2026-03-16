@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=torchtitan-qwen3
 #SBATCH --cpus-per-task=64
-#SBATCH --partition=a100
+#SBATCH --partition=all
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:8
 #SBATCH --mem=200G
@@ -9,7 +9,7 @@
 #SBATCH --output=outputs/slurm_jobs/titan/%j.out
 #SBATCH --error=outputs/slurm_jobs/titan/%j.err
 
-export WANDB_ENTITY=${WANDB_ENTITY:-menuab_team}
+export WANDB_ENTITY=${WANDB_ENTITY:-vover-yerevann}
 export WANDB_PROJECT=${WANDB_PROJECT:-3dmolgen}
 export WANDB_GROUP=${WANDB_GROUP:-pretrain}
 export WANDB_JOB_TYPE=${WANDB_JOB_TYPE:-pretrain}
@@ -23,6 +23,7 @@ export WANDB_CONFIG=${WANDB_CONFIG:-'{"run_type": "pretrain"}'}
 export TORCH_COMPILE=${TORCH_COMPILE:-0}
 export TOKENIZERS_PARALLELISM=${TOKENIZERS_PARALLELISM:-false}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-2}
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 TRAIN_TOML=${TRAIN_TOML:-src/molgen3D/config/pretrain/qwen3_06b.toml}
 

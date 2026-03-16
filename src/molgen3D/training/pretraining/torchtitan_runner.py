@@ -207,7 +207,6 @@ def _load_tokenizer_details(tokenizer_path: Path) -> TokenizerDetails:
     tokenizer = AutoTokenizer.from_pretrained(
         str(tokenizer_path),
         use_fast=True,
-        fix_mistral_regex=True,
     )
     ensure_tokenizer_pad_token(tokenizer)
     vocab_size = len(tokenizer)

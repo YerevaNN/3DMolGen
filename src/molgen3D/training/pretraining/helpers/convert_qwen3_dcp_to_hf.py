@@ -18,6 +18,7 @@ import torch.distributed.checkpoint as dcp
 import tyro
 from transformers import AutoTokenizer, Qwen3Config, Qwen3ForCausalLM
 
+from torchtitan.models.qwen3.model.args import Qwen3ModelArgs
 from torchtitan.models.qwen3.model.state_dict_adapter import Qwen3StateDictAdapter
 from molgen3D.config.paths import get_tokenizer_path
 # from torchtitan.tools.logging import logger
@@ -480,7 +481,23 @@ def _map_titan_to_hf_state(
     """
     Use Torchtitan's Qwen3StateDictAdapter to convert Titan layout -> HF layout.
     """
-    adapter = Qwen3StateDictAdapter(hf_model.config, str(hf_assets_path))  # tweak if your ctor differs
+    cfg = hf_model.config
+    model_args = Qwen3ModelArgs(
+        dim=int(cfg.hidden_size),
+        n_layers=int(cfg.num_hidden_layers),
+        n_heads=int(cfg.num_attention_heads),
+        n_kv_heads=int(getattr(cfg, "num_key_value_heads", cfg.num_attention_heads)),
+        vocab_size=int(cfg.vocab_size),
+        hidden_dim=int(cfg.intermediate_size),
+        norm_eps=float(cfg.rms_norm_eps),
+        rope_theta=float(getattr(cfg, "rope_theta", 10_000.0)),
+        max_seq_len=int(getattr(cfg, "max_position_embeddings", 4096)),
+        eos_id=int(cfg.eos_token_id),
+        # Keep lm_head in converted state_dict, then explicitly tie after load.
+        enable_weight_tying=False,
+        moe_enabled=bool(getattr(cfg, "num_experts", 0) and getattr(cfg, "num_experts", 0) > 0),
+    )
+    adapter = Qwen3StateDictAdapter(model_args, str(hf_assets_path))
 
     if not hasattr(adapter, "to_hf"):
         raise RuntimeError(
