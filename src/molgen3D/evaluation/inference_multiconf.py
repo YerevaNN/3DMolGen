@@ -252,6 +252,9 @@ def generate_multiple_conformers(
     stats: Counter,
     geom_smiles: str,
     current_output: str = None,
+    serialization_tag: str = "cartesian",
+    uniform_bin_config_path: str = None,
+    quantile_bin_config_path: str = None,
 ) -> tuple[List, str]:
     """
     Generate multiple conformers for a single SMILES by forcing conformer continuation.
@@ -276,10 +279,9 @@ def generate_multiple_conformers(
         ConformerCountStoppingCriteria,
     )
     from molgen3D.data_processing.smiles_encoder_decoder import (
-        decode_cartesian_v2,
+        decode_conformer_by_serialization,
         strip_smiles,
-        decode_cartesian_binned_v2,
-        get_bins_for_coords
+        get_bins_for_coords,
     )
     from molgen3D.evaluation.utils import same_molecular_graph, log_mfu
 
@@ -416,10 +418,13 @@ def generate_multiple_conformers(
         else:
             # Try to decode the conformer
             try:
-                if binned:
-                    mol_obj = decode_cartesian_binned_v2(generated_conformer, bins)
-                else:
-                    mol_obj = decode_cartesian_v2(generated_conformer)
+                mol_obj = decode_conformer_by_serialization(
+                    generated_conformer,
+                    serialization_tag,
+                    bins=bins,
+                    uniform_config_path=uniform_bin_config_path,
+                    quantile_config_path=quantile_bin_config_path,
+                )
                 mol_objects.append(mol_obj)
             except Exception as e:
                 if stats["mol_parse_fail"] < 20:
@@ -439,6 +444,9 @@ def generate_multiple_conformers_batched(
     gen_config,
     binned: bool,
     stats: Counter,
+    serialization_tag: str = "cartesian",
+    uniform_bin_config_path: str = None,
+    quantile_bin_config_path: str = None,
 ) -> List[List]:
     """
     Generate multiple conformers for a BATCH of SMILES in parallel.
@@ -463,10 +471,9 @@ def generate_multiple_conformers_batched(
         ConformerCountStoppingCriteria,
     )
     from molgen3D.data_processing.smiles_encoder_decoder import (
-        decode_cartesian_v2,
+        decode_conformer_by_serialization,
         strip_smiles,
-        decode_cartesian_binned_v2,
-        get_bins_for_coords
+        get_bins_for_coords,
     )
     from molgen3D.evaluation.utils import same_molecular_graph, log_mfu
 
@@ -599,10 +606,13 @@ def generate_multiple_conformers_batched(
                 stats["smiles_mismatch"] += 1
             else:
                 try:
-                    if binned:
-                        mol_obj = decode_cartesian_binned_v2(generated_conformer, bins)
-                    else:
-                        mol_obj = decode_cartesian_v2(generated_conformer)
+                    mol_obj = decode_conformer_by_serialization(
+                        generated_conformer,
+                        serialization_tag,
+                        bins=bins,
+                        uniform_config_path=uniform_bin_config_path,
+                        quantile_config_path=quantile_bin_config_path,
+                    )
                     mol_objects.append(mol_obj)
                 except Exception as e:
                     stats["mol_parse_fail"] += 1
@@ -705,12 +715,15 @@ def run_multiconf_inference(inference_config: dict):
     # Get configuration parameters
     conformers_per_batch = inference_config.get("conformers_per_batch", 8)
     binned = inference_config.get("binned", False)
+    serialization_tag =  str(inference_config.get("serialization_tag", "cartesian"))
 
     logger.info(f"Conformers per batch: {conformers_per_batch}")
 
     if not binned and "binned" in str(inference_config["model_path"]):
         logger.info("Auto-detecting binned=True based on model path")
         binned = True
+
+    logger.info(f"Using serialization_tag={serialization_tag}")
 
     # Initialize statistics and results
     stats = Counter({
@@ -781,6 +794,9 @@ def run_multiconf_inference(inference_config: dict):
             gen_config=inference_config["gen_config"],
             binned=binned,
             stats=stats,
+            serialization_tag=serialization_tag,
+            uniform_bin_config_path=inference_config.get("uniform_bin_config_path"),
+            quantile_bin_config_path=inference_config.get("quantile_bin_config_path"),
         )
 
         # Accumulate results and update remaining counts
@@ -833,6 +849,9 @@ def launch_multiconf_inference_from_cli(
     conformer_multiplier: int = 2,
     limit: Optional[int] = None,
     binned: bool = False,
+    serialization_tag: str = "cartesian",
+    uniform_bin_config_path: str = None,
+    quantile_bin_config_path: str = None,
     parallel_jobs: int = 1,
 ) -> None:
     """Launch multi-conformer inference from CLI arguments.
@@ -922,7 +941,10 @@ def launch_multiconf_inference_from_cli(
         "conformers_per_batch": conformers_per_batch,
         "conformer_multiplier": conformer_multiplier,
         "limit": limit,
-        "binned": True,  # Auto-enable for binned models
+        "binned": binned,
+        "serialization_tag": serialization_tag,
+        "uniform_bin_config_path": uniform_bin_config_path,
+        "quantile_bin_config_path": quantile_bin_config_path,
     }
     
     if grid_run_inference:
@@ -1027,6 +1049,25 @@ if __name__ == "__main__":
                         help="Limit number of unique SMILES to process (default: 10 for testing)")
     parser.add_argument("--binned", action="store_true", default=False,
                         help="Use binned decoding")
+    parser.add_argument(
+        "--serialization_tag",
+        type=str,
+        choices=["cartesian", "uniform", "quantile"],
+        default="cartesian",
+        help="Select decoding scheme.",
+    )
+    parser.add_argument(
+        "--uniform_bin_config_path",
+        type=str,
+        default=None,
+        help="Optional BinConfig path for uniform decoding.",
+    )
+    parser.add_argument(
+        "--quantile_bin_config_path",
+        type=str,
+        default=None,
+        help="Optional BinConfig path for quantile decoding.",
+    )
     parser.add_argument("--parallel_jobs", type=int, default=1,
                         help="Number of parallel inference jobs for local execution")
 
@@ -1045,5 +1086,8 @@ if __name__ == "__main__":
         conformer_multiplier=args.conformer_multiplier,
         limit=args.limit,
         binned=args.binned,
+        serialization_tag=args.serialization_tag,
+        uniform_bin_config_path=args.uniform_bin_config_path,
+        quantile_bin_config_path=args.quantile_bin_config_path,
         parallel_jobs=args.parallel_jobs,
     )

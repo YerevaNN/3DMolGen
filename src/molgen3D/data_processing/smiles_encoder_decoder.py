@@ -3,6 +3,8 @@ import json
 import math
 import re
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
 
 from rdkit import Chem
 from rdkit.Chem import AllChem
@@ -70,6 +72,7 @@ def strip_smiles(s: str) -> str:
     # Remove any tags that might be present
     s = s.replace("[CONFORMER]", "").replace("[/CONFORMER]", "")
     s = s.replace("[SMILES]", "").replace("[/SMILES]", "")
+    s = re.sub(r"\[SERIALIZATION\].*?\[/SERIALIZATION\]", "", s, flags=re.IGNORECASE | re.DOTALL)
     s = s.replace(";", "")
 
     s = _WHITESPACE_RE.sub('', s)
@@ -961,3 +964,31 @@ def decode_cartesian_binned_v2(enriched_string, bins, use_bin_center=True):
         conformer.SetAtomPosition(idx, Point3D(x, y, z))
     mol.AddConformer(conformer, assignId=True)
     return mol
+
+
+def decode_conformer_by_serialization(
+    enriched_string: str,
+    serialization_tag: str,
+    *,
+    bins=None,
+    uniform_config_path: Optional[str] = None,
+    quantile_config_path: Optional[str] = None,
+):
+    mode = str(serialization_tag)
+    if mode == "cartesian":
+        return decode_cartesian_v2(enriched_string)
+    if mode == "cartesian_binned":
+        if bins is None:
+            raise ValueError("`bins` must be provided for cartesian_binned decoding.")
+        return decode_cartesian_binned_v2(enriched_string, bins)
+    if mode == "uniform":
+        cfg_path = uniform_config_path or str(
+            Path(__file__).resolve().parents[1] / "config" / "bin_configs" / "uniform_bins.json"
+        )
+        return decode_cartesian_with_config(enriched_string, BinConfig.load(cfg_path))
+    if mode == "quantile":
+        cfg_path = quantile_config_path or str(
+            Path(__file__).resolve().parents[1] / "config" / "bin_configs" / "quantile_bins.json"
+        )
+        return decode_cartesian_with_config(enriched_string, BinConfig.load(cfg_path))
+    raise ValueError(f"Unsupported serialization mode: {serialization_tag}")
