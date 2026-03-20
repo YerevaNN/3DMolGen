@@ -630,7 +630,6 @@ class JsonlTaggedPackedDataset(IterableDataset):
             tokenizer = AutoTokenizer.from_pretrained(
                 str(self._tokenizer_path),
                 use_fast=True,
-                fix_mistral_regex=True,
             )
             sep_id = ensure_tokenizer_pad_token(tokenizer)
             self._tokenizer = tokenizer
