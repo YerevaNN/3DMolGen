@@ -1,19 +1,18 @@
 [job]
-description = "qwen3_06b_pre_4e_8e-4_binned_grouped"
+description = "qwen3_06b_pre_4e_revisited_cartesian_isomeric"
 dump_folder = "pretrain_runs"
 print_config = true
 custom_config_module = "molgen3D.training.pretraining.config.custom_job_config"
 
 [molgen_run]
 init_mode = "hf_pretrain" # scratch | hf_pretrain | resume
-tokenizer_tag = "tokenizers:qwen3_0.6b_binned_258"
+tokenizer_tag = "tokenizers:qwen3_0.6b_custom"
 base_model_tag = "base_paths:qwen3_0.6b_base_model"
-# resume_run_path_tag = "ckpts:qwen3_06b/251230-1352-da5b-qwen3_06b_pre_5e_48effb_4kseq/step-90000"
 
 [model]
 name = "molgen_qwen3"
 flavor = "0.6B"
-hf_assets_path = "src/molgen3D/training/tokenizers/Qwen3_tokenizer_binned_258"
+hf_assets_path = "src/molgen3D/training/tokenizers/Qwen3_tokenizer_custom"
 
 [experimental]
 custom_import = "molgen3D.training.pretraining.torchtitan_model.qwen3_custom"
@@ -23,18 +22,16 @@ gc_freq = 1000
 seq_len = 4096
 local_batch_size = 6
 global_batch_size = 48
-steps = 28000
+steps = 82000
 max_norm = 1.0
 dtype = "bfloat16"
 dataset = "molgen_jsonl"
-# dataset_path = "data:geom_conformers_train"
-dataset_path = "data:revisited_uniform_binned_train"
+dataset_path = "data:revisited_cartesian_isomeric_train"
 
 [validation]
 enable = false
 dataset = "molgen_jsonl"
-# dataset_path = "data:geom_conformers_valid"
-dataset_path = "data:revisited_uniform_binned_valid"
+dataset_path = "data:revisited_cartesian_isomeric_valid"
 local_batch_size = 4
 seq_len = 4096
 freq = 500
@@ -44,9 +41,8 @@ num_val_molecules = 10
 numerical_validation_freq = 10000
 
 [molgen_data]
-# train_path_key = "conformers_train"
-train_path = "data:revisited_q_binned_train"
-tokenizer_key = "qwen3_0.6b_binned_258"
+train_path = "data:revisited_cartesian_isomeric_train"
+tokenizer_key = "qwen3_0.6b_custom"
 min_emb_len = 0
 shuffle_lines = true
 infinite = true
@@ -58,7 +54,6 @@ persistent_workers = false
 prefetch_factor = 2
 lookahead_limit = 100
 shuffle_buffer_size = 128
-#serialization_mode = "pairs"
 serialization_mode = "pairs"
 
 [optimizer]
@@ -69,20 +64,16 @@ beta2 = 0.95
 eps = 1e-8
 weight_decay = 0.1
 
-# [lr_scheduler]
-# warmup_steps = 500
-# decay_type = "cosine"
-
 [wsds_scheduler]
 enable = true
 warmup_steps = 500
-checkpoints = [7000, 14000, 21000, 28000]
+checkpoints = [20500, 41000, 61500, 82000]
 lr_min = 0
 decay_frac = 0.1
 
 [checkpoint]
 enable = true
-interval = 7000
+interval = 20500
 keep_latest_k = 4
 folder = "checkpoint"
 create_seed_checkpoint = false
@@ -94,7 +85,7 @@ async_mode = "async"
 
 [metrics]
 log_freq = 20
-enable_wandb = true
+enable_wandb = false
 save_for_all_ranks = false
 save_tb_folder = "tb"
 
