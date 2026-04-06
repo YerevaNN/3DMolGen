@@ -1,98 +1,48 @@
 import argparse
-import glob
 import json
 import os
 import os.path as osp
+import pickle
 import random
 from collections import defaultdict
 from multiprocessing import Pool
-from typing import Any, Dict, Optional, Set, Tuple, List
+from typing import Any, Dict, List, Optional, Set, Tuple
 
-import numpy as np
 from loguru import logger as log
 from rdkit import Chem, RDLogger
 from tqdm.auto import tqdm
 
-from molgen3D.data_processing.utils import (
-    JsonlSplitWriter,
-    copy_single_conformer_mol,
-    extract_conf_meta,
-    get_embedding_func_and_config,
-    parse_coordinate_ranges,
-    save_grouped_pickle,
-)
 from molgen3D.data_processing.smiles_encoder_decoder import (
     encode_cartesian_binned,
     encode_cartesian_binned_v2,
     encode_cartesian_with_config,
 )
-from molgen3D.utils.utils import load_pkl
+from molgen3D.data_processing.utils import (
+    JsonlSplitWriter,
+    copy_single_conformer_mol,
+    extract_conf_meta,
+    filter_revisited_conformers_keep_dotted,
+    get_embedding_func_and_config,
+    get_revisited_split_path,
+    parse_coordinate_ranges,
+    save_grouped_pickle,
+)
 
 RDLogger.DisableLog("rdApp.*")
 
-# Data layout inspection (sample file: /home/chem-project/data/rdkit_folder/drugs/...)
-# Energy is stored at conformer["totalenergy"] (float).
-# Weight is stored at conformer["boltzmannweight"] (float).
-# Conf id is stored at conformer["geom_id"] (int) when present.
+_REVISITED_DATA: Optional[List] = None
 
 
-def infer_geom_id(mol_path: str) -> str:
-    return osp.splitext(osp.basename(mol_path))[0]
-
-
-def filter_conformers_keep_dotted(
-    mol_object: Dict[str, Any],
-    failures: Dict[str, int],
-) -> List[Tuple[Chem.Mol, Dict[str, Any], int]]:
-    confs = mol_object.get("conformers", [])
-    smiles = mol_object.get("smiles")
-
-    if smiles and "." in smiles:
-        failures["dot_in_smiles"] += 1
-
-    mol_from_smiles = Chem.MolFromSmiles(smiles) if smiles else None
-    if mol_from_smiles is None:
-        failures["mol_from_smiles_failed"] += 1
-        return []
-
-    selected: List[Tuple[Chem.Mol, Dict[str, Any], int]] = []
-    for idx, conf in enumerate(confs):
-        mol = conf.get("rd_mol") if isinstance(conf, dict) else None
-        if mol is None:
-            failures["missing_rd_mol"] += 1
-            continue
-
-        num_neighbors = [len(a.GetNeighbors()) for a in mol.GetAtoms()]
-        if not num_neighbors or np.max(num_neighbors) > 4:
-            failures["large_degree"] += 1
-            continue
-
-        selected.append((mol, conf if isinstance(conf, dict) else {}, idx))
-
-    return selected
-
-
-def read_mol(
-    args: Tuple[str, int, int, Any, float, List[Tuple[float, float]], str]
-) -> Optional[
-    Tuple[
-        Optional[str],
-        Dict[str, Any],
-        str,
-        Set[str],
-        Dict[str, List[Dict[str, Any]]],
-    ]
-]:
-    mol_path = args[0]
-    try:
-        return _read_mol_impl(args)
-    except Exception as exc:
-        log.error("Unhandled exception in read_mol | path={} | error={}", mol_path, exc)
-        return None
-
-
-def _read_mol_impl(
-    args: Tuple[str, int, int, Any, float, List[Tuple[float, float]], str]
+def _process_revisited_mol_impl(
+    idx: int,
+    max_confs: int,
+    precision: int,
+    embedding_func: Any,
+    bin_size: float,
+    parsed_ranges: List[Tuple[float, float]],
+    sort_by: str,
+    bin_config: Any,
+    use_isomeric_smiles: bool,
 ) -> Tuple[
     Optional[str],
     Dict[str, Any],
@@ -100,41 +50,41 @@ def _read_mol_impl(
     Set[str],
     Dict[str, List[Dict[str, Any]]],
 ]:
-    mol_path, max_confs, precision, embedding_func, bin_size, ranges, sort_by = args
-    bin_config = args[7] if len(args) > 7 else None
-    use_isomeric_smiles = args[8] if len(args) > 8 else False
-    mol_object = load_pkl(mol_path)
-    geom_key = mol_object.get("smiles")
-    geom_id = infer_geom_id(mol_path)
-
+    smiles, mols = _REVISITED_DATA[idx]
+    geom_id = str(idx)
     local_failures: Dict[str, int] = defaultdict(int)
-    candidates = filter_conformers_keep_dotted(mol_object, failures=local_failures)
 
-    nonisomeric_smiles, dotted_smiles, isomeric_smiles = set(), set(), set()
-    sample_isomers: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    pickle_isomers: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    candidates = filter_revisited_conformers_keep_dotted(
+        smiles=smiles,
+        mols=mols,
+        failures=local_failures,
+    )
 
     scored_candidates: List[
-        Tuple[float, int, Chem.Mol, Dict[str, Any], Optional[float], Optional[float], Optional[int]]
+        Tuple[float, int, Chem.Mol, Optional[float], Optional[float], Optional[int]]
     ] = []
-    for mol, conf_meta, idx in candidates:
-        energy, weight, conf_id = extract_conf_meta(conf_meta, mol)
+    for mol, conf_idx in candidates:
+        energy, weight, conf_id = extract_conf_meta(None, mol)
         if energy is None:
             local_failures["missing_energy"] += 1
         if sort_by == "energy":
             scored_value = energy if energy is not None else float("inf")
         elif sort_by == "weight":
-            # Higher weight is better; missing weights should not displace known weights.
             scored_value = -(weight if weight is not None else float("-inf"))
         else:
-            scored_value = float(idx)
-
-        scored_candidates.append((scored_value, idx, mol, conf_meta, energy, weight, conf_id))
+            scored_value = float(conf_idx)
+        scored_candidates.append((scored_value, conf_idx, mol, energy, weight, conf_id))
 
     scored_candidates.sort(key=lambda x: (x[0], x[1]))
     scored_candidates = scored_candidates[:max_confs]
 
-    for _, _, mol, _conf_meta, energy, weight, conf_id in scored_candidates:
+    nonisomeric_smiles: Set[str] = set()
+    dotted_smiles: Set[str] = set()
+    isomeric_smiles: Set[str] = set()
+    sample_isomers: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    pickle_isomers: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+
+    for _, _, mol, energy, weight, conf_id in scored_candidates:
         try:
             if embedding_func is encode_cartesian_with_config:
                 embedded_smile, iso_smile = embedding_func(mol, bin_config)
@@ -142,17 +92,16 @@ def _read_mol_impl(
                 embedded_smile, iso_smile = embedding_func(
                     mol,
                     bin_size=bin_size,
-                    ranges=ranges,
+                    ranges=parsed_ranges,
                 )
             else:
-                embedded_smile, iso_smile = embedding_func(mol, precision)
+                embedded_smile, iso_smile = embedding_func(mol, precision=precision)
         except Exception as exc:
-            log.error("Error encoding conformer | path={} | failure={}", mol_path, exc)
+            log.error("Error encoding conformer | smiles={} | failure={}", smiles, exc)
             local_failures["encoding_error"] += 1
             continue
 
         noniso = None
-        # Compute nonisomeric SMILES only for conformers that encoded successfully
         try:
             noniso = Chem.MolToSmiles(
                 Chem.RemoveHs(mol, sanitize=False),
@@ -172,7 +121,7 @@ def _read_mol_impl(
             "embedded_smiles": embedded_smile,
             "energy": energy,
             "weight": weight,
-            "geom_id": str(geom_id),
+            "geom_id": geom_id,
         }
         if conf_id is not None:
             sample_entry["conf_id"] = conf_id
@@ -183,7 +132,7 @@ def _read_mol_impl(
             "embedded_smiles": embedded_smile,
             "energy": energy,
             "weight": weight,
-            "geom_id": str(geom_id),
+            "geom_id": geom_id,
         }
         if conf_id is not None:
             pickle_entry["conf_id"] = conf_id
@@ -192,30 +141,30 @@ def _read_mol_impl(
     if len(nonisomeric_smiles) > 1:
         log.info(
             "multiple_distinct_nonisomeric_smiles | path={} | distinct_smiles={}",
-            mol_path,
+            smiles,
             nonisomeric_smiles,
         )
         for dotted in dotted_smiles:
-            log.info("dot_in_conformer_smiles | path={} | smile={}", mol_path, dotted)
+            log.info("dot_in_conformer_smiles | path={} | smile={}", smiles, dotted)
+
+    if not sample_isomers:
+        log.warning("No samples after filtering | path={}", smiles)
+        local_failures["no_samples_after_filtering"] += 1
 
     json_line = None
     if sample_isomers:
         json_line = (
             json.dumps(
-                {
-                    "geom_key": geom_key,
-                    "geom_id": str(geom_id),
-                    "isomers": sample_isomers,
-                },
+                {"geom_key": smiles, "geom_id": geom_id, "isomers": sample_isomers},
                 separators=(",", ":"),
             )
             + "\n"
         )
 
     stats = {
-        "path": mol_path,
-        "geom_smiles": geom_key,
-        "confs_count_pre_filter": len(mol_object.get("conformers", [])),
+        "path": smiles,
+        "geom_smiles": smiles,
+        "confs_count_pre_filter": len(mols),
         "confs_count_post_filter": sum(len(v) for v in sample_isomers.values()),
         "nonisomeric_smiles_post_filter": len(nonisomeric_smiles),
         "isomeric_smiles_post_filter": isomeric_smiles,
@@ -224,21 +173,23 @@ def _read_mol_impl(
         "failures": local_failures,
         "processed_pickle_path": None,
     }
-
-    if not sample_isomers:
-        log.warning("No samples after filtering | path={}", mol_path)
-        local_failures["no_samples_after_filtering"] += 1
-
     return json_line, stats, geom_id, isomeric_smiles, pickle_isomers
 
 
-def preprocess(
+def _process_revisited_by_idx(args: Tuple) -> Optional[Tuple]:
+    idx = args[0]
+    try:
+        return _process_revisited_mol_impl(idx, *args[1:])
+    except Exception as exc:
+        log.error("Unhandled exception | idx={} | error={}", idx, exc)
+        return None
+
+
+def preprocess_revisited(
     geom_raw_path: str,
-    indices_path: str,
     embedding_type: str,
     num_workers: int = 20,
     precision: int = 4,
-    dataset_type: str = "drugs",
     splits: Optional[str] = None,
     dest_path: Optional[str] = None,
     max_confs: int = 30,
@@ -247,7 +198,10 @@ def preprocess(
     sort_by: str = "energy",
     bin_config_path: Optional[str] = None,
     isomeric: bool = False,
+    use_centered: bool = True,
 ) -> None:
+    global _REVISITED_DATA
+
     if dest_path is None:
         raise ValueError("dest_path must be provided for preprocessing output")
 
@@ -255,10 +209,8 @@ def preprocess(
         embedding_type=embedding_type,
         bin_config_path=bin_config_path,
     )
-
-    overall_total_input_mols = overall_total_confs = overall_total_mols = 0
-    overall_multi_distinct_graphs = overall_mol_with_dotted_smiles = overall_total_dotted_smiles = 0
-    overall_failure_counts: Dict[str, int] = defaultdict(int)
+    parsed_ranges = parse_coordinate_ranges(ranges)
+    requested_splits = [splits] if splits else ["train", "valid", "test"]
 
     strings_root = osp.join(dest_path, "processed_strings")
     split_writers = {
@@ -271,73 +223,61 @@ def preprocess(
     for split_dir in split_pickle_dirs.values():
         os.makedirs(split_dir, exist_ok=True)
 
-    split_name_to_index = {"train": 0, "valid": 1, "test": 2}
-    requested_splits = [splits] if splits else list(split_name_to_index.keys())
-    log.info("Reading files from %s", geom_raw_path)
-
-    split_indices_array = np.load(indices_path, allow_pickle=True)
-
-    parsed_ranges = parse_coordinate_ranges(ranges)
-
-    pickle_glob = osp.join(geom_raw_path, f"{dataset_type}/*.pickle")
-    pickle_paths = np.array(sorted(glob.glob(pickle_glob)))
-    if pickle_paths.size == 0:
-        raise FileNotFoundError(f"No pickle files found under pattern {pickle_glob}")
+    overall_total_input = overall_total_confs = overall_total_mols = 0
+    overall_failure_counts: Dict[str, int] = defaultdict(int)
 
     for split_name in requested_splits:
-        split_idx = split_name_to_index[split_name]
-        split_indices = np.array(sorted(split_indices_array[split_idx]), dtype=int)
+        data_path = get_revisited_split_path(
+            geom_raw_path=geom_raw_path,
+            split_name=split_name,
+            use_centered=use_centered,
+        )
+        if not osp.exists(data_path):
+            raise FileNotFoundError(f"Revisited split file not found: {data_path}")
 
-        if split_indices.size == 0:
-            log.warning("No indices found for split {}", split_name)
-            continue
+        log.info("Loading {} ...", data_path)
+        with open(data_path, "rb") as fh:
+            _REVISITED_DATA = pickle.load(fh)
+        log.info("Loaded {:,} molecules for split '{}'", len(_REVISITED_DATA), split_name)
 
-        if split_indices.max() >= len(pickle_paths):
-            raise IndexError(
-                f"Split index {split_indices.max()} out of range for available pickle files ({len(pickle_paths)})."
+        n = len(_REVISITED_DATA)
+        overall_total_input += n
+
+        job_args = [
+            (
+                idx,
+                max_confs,
+                precision,
+                embedding_func,
+                bin_size,
+                parsed_ranges,
+                sort_by,
+                bin_config,
+                isomeric,
             )
+            for idx in range(n)
+        ]
 
-        mol_paths = pickle_paths[split_indices]
-
-        log.info("Processing split %s with %d samples", split_name, len(mol_paths))
-
-        split_total_input = len(mol_paths)
-        overall_total_input_mols += split_total_input
-
-        conf_count_post = conf_count_pre = mol_count_post = 0
+        conf_count_pre = conf_count_post = mol_count_post = 0
         split_num_mol_with_multi_distinct_graphs = split_num_mol_with_dotted_smiles = total_dotted_smiles = 0
-        split_geom_to_iso_map: Dict[str, Set[str]] = defaultdict(set)
         failure_counts: Dict[str, int] = defaultdict(int)
+        split_geom_to_iso_map: Dict[str, Set[str]] = defaultdict(set)
 
         geom_to_iso_path = osp.join(dest_path, f"{split_name}_geom_to_isomeric_smiles.jsonl")
         iso_to_geom_path = osp.join(dest_path, f"{split_name}_isomeric_to_geom.jsonl")
         geom_to_iso_fh = open(geom_to_iso_path, "w")
         iso_to_geom_fh = open(iso_to_geom_path, "w")
         try:
-            job_args = [
-                (
-                    path,
-                    max_confs,
-                    precision,
-                    embedding_func,
-                    bin_size,
-                    parsed_ranges,
-                    sort_by,
-                    bin_config,
-                    isomeric,
-                )
-                for path in mol_paths
-            ]
-
-            with tqdm(total=len(job_args), dynamic_ncols=True, mininterval=0.2) as pbar:
+            with tqdm(total=n, dynamic_ncols=True, mininterval=0.2) as pbar:
                 with Pool(processes=num_workers) as pool:
-                    chunk_size = max(1, len(job_args) // max(num_workers * 2, 1))
-                    processed = 0
-
-                    for result in pool.imap_unordered(read_mol, job_args, chunksize=chunk_size):
+                    chunk_size = max(1, n // max(num_workers * 2, 1))
+                    for result in pool.imap_unordered(
+                        _process_revisited_by_idx,
+                        job_args,
+                        chunksize=chunk_size,
+                    ):
                         if result is None:
                             failure_counts["unhandled_exception"] += 1
-                            processed += 1
                             pbar.update()
                             continue
 
@@ -401,36 +341,29 @@ def preprocess(
                                     + "\n"
                                 )
 
-                        processed += 1
                         pbar.update()
-                        if (processed & 63) == 0:
-                            pbar.refresh()
         finally:
             geom_to_iso_fh.close()
             iso_to_geom_fh.close()
+            _REVISITED_DATA = None
 
-        total_distinct_isos = sum(len(v) for v in split_geom_to_iso_map.values())
-        avg_confs_per_mol = conf_count_post / mol_count_post if mol_count_post else 0.0
-        success_rate = mol_count_post / split_total_input if split_total_input else 0.0
+        avg_confs = conf_count_post / mol_count_post if mol_count_post else 0.0
+        success_rate = mol_count_post / n if n else 0.0
         split_report = {
             "split": split_name,
-            "num_input_molecules": split_total_input,
+            "num_input_molecules": n,
             "num_output_molecules": mol_count_post,
             "num_input_conformers": conf_count_pre,
             "total_conformers_after": conf_count_post,
-            "avg_conformers_per_molecule_after": avg_confs_per_mol,
+            "avg_conformers_per_molecule_after": avg_confs,
             "success_rate": success_rate,
             "failure_counts": dict(failure_counts),
             "molecules_with_multiple_distinct_graphs": split_num_mol_with_multi_distinct_graphs,
             "molecules_with_dotted_smiles": split_num_mol_with_dotted_smiles,
-            "num_distinct_isomeric_smiles": total_distinct_isos,
             "total_dotted_smiles": total_dotted_smiles,
         }
         log.info(json.dumps({"split_summary": split_report}, ensure_ascii=False, separators=(",", ":")))
 
-        overall_multi_distinct_graphs += split_num_mol_with_multi_distinct_graphs
-        overall_mol_with_dotted_smiles += split_num_mol_with_dotted_smiles
-        overall_total_dotted_smiles += total_dotted_smiles
         for reason, count in failure_counts.items():
             overall_failure_counts[reason] += count
 
@@ -438,18 +371,14 @@ def preprocess(
         writer.close()
 
     grand_total = sum(writer.total_samples for writer in split_writers.values())
-    overall_success_rate = float(overall_total_mols) / max(1, overall_total_input_mols)
-
+    overall_success_rate = float(overall_total_mols) / max(1, overall_total_input)
     run_summary = {
         "grand_total_samples_written": grand_total,
-        "total_input_molecules": overall_total_input_mols,
+        "total_input_molecules": overall_total_input,
         "molecules_after_filter": overall_total_mols,
         "conformers_after_filter": overall_total_confs,
         "avg_confs_per_mol_after": float(overall_total_confs) / max(1, overall_total_mols),
         "overall_success_rate": overall_success_rate,
-        "molecules_with_multiple_distinct_graphs": overall_multi_distinct_graphs,
-        "molecules_with_dotted_smiles": overall_mol_with_dotted_smiles,
-        "total_dotted_smiles": overall_total_dotted_smiles,
         "overall_failure_counts": dict(overall_failure_counts),
     }
     log.info(json.dumps({"run_summary": run_summary}, ensure_ascii=False, separators=(",", ":")))
@@ -461,8 +390,8 @@ if __name__ == "__main__":
         "--geom_raw_path",
         "-p",
         type=str,
-        default="/data/molgen/rdkit_folder",
-        help="Path to the GEOM rdkit folder.",
+        required=True,
+        help="Path to the revisited GEOM split pickle files.",
     )
     parser.add_argument(
         "--dest",
@@ -504,7 +433,7 @@ if __name__ == "__main__":
         "-dt",
         type=str,
         default="drugs",
-        help="Dataset type (drugs, qm9).",
+        help="Unused placeholder kept for CLI parity.",
     )
     parser.add_argument(
         "--splits",
@@ -518,12 +447,6 @@ if __name__ == "__main__":
         type=str,
         default="",
         help="Run name, appended to destination directory.",
-    )
-    parser.add_argument(
-        "--indices_path",
-            type=str,
-            default="/data/molgen/splits/splits/split0.npy",
-        help="Path to numpy file containing split indices.",
     )
     parser.add_argument(
         "--max_confs",
@@ -547,7 +470,7 @@ if __name__ == "__main__":
         "--sort_by",
         type=str,
         choices=["energy", "weight", "none"],
-        default="energy",
+        default="none",
         help="Sort conformers by energy, weight, or keep original order.",
     )
     parser.add_argument(
@@ -560,6 +483,12 @@ if __name__ == "__main__":
         "--isomeric",
         action="store_true",
         help="If set, use isomeric SMILES keys; otherwise use non-isomeric keys when available.",
+    )
+    parser.add_argument(
+        "--use_centered",
+        action="store_true",
+        default=False,
+        help="Load *_data_centered.pickle instead of *_data.pickle.",
     )
     args = parser.parse_args()
 
@@ -575,19 +504,18 @@ if __name__ == "__main__":
         diagnose=False,
     )
 
-    preprocess(
+    preprocess_revisited(
         geom_raw_path=args.geom_raw_path,
-        indices_path=args.indices_path,
         embedding_type=args.embedding_type,
         dest_path=dest_path,
         max_confs=args.max_confs,
         num_workers=args.num_workers,
         precision=args.precision,
-        dataset_type=args.dataset_type,
         splits=args.splits,
-        sort_by=args.sort_by,
         bin_size=args.bin_size,
         ranges=args.ranges,
+        sort_by=args.sort_by,
         bin_config_path=args.bin_config_path,
         isomeric=args.isomeric,
+        use_centered=args.use_centered,
     )
