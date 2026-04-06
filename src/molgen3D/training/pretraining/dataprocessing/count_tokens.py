@@ -1750,10 +1750,10 @@ def main() -> None:
         action="store_true",
         help="Use grouped binned dataset defaults (binned_conformers_* and isomer_units).",
     )
-    parser.add_argument("--seq-len", type=int, default=4096)
+    parser.add_argument("--seq-len", type=int, default=2048)
     parser.add_argument("--sample-lines", type=int, default=1000)
     parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--tokenizers", nargs="+", default=["qwen3_0.6b_origin", "qwen3_0.6b_custom", "qwen3_0.6b_binned", "qwen3_0.6b_binned_258"])
+    parser.add_argument("--tokenizers", nargs="+", default=["qwen3_0.6b_origin", "qwen3_0.6b_custom", "qwen3_0.6b_binned"])
     parser.add_argument("--skip-validation", action="store_true")
     parser.add_argument("--shuffle", action="store_true", help="Sample random lines via dataloader shuffle")
     parser.add_argument("--seed", type=int, default=0)
@@ -1857,7 +1857,7 @@ def main() -> None:
     for alias in args.tokenizers:
         tok_path = str(get_tokenizer_path(alias))
         tokenizer = AutoTokenizer.from_pretrained(
-            tok_path, use_fast=True,
+            tok_path, use_fast=True, fix_mistral_regex=True
         )
         tokenizer_map[alias] = (tok_path, tokenizer)
         tokenizer_info_map[alias] = {
