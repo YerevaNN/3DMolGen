@@ -1,6 +1,7 @@
 base_paths:
   project_root: "."
   data_root:
+    - "/mnt/weka/vtarasov"
     - "/data/vtarasov"
     - "/data/molgen"
     - "data"
@@ -15,9 +16,12 @@ base_paths:
     - "/mnt/weka/vtarasov/checkpoints"
     - "/data/chem-project/checkpoints"
   hf_yerevann_root:
+    - "/mnt/weka/vtarasov/checkpoints/hf/yerevann"
     - "/nfs/h100/raid/chem/checkpoints/hf/yerevann"
     - "/data/chem-project/checkpoints/hf/yerevann"
   qwen_yerevann_root:
+    - "/mnt/weka/vtarasov/checkpoints"
+    - "/mnt/weka/vtarasov/checkpoints/hf/yerevann"
     - "/data/chem-project/checkpoints"
     - "/mnt/weka/data/chem-project/checkpoints"
     - "/home/chem-project/checkpoints"
@@ -25,16 +29,18 @@ base_paths:
     - "/nfs/h100/raid/chem/checkpoints/yerevann"
   grpo_root:
     - "/mnt/weka/vtarasov/conf_grpo"
+    - "/mnt/weka/vtarasov/checkpoints/grpo"
     - "/data/chem-project/checkpoints/conf_grpo"
     - "/nfs/h100/raid/chem/checkpoints/conf_grpo"
   qwen3_grpo_root:
     - "/mnt/weka/vtarasov/conf_grpo"
+    - "/mnt/weka/vtarasov/checkpoints/grpo"
     - "/data/chem-project/checkpoints/conf_grpo"
     - "/nfs/h100/raid/chem/checkpoints/conf_grpo"
-  gen_results_root: "outputs/gen_results"
-  eval_results_root: "outputs/eval_results"
-  pretrain_results_root: "outputs/pretrain_results"
-  pretrain_logs_root: "outputs/pretrain_logs"
+  gen_results_root: "/mnt/weka/vtarasov/outputs/outputs/gen_results/"
+  eval_results_root: "/mnt/weka/vtarasov/outputs/outputs/eval_results"
+  pretrain_results_root: "/mnt/weka/vtarasov/outputs/outputs/pretrain_results"
+  pretrain_logs_root: "/mnt/weka/vtarasov/outputs/outputs/pretrain_logs"
   wandb_root: "wandb_runs"
   qwen3_0.6b_base_model:
     - "/mnt/weka/vtarasov/Qwen3-0.6B-Base"
@@ -59,7 +65,7 @@ data:
   distinct_smi: "tmp/distinct_smi_filtered_13.pickle"
   xl_smi: "xl_smi.pickle"
   qm9_smi: "qm9_smi.pickle"
-  revisited_smi: "revisited_smi.pickle"
+  revisited_smi: "/home/vtarasov/code/3DMolGen/data/revisited_smi.pickle"
   icl_5_smi: "icl_5_smi.pickle"
   icl_10_smi: "icl_10_smi.pickle"
   icl_20_smi: "icl_20_smi.pickle"
@@ -192,6 +198,10 @@ data:
     - "geom_revisited_cartesian_isomeric_grouped/processed_strings/valid"
   revisited_cartesian_isomeric_grouped_test:
     - "geom_revisited_cartesian_isomeric_grouped/processed_strings/test"
+
+  big_data_train:
+    - "3DBigData_formatted/processed/bigdata_uniform_binned_isomeric/processed_strings/train"
+
 
 tokenizers:
   llama3_chem_v1: "src/molgen3D/training/tokenizers/Llama-3.2-chem-1B-v1"
@@ -363,7 +373,7 @@ models:
       "5e": "step-27500-hf"
 
   qw600_pre_binned_revisited_uniform_isomeric:
-    root: "qwen3_06b/260308-0317-2013-qwen3_06b_pre_4e_revisited_uniform_binned_isomeric/"
+    root: "qwen3_06b/260330-1525-9eef-qwen3_06b_pre_4e_revisited_uniform_binned_isomeric_grouped"
     steps:
       "1e": "step-6800-hf"
       "2e": "step-13600-hf"
@@ -371,7 +381,7 @@ models:
       "4e": "step-27200-hf"
     
   qw600_pre_binned_revisited_quantile_isomeric:
-    root: "qwen3_06b/260308-0316-a956-qwen3_06b_pre_4e_revisited_quantile_binned_isomeric/"
+    root: "qwen3_06b/260330-1541-7425-qwen3_06b_pre_4e_revisited_quantile_binned_isomeric/"
     steps:
       "1e": "step-6800-hf"
       "2e": "step-13600-hf"
@@ -385,6 +395,19 @@ models:
       "2e": "step-41000-hf"
       "3e": "step-61500-hf"
       "4e": "step-82000-hf"
+
+  qwen600_pre_binned_uniform_bigdata:
+    root: "qwen3_06b/260507-2158-3956-qwen3_06b_pre_1e_8e-4_bigdata_pairs/"
+    steps:
+      "1e": "step-222000-hf"
+
+  qw600_pre_binned_uniform_revisited_finetuned_from_bigdata:
+    root: "qwen3_06b/260508-1740-4135-qwen3_06b_finetuned_4e_uniform_binned_isomeric_from_bigdata/"
+    steps:
+      "1e": "step-6800-hf"
+      "2e": "step-13600-hf"
+      "3e": "step-20400-hf"
+      "4e": "step-27200-hf"
 
   # ---------- GRPO / FINETUNED MODELS (same structure) ----------
 

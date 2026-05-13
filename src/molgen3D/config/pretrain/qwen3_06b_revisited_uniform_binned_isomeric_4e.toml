@@ -1,5 +1,5 @@
 [job]
-description = "qwen3_06b_pre_4e_revisited_uniform_binned_isomeric"
+description = "qwen3_06b_pre_4e_revisited_uniform_binned_isomeric_4e_grouped"
 dump_folder = "pretrain_runs"
 print_config = true
 custom_config_module = "molgen3D.training.pretraining.config.custom_job_config"
@@ -22,16 +22,16 @@ gc_freq = 1000
 seq_len = 4096
 local_batch_size = 6
 global_batch_size = 48
-steps = 27200
+steps = 29600
 max_norm = 1.0
 dtype = "bfloat16"
 dataset = "molgen_jsonl"
-dataset_path = "data:revisited_uniform_binned_isomeric_train"
+dataset_path = "data:revisited_uniform_binned_isomeric_grouped_train"
 
 [validation]
 enable = false
 dataset = "molgen_jsonl"
-dataset_path = "data:revisited_uniform_binned_isomeric_valid"
+dataset_path = "data:revisited_uniform_binned_isomeric_grouped_valid"
 local_batch_size = 4
 seq_len = 4096
 freq = 500
@@ -41,7 +41,7 @@ num_val_molecules = 10
 numerical_validation_freq = 10000
 
 [molgen_data]
-train_path = "data:revisited_uniform_binned_isomeric_train"
+train_path = "data:revisited_uniform_binned_isomeric_grouped_train"
 tokenizer_key = "qwen3_0.6b_binned_258"
 min_emb_len = 0
 shuffle_lines = true
@@ -54,7 +54,7 @@ persistent_workers = false
 prefetch_factor = 2
 lookahead_limit = 100
 shuffle_buffer_size = 128
-serialization_mode = "pairs"
+serialization_mode = "isomer_units"
 
 [optimizer]
 name = "AdamW"
@@ -67,13 +67,13 @@ weight_decay = 0.1
 [wsds_scheduler]
 enable = true
 warmup_steps = 500
-checkpoints = [6800, 13600, 20400, 27200]
+checkpoints = [7400, 14800, 22200, 29600]
 lr_min = 0
 decay_frac = 0.1
 
 [checkpoint]
 enable = true
-interval = 6800
+interval = 7400
 keep_latest_k = 4
 folder = "checkpoint"
 create_seed_checkpoint = false
@@ -85,7 +85,7 @@ async_mode = "async"
 
 [metrics]
 log_freq = 20
-enable_wandb = false
+enable_wandb = true
 save_for_all_ranks = false
 save_tb_folder = "tb"
 

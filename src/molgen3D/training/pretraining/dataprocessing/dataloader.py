@@ -6,6 +6,7 @@ import time
 import os
 import random
 from pathlib import Path
+import numpy as np
 from dataclasses import dataclass
 from typing import BinaryIO, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple, Union
 
@@ -548,10 +549,15 @@ class JsonlTaggedPackedDataset(IterableDataset):
         super().__init__()
         self.files = _coerce_train_targets(train_path)
         self.idxs = [build_line_index(p) for p in self.files]
-        self._all_pairs: List[Tuple[int, int]] = []
+        n_total = sum(len(idx) for idx in self.idxs)
+        self._all_pairs = np.empty((n_total, 2), dtype=np.int32)
+        pos = 0
         for fi, idx in enumerate(self.idxs):
-            self._all_pairs.extend((fi, li) for li in range(len(idx)))
-        self._all_pair_indices = list(range(len(self._all_pairs)))
+            n = len(idx)
+            self._all_pairs[pos:pos + n, 0] = fi
+            self._all_pairs[pos:pos + n, 1] = np.arange(n, dtype=np.int32)
+            pos += n
+        self._all_pair_indices = np.arange(n_total, dtype=np.int32)
 
         if world_size is None or rank is None:
             self.world_size = int(os.environ.get("WORLD_SIZE", "1"))
@@ -675,16 +681,13 @@ class JsonlTaggedPackedDataset(IterableDataset):
                 stats=self._stats,
             )
 
-    def _pairs_for_epoch(self) -> List[Tuple[int, int]]:
+    def _pairs_for_epoch(self) -> np.ndarray:
         start = time.perf_counter()
-        indices = list(self._all_pair_indices)
+        indices = self._all_pair_indices.copy()
         if self.shuffle_lines:
-            self._rng.shuffle(indices)
-        pairs: List[Tuple[int, int]] = []
-        for global_idx in indices:
-            if (global_idx % self.world_size) != self.rank:
-                continue
-            pairs.append(self._all_pairs[global_idx])
+            np.random.default_rng(self._rng.getrandbits(64)).shuffle(indices)
+        rank_mask = (indices % self.world_size) == self.rank
+        pairs = self._all_pairs[indices[rank_mask]]
         if self._stats.enabled:
             self._stats.t_pairs_for_epoch += time.perf_counter() - start
         return pairs
@@ -701,7 +704,7 @@ class JsonlTaggedPackedDataset(IterableDataset):
         try:
             while True:
                 all_pairs = self._pairs_for_epoch()
-                worker_pairs = [p for i, p in enumerate(all_pairs) if (i % nworkers) == wid]
+                worker_pairs = all_pairs[np.arange(len(all_pairs)) % nworkers == wid]
                 self._pairs_total = len(worker_pairs)
                 preview_enabled = (
                     self._preview_enabled and (self._epoch == 0) and (wid == 0)
@@ -788,12 +791,13 @@ class JsonlTaggedPackedDataset(IterableDataset):
         self._monster_warning_shown = False
         self._truncation_warning_shown = False
 
-    def _fill_pair_buffer(self, worker_pairs: List[Tuple[int, int]]) -> None:
+    def _fill_pair_buffer(self, worker_pairs) -> None:
         while (
             len(self._pair_buffer) < self.shuffle_buffer_size
             and self._pair_cursor < len(worker_pairs)
         ):
-            self._pair_buffer.append(worker_pairs[self._pair_cursor])
+            row = worker_pairs[self._pair_cursor]
+            self._pair_buffer.append((int(row[0]), int(row[1])))
             self._pair_cursor += 1
             self._start_k = self._pair_cursor
 

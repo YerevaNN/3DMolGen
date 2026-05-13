@@ -1,5 +1,5 @@
 [job]
-description = "qwen3_06b_pre_4e_8e-4_binned_grouped"
+description = "qwen3_06b_pre_1e_8e-4_bigdata_pairs"
 dump_folder = "pretrain_runs"
 print_config = true
 custom_config_module = "molgen3D.training.pretraining.config.custom_job_config"
@@ -21,19 +21,19 @@ custom_import = "molgen3D.training.pretraining.torchtitan_model.qwen3_custom"
 [training]
 gc_freq = 1000
 seq_len = 4096
-local_batch_size = 6
+local_batch_size = 2
 global_batch_size = 48
-steps = 28000
+steps = 222000
 max_norm = 1.0
 dtype = "bfloat16"
 dataset = "molgen_jsonl"
 # dataset_path = "data:geom_conformers_train"
-dataset_path = "data:revisited_uniform_binned_train"
+dataset_path = "data:big_data_train"
 
 [validation]
 enable = false
 dataset = "molgen_jsonl"
-# dataset_path = "data:geom_conformers_valid"
+# dataset_path = "data:revisited_uniform_binned_valid"
 dataset_path = "data:revisited_uniform_binned_valid"
 local_batch_size = 4
 seq_len = 4096
@@ -45,21 +45,21 @@ numerical_validation_freq = 10000
 
 [molgen_data]
 # train_path_key = "conformers_train"
-train_path = "data:revisited_q_binned_train"
+train_path = "data:big_data_train"
 tokenizer_key = "qwen3_0.6b_binned_258"
 min_emb_len = 0
 shuffle_lines = true
 infinite = true
 seed = 2025
-num_workers = 8
+num_workers = 4
 pin_memory = true
 drop_last = true
 persistent_workers = false
 prefetch_factor = 2
 lookahead_limit = 100
 shuffle_buffer_size = 128
-#serialization_mode = "pairs"
 serialization_mode = "pairs"
+#serialization_mode = "isomer_units"
 
 [optimizer]
 name = "AdamW"
@@ -76,13 +76,14 @@ weight_decay = 0.1
 [wsds_scheduler]
 enable = true
 warmup_steps = 500
-checkpoints = [7000, 14000, 21000, 28000]
+checkpoints = [222000]
 lr_min = 0
 decay_frac = 0.1
 
 [checkpoint]
 enable = true
-interval = 7000
+interval = 222000
+
 keep_latest_k = 4
 folder = "checkpoint"
 create_seed_checkpoint = false
@@ -99,7 +100,7 @@ save_for_all_ranks = false
 save_tb_folder = "tb"
 
 [parallelism]
-data_parallel_replicate_degree = 1
-data_parallel_shard_degree = -1
+data_parallel_replicate_degree = 3
+data_parallel_shard_degree = 8
 tensor_parallel_degree = 1
 fsdp_reshard_after_forward = "default"

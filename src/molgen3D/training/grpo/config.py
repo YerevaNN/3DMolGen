@@ -118,9 +118,12 @@ class GRPOConfig:
     fbeta_drop_if_valid_lt: int = 3
     fbeta_use_uniq_frac: bool = True
     fbeta_reward_mode: str = "fbeta"  # "fbeta", "precision_only", "valid_count", "valid_frac"
+    fbeta_serialization_tag: str = "cartesian"
     fbeta_use_binned_decoder: bool = False
     fbeta_binned_ranges: Optional[List[List[float]]] = None
     fbeta_binned_bin_size: float = 0.104
+    fbeta_uniform_bin_config_path: Optional[str] = None
+    fbeta_quantile_bin_config_path: Optional[str] = None
     fbeta_warmup_lambda: float = 0.1
     fbeta_warmup_sigma: float = 0.75
 

@@ -1,5 +1,4 @@
 import argparse
-import ast
 import glob
 import json
 import os
@@ -7,24 +6,21 @@ import os.path as osp
 import random
 from collections import defaultdict
 from multiprocessing import Pool
-from typing import Any, Dict, Optional, Set, Tuple, List
+from typing import Any, Dict, List, Optional, Set, Tuple
 import numpy as np
 from loguru import logger as log
 from rdkit import Chem, RDLogger
 from tqdm.auto import tqdm
 
 from molgen3D.data_processing.utils import (
+    encode_mol_with_embedding,
     JsonlSplitWriter,
     filter_mols,
+    get_coordinate_ranges_for_embedding,
+    get_embedding_func_and_config,
     save_processed_pickle,
 )
-from molgen3D.data_processing.smiles_encoder_decoder import (
-    BinConfig,
-    encode_cartesian_v2,
-    encode_cartesian_binned,
-    encode_cartesian_binned_v2,
-    encode_cartesian_with_config,
-)
+from molgen3D.data_processing.smiles_encoder_decoder import BinConfig
 from molgen3D.utils.utils import load_pkl
 
 RDLogger.DisableLog("rdApp.*")
@@ -35,10 +31,12 @@ def read_mol(
 ) -> Optional[Tuple[List[str], Dict[str, Any]]]:
     mol_path, max_confs, precision, embedding_func, bin_size, ranges, do_filter, pickle_dir, _geom_root = args[:9]
     bin_config = args[9] if len(args) > 9 else None
+    use_isomeric_smiles = args[10] if len(args) > 10 else False
     try:
         return _read_mol_impl(
             mol_path, max_confs, precision, embedding_func, bin_size, ranges, do_filter, pickle_dir,
             bin_config=bin_config,
+            use_isomeric_smiles=use_isomeric_smiles,
         )
     except Exception as exc:
         log.error("Unhandled exception in read_mol | path={} | error={}", mol_path, exc)
@@ -55,6 +53,7 @@ def _read_mol_impl(
     do_filter: bool,
     pickle_dir: str,
     bin_config: Optional[BinConfig] = None,
+    use_isomeric_smiles: bool = False,
 ) -> Tuple[List[str], Dict[str, Any]]:
     mol_object = load_pkl(mol_path)
     geom_smiles = mol_object["smiles"]
@@ -80,18 +79,21 @@ def _read_mol_impl(
                 continue
 
         try:
-            if embedding_func is encode_cartesian_with_config:
-                embedded_smile, iso_smile = embedding_func(mol, bin_config)
-            elif embedding_func in (encode_cartesian_binned, encode_cartesian_binned_v2):
-                embedded_smile, iso_smile = embedding_func(mol, bin_size=bin_size, ranges=ranges)
-            else:
-                embedded_smile, iso_smile = embedding_func(mol, precision=precision)
+            embedded_smile, iso_smile = encode_mol_with_embedding(
+                mol,
+                embedding_func,
+                precision=precision,
+                bin_size=bin_size,
+                ranges=ranges,
+                bin_config=bin_config,
+            )
         except Exception as exc:
             log.error("Error encoding conformer | path={} | failure={}", mol_path, exc)
             local_failures["encoding_error"] += 1
             continue
 
         # Compute nonisomeric SMILES only for conformers that encoded successfully
+        noniso = None
         try:
             noniso = Chem.MolToSmiles(Chem.RemoveHs(mol, sanitize=False), canonical=True, isomericSmiles=False)
             nonisomeric_smiles.add(noniso)
@@ -100,10 +102,11 @@ def _read_mol_impl(
         except Exception:
             pass
 
+        canonical_smiles = iso_smile if use_isomeric_smiles else (noniso or iso_smile)
         samples.append(
             json.dumps(
                 {
-                    "canonical_smiles": iso_smile,
+                    "canonical_smiles": canonical_smiles,
                     "embedded_smiles": embedded_smile,
                 },
                 separators=(",", ":"),
@@ -166,33 +169,15 @@ def preprocess(
     ranges: str = "[-13.0, 13.0], [-13.0, 13.0], [-13.0, 13.0]",
     filter_ranges: str = None,
     bin_config_path: Optional[str] = None,
+    use_isomeric_smiles: bool = False,
 ) -> None:
     if dest_path is None:
         raise ValueError("dest_path must be provided for preprocessing output")
 
-    embedding_registry = {
-        "cartesian_v2": encode_cartesian_v2,
-        "cartesian": encode_cartesian_v2,
-        "cartesian_binned": encode_cartesian_binned,
-        "cartesian_binned_v2": encode_cartesian_binned_v2,
-        "uniform_binned": encode_cartesian_with_config,
-        "quantile_binned": encode_cartesian_with_config,
-    }
-
-    # Load BinConfig for uniform_binned / quantile_binned
-    bin_config = None
-    if embedding_type in ("uniform_binned", "quantile_binned"):
-        if bin_config_path is None:
-            raise ValueError(
-                f"--bin_config_path is required for embedding_type={embedding_type!r}. "
-                f"Generate one with: python scripts/fit_bins.py"
-            )
-        bin_config = BinConfig.load(bin_config_path)
-        log.info("Loaded BinConfig from {} | mode={} L={:.4f} H={:.4f} n_bins={}",
-                 bin_config_path, bin_config.mode, bin_config.L, bin_config.H, bin_config.n_bins)
-    if embedding_type not in embedding_registry:
-        raise ValueError(f"Unsupported embedding_type '{embedding_type}'. Options: {sorted(embedding_registry)}")
-    embedding_func = embedding_registry[embedding_type]
+    embedding_func, bin_config = get_embedding_func_and_config(
+        embedding_type=embedding_type,
+        bin_config_path=bin_config_path,
+    )
 
     overall_total_input_mols = overall_total_confs = overall_total_mols = 0
     overall_multi_distinct_graphs = overall_mol_with_dotted_smiles = overall_total_dotted_smiles = 0
@@ -221,13 +206,7 @@ def preprocess(
     if pickle_paths.size == 0:
         raise FileNotFoundError(f"No pickle files found under pattern {pickle_glob}")
 
-    # Parse ranges string once
-    try:
-        parsed_ranges = ast.literal_eval(f"[{ranges}]")
-        parsed_ranges = [tuple(r) for r in parsed_ranges]
-    except Exception as e:
-        log.error(f"Failed to parse ranges: {ranges}. Error: {e}")
-        parsed_ranges = [(-13.0, 13.0), (-13.0, 13.0), (-13.0, 13.0)]
+    parsed_ranges = get_coordinate_ranges_for_embedding(ranges, bin_config=bin_config)
 
     do_filter = False
     if filter_ranges is not None:
@@ -273,6 +252,7 @@ def preprocess(
                 split_pickle_dirs[split_name],
                 geom_raw_path,
                 bin_config,
+                use_isomeric_smiles,
             )
             for path in mol_paths
         ]
@@ -456,13 +436,13 @@ if __name__ == "__main__":
         "--bin_size",
         type=float,
         default=0.104,
-        help="Bin size for binned embedding.",
+        help="Legacy bin size for cartesian_binned* embeddings.",
     )
     parser.add_argument(
         "--ranges",
         type=str,
         default="[-13.0, 13.0], [-13.0, 13.0], [-13.0, 13.0]",
-        help="Ranges for binned embedding.",
+        help="Legacy ranges for cartesian_binned* embeddings.",
     )
     parser.add_argument(
         "--filter_ranges",
@@ -476,6 +456,19 @@ if __name__ == "__main__":
         default=None,
         help="Path to BinConfig JSON (required for uniform_binned / quantile_binned).",
     )
+
+    parser.add_argument(
+        "--isomeric",
+        action="store_true",
+        help="Alias for --use_isomeric_smiles.",
+    )
+    parser.add_argument(
+        "--sort_by",
+        type=str,
+        choices=["energy", "weight", "none"],
+        default="energy",
+        help="Sort conformers by energy, weight, or keep original order.",
+    )
     args = parser.parse_args()
 
     dest_path = osp.join(args.dest, args.run_name)
@@ -487,6 +480,8 @@ if __name__ == "__main__":
         backtrace=False,
         diagnose=False,
     )
+
+    use_isomeric = args.isomeric
 
     preprocess(
         geom_raw_path=args.geom_raw_path,
@@ -502,5 +497,6 @@ if __name__ == "__main__":
         ranges=args.ranges,
         filter_ranges=args.filter_ranges,
         bin_config_path=args.bin_config_path,
+        use_isomeric_smiles=use_isomeric,
     )
     

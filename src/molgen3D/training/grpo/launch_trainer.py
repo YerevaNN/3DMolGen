@@ -288,7 +288,7 @@ def main():
     )
     parser.add_argument("--ngpus", type=int, default=1, help="Number of GPUs to use")
     parser.add_argument("--strategy", type=str, choices=["single", "ddp", "fsdp", "ds"], 
-                       default="single", help="Training strategy")
+                       default="fsdp", help="Training strategy")
     parser.add_argument("--nccl-debug", action="store_true", help="Enable NCCL debug logging")
     # WandB is configured via hardcoded defaults and environment variables.
     

@@ -1750,10 +1750,10 @@ def main() -> None:
         action="store_true",
         help="Use grouped binned dataset defaults (binned_conformers_* and isomer_units).",
     )
-    parser.add_argument("--seq-len", type=int, default=2048)
+    parser.add_argument("--seq-len", type=int, default=4096)
     parser.add_argument("--sample-lines", type=int, default=1000)
     parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--tokenizers", nargs="+", default=["qwen3_0.6b_origin", "qwen3_0.6b_custom", "qwen3_0.6b_binned"])
+    parser.add_argument("--tokenizers", nargs="+", default=["qwen3_0.6b_origin", "qwen3_0.6b_custom", "qwen3_0.6b_binned", "qwen3_0.6b_binned_258"])
     parser.add_argument("--skip-validation", action="store_true")
     parser.add_argument("--shuffle", action="store_true", help="Sample random lines via dataloader shuffle")
     parser.add_argument("--seed", type=int, default=0)
@@ -1838,15 +1838,17 @@ def main() -> None:
     else:
         train_path = str(get_data_path(args.dataset))
 
-    if args.validation_path.strip():
-        try:
-            valid_path = str(get_data_path(args.validation_path.strip()))
-        except KeyError:
-            valid_path = args.validation_path.strip()
-    elif args.binned:
-        valid_path = str(get_data_path("binned_conformers_valid"))
-    else:
-        valid_path = str(get_data_path(args.dataset.replace("train", "valid")))
+    valid_path = ""
+    if not args.skip_validation:
+        if args.validation_path.strip():
+            try:
+                valid_path = str(get_data_path(args.validation_path.strip()))
+            except KeyError:
+                valid_path = args.validation_path.strip()
+        elif args.binned:
+            valid_path = str(get_data_path("binned_conformers_valid"))
+        else:
+            valid_path = str(get_data_path(args.dataset.replace("train", "valid")))
 
     serialization_mode = args.serialization_mode
     if args.binned and serialization_mode == "pairs":

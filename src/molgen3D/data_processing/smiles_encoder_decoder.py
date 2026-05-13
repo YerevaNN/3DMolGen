@@ -590,6 +590,9 @@ class BinConfig:
     def __post_init__(self):
         self.digit_width = max(3, len(str(self.n_bins + 1)))
 
+    def coordinate_ranges(self):
+        return [(float(self.L), float(self.H))] * 3
+
     # -- persistence ---------------------------------------------------------
     def save(self, path: str) -> None:
         obj = {
@@ -613,6 +616,22 @@ class BinConfig:
             n_bins=obj["n_bins"],
             edges=np.array(obj["edges"], dtype=np.float64),
         )
+
+
+def get_default_bin_config_path(mode: str) -> str:
+    normalized_mode = str(mode)
+    if normalized_mode not in {"uniform", "quantile"}:
+        raise ValueError(f"Unsupported BinConfig mode: {mode!r}")
+    return str(
+        Path(__file__).resolve().parents[1]
+        / "config"
+        / "bin_configs"
+        / f"{normalized_mode}_bins.json"
+    )
+
+
+def load_bin_config_for_mode(mode: str, config_path: Optional[str] = None) -> BinConfig:
+    return BinConfig.load(config_path or get_default_bin_config_path(mode))
 
 
 def fit_uniform_bins(
@@ -973,6 +992,8 @@ def decode_conformer_by_serialization(
     bins=None,
     uniform_config_path: Optional[str] = None,
     quantile_config_path: Optional[str] = None,
+    uniform_config: Optional[BinConfig] = None,
+    quantile_config: Optional[BinConfig] = None,
 ):
     mode = str(serialization_tag)
     if mode == "cartesian":
@@ -982,13 +1003,9 @@ def decode_conformer_by_serialization(
             raise ValueError("`bins` must be provided for cartesian_binned decoding.")
         return decode_cartesian_binned_v2(enriched_string, bins)
     if mode == "uniform":
-        cfg_path = uniform_config_path or str(
-            Path(__file__).resolve().parents[1] / "config" / "bin_configs" / "uniform_bins.json"
-        )
-        return decode_cartesian_with_config(enriched_string, BinConfig.load(cfg_path))
+        config = uniform_config or load_bin_config_for_mode("uniform", uniform_config_path)
+        return decode_cartesian_with_config(enriched_string, config)
     if mode == "quantile":
-        cfg_path = quantile_config_path or str(
-            Path(__file__).resolve().parents[1] / "config" / "bin_configs" / "quantile_bins.json"
-        )
-        return decode_cartesian_with_config(enriched_string, BinConfig.load(cfg_path))
+        config = quantile_config or load_bin_config_for_mode("quantile", quantile_config_path)
+        return decode_cartesian_with_config(enriched_string, config)
     raise ValueError(f"Unsupported serialization mode: {serialization_tag}")

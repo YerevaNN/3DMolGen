@@ -15,6 +15,7 @@ import os
 import argparse
 from datetime import datetime
 import time
+import numpy as np
 
 torch.set_grad_enabled(False)
 torch.set_float32_matmul_precision("high")
@@ -24,9 +25,8 @@ torch.backends.cuda.matmul.allow_tf32 = True
 from molgen3D.data_processing.utils import decode_cartesian_raw
 from molgen3D.data_processing.smiles_encoder_decoder import (
     decode_conformer_by_serialization,
-    normalize_serialization_tag,
+    load_bin_config_for_mode,
     strip_smiles,
-    get_bins_for_coords,
 )
 from molgen3D.evaluation.utils import (
     extract_between,
@@ -45,8 +45,6 @@ RDLogger.DisableLog("rdApp.warning")
 RDLogger.DisableLog("rdApp.error")
 rdBase.DisableLog("rdApp.warning")
 rdBase.DisableLog("rdApp.error")
-
-
 def set_seed(seed=42):
     random.seed(seed)  # Python random module
     torch.manual_seed(seed)  # PyTorch CPU
@@ -113,12 +111,14 @@ def process_batch(
     serialization_tag: str = "cartesian",
     uniform_bin_config_path: str = None,
     quantile_bin_config_path: str = None,
+    uniform_bin_config=None,
+    quantile_bin_config=None,
 ):
-    # Create bins for binned decoding (must match encoding bins)
     bins = None
-    if binned:
+    if binned and serialization_tag == "cartesian_binned":
         ranges = [(-13.0, 13.0), (-13.0, 13.0), (-13.0, 13.0)]
-        bins = get_bins_for_coords(ranges, bin_size=0.104)
+        bin_size = 0.104
+        bins = [np.arange(start, end, bin_size) for start, end in ranges]
     generations = defaultdict(list)
     stats = {"smiles_mismatch":0, "mol_parse_fail" :0, "no_eos":0}
     
@@ -176,6 +176,8 @@ def process_batch(
                         bins=bins,
                         uniform_config_path=uniform_bin_config_path,
                         quantile_config_path=quantile_bin_config_path,
+                        uniform_config=uniform_bin_config,
+                        quantile_config=quantile_bin_config,
                     )
                     generations[geom_smiles].append(mol_obj)
                 except Exception as e:
@@ -276,12 +278,23 @@ def run_inference(inference_config: dict):
         logger.info("Auto-detecting binned=True based on model path")
         binned = True
 
-    serialization_tag = normalize_serialization_tag(
-        inference_config.get("serialization_tag", "cartesian")
-    )
+    serialization_tag = inference_config.get("serialization_tag", "cartesian")
     if serialization_tag == "cartesian_binned":
         binned = True
     logger.info(f"Using serialization_tag={serialization_tag}")
+
+    uniform_bin_config = None
+    quantile_bin_config = None
+    if serialization_tag == "uniform":
+        uniform_bin_config = load_bin_config_for_mode(
+            "uniform",
+            inference_config.get("uniform_bin_config_path"),
+        )
+    elif serialization_tag == "quantile":
+        quantile_bin_config = load_bin_config_for_mode(
+            "quantile",
+            inference_config.get("quantile_bin_config_path"),
+        )
 
     for start in tqdm(range(0, len(mols_list), batch_size), desc="generating"):
         batch = mols_list[start:start + batch_size]
@@ -296,6 +309,8 @@ def run_inference(inference_config: dict):
                 serialization_tag=serialization_tag,
                 uniform_bin_config_path=inference_config.get("uniform_bin_config_path"),
                 quantile_bin_config_path=inference_config.get("quantile_bin_config_path"),
+                uniform_bin_config=uniform_bin_config,
+                quantile_bin_config=quantile_bin_config,
             )
             stats.update(stats_)
             for k, v in outputs.items():
@@ -340,11 +355,12 @@ def launch_inference_from_cli(
         return
     
     n_gpus = 1
-    node = device if device in ["a100", "h100", "all"] else "local"
+    _slurm_devices = ["a100", "h100", "all", "research"]
+    node = device if device in _slurm_devices else "local"
     executor = None
-    
+
     # Set SLURM_CONF if not already set (needed for sbatch to work)
-    if device in ["a100", "h100", "all"]:
+    if device in _slurm_devices:
         if not os.environ.get("SLURM_CONF"):
             # Try common SLURM config paths
             possible_paths = [
@@ -370,30 +386,29 @@ def launch_inference_from_cli(
                     "sbatch may fail to locate slurmctld."
                 )
     
-    if device in ["a100", "h100", "all"]:
+    if device in _slurm_devices:
         executor = submitit.AutoExecutor(folder="outputs/slurm_jobs/conf_gen/job_%j")
     elif device == "local":
         executor = submitit.LocalExecutor(folder="outputs/slurm_jobs/conf_gen/job_%j")
-    
+
     if executor is not None:
         executor.update_parameters(
             name="conf_gen",
-            timeout_min=24 * 24 * 60,
+            timeout_min=5* 24 * 60,
             gpus_per_node=n_gpus,
             nodes=1,
             mem_gb=80,
             cpus_per_task=n_gpus * 12,
             slurm_additional_parameters={"partition": node},
         )
-        # Disable srun to avoid PMIx/MPI plugin issues and srun command not found errors
-        if device in ["a100", "h100", "all"]:
+        if device in _slurm_devices:
             logger.info("Disabling srun to avoid PMIx/MPI plugin issues.")
             executor.update_parameters(slurm_use_srun=False)
     
     # Base configuration template
     base_inference_config = {
-        "model_path": get_ckpt("qw600_pre_binned_filtered", "1e"),
-        "tokenizer_path": get_tokenizer_path("qwen3_0.6b_binned"),
+        "model_path": get_ckpt("qw600_pre_binned_revisited_cartesian_isomeric", "4e"),
+        "tokenizer_path": get_tokenizer_path("qwen3_0.6b_custom"),
         "torch_dtype": "bfloat16",
         "batch_size": 128,
         "num_gens": gen_num_codes["2k_per_conf"],
@@ -410,55 +425,49 @@ def launch_inference_from_cli(
 
     if grid_run_inference:
         param_grid = [
-            "/data/chem-project/checkpoints/qwen3_06b/260126-0653-7cf8-qwen3_06b_pre_5e_8e-4_binned_grouped/step-27500-hf",
-            # "/home/chem-project/checkpoints/conf_grpo/260205-0417_qwen3_fscore_lr8e-05_d075_b10.0_g2.0_w0_warmup0_tau0_noscale_7cf8model_fbeta/model",
-            # "/home/chem-project/checkpoints/conf_grpo/260204-1141_qwen3_fscore_lr8e-05_d075_b2.0_g2.0_w0_warmup0_tau0_noscale_7cf8model_fbeta/model",
-            # "/home/chem-project/checkpoints/conf_grpo/260204-1143_qwen3_fscore_lr8e-05_d075_b0.0_g2.0_w0_warmup0_tau0_noscale_7cf8model_valid_count/model",
-            # "/home/chem-project/checkpoints/conf_grpo/260204-1143_qwen3_fscore_lr8e-05_d075_b0.0_g2.0_w0_warmup0_tau0_noscale_7cf8model_valid_count/model",
-        
+            ("qwen600_pre_binned_uniform_bigdata", "1e"),
         ]
         jobs = []
+        def _build_grid_config(base_config, model_key_epoch, test_set_name):
+            model_alias, epoch = model_key_epoch
+            resolved_path = get_ckpt(model_alias, epoch)
+            cfg = dict(base_config)
+            cfg["model_path"] = resolved_path
+            if "binned" in model_alias or "qwen3" in model_alias:
+                cfg["tokenizer_path"] = get_tokenizer_path("qwen3_0.6b_binned")
+                cfg["binned"] = True
+            else:
+                cfg["tokenizer_path"] = get_tokenizer_path("qwen3_0.6b_custom")
+                cfg["binned"] = False
+            if test_set_name == "xl":
+                cfg["batch_size"] = 100
+            if test_set_name == "qm9":
+                cfg["batch_size"] = 100
+            if test_set_name == "valid":
+                cfg["batch_size"] = 128
+            if test_set_name == "valid":
+                cfg["test_data_path"] = get_data_path("validation_pickle")
+            else:
+                cfg["test_data_path"] = get_data_path(f"{test_set_name}_smi")
+            cfg["test_set"] = test_set_name
+            path_parts = str(resolved_path).rstrip('/').split('/')
+            model_name = path_parts[-2] if path_parts[-1] == "model" else path_parts[-1]
+            cfg["run_name"] = f"{model_name}_{test_set_name}"
+            return cfg
+
         if executor is not None:
             with executor.batch():
                 for model_path in param_grid:
                     for test_set_name in test_sets_to_run:
-                        grid_config = dict(base_inference_config)
-                        # Use direct path (model_path is already a full path string)
-                        grid_config["model_path"] = model_path
-                        
-                        # Auto-select tokenizer based on model path
-                        if "binned" in model_path or "qwen3" in model_path:
-                            grid_config["tokenizer_path"] = get_tokenizer_path("qwen3_0.6b_binned")
-                            grid_config["binned"] = True
-                        else:
-                            grid_config["tokenizer_path"] = get_tokenizer_path("qwen3_0.6b_custom")
-                            grid_config["binned"] = False
-                        
-                        if test_set_name == "xl":
-                            grid_config["batch_size"] = 100
-                        
-                        if test_set_name == "qm9":
-                            grid_config["batch_size"] = 100
-
-                        if test_set_name == "valid":
-                            grid_config["batch_size"] = 128
-
-                        if test_set_name == "valid":
-                            grid_config["test_data_path"] = get_data_path("validation_pickle")
-                        else:
-                            grid_config["test_data_path"] = get_data_path(f"{test_set_name}_smi")
-                        grid_config["test_set"] = test_set_name
-                        # Create a cleaner run name from the model path
-                        # Extract the last meaningful directory name or use basename
-                        path_parts = model_path.rstrip('/').split('/')
-                        if path_parts[-1] == "model":
-                            model_name = path_parts[-2]  # Use parent directory if path ends with /model
-                        else:
-                            model_name = path_parts[-1]  # Use last directory/file name
-                        grid_config["run_name"] = f"{model_name}_{test_set_name}"
-                        
+                        grid_config = _build_grid_config(base_inference_config, model_path, test_set_name)
                         job = executor.submit(run_inference, inference_config=grid_config)
                         jobs.append(job)
+        else:
+            for model_path in param_grid:
+                for test_set_name in test_sets_to_run:
+                    grid_config = _build_grid_config(base_inference_config, model_path, test_set_name)
+                    logger.info(f"Running grid inference for {grid_config['model_path']} on {test_set_name}")
+                    run_inference(inference_config=grid_config)
     else:
         if executor is not None:
             with executor.batch():
@@ -501,7 +510,7 @@ def launch_inference_from_cli(
 if __name__ == "__main__":
     set_seed(42)
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device", type=str, choices=["local", "a100", "h100", "all"], default="local")
+    parser.add_argument("--device", type=str, choices=["local", "a100", "h100", "all", "research"], default="research")
     parser.add_argument("--grid_run_inference", action="store_true")
     parser.add_argument(
         "--test_set",
