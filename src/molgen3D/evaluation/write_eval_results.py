@@ -8,7 +8,6 @@ import pickle
 
 from molgen3D.evaluation.utils import covmat_metrics, DEFAULT_THRESHOLDS
 from molgen3D.data_processing.utils import load_pkl
-from molgen3D.config.paths import get_data_path
 
 THRESHOLD_075 = 0.75
 
@@ -192,8 +191,12 @@ def save_evaluation_results(cov_df: pd.DataFrame, matching: Dict[str, float], ag
 
     # Save RMSD matrix
     rmsd_matrix_path = os.path.join(results_path, "rmsd_matrix.csv")
-    # Load ground truth data once outside the loop for better performance
-    gt_dict = load_pkl(get_data_path(f"{args.test_set}_smi"))
+    # Load ground truth data once outside the loop for better performance.
+    # Prefer the already-resolved path passed via gt_stats to keep fallbacks consistent.
+    gt_path = gt_stats.get("gt_path")
+    if not gt_path:
+        raise KeyError("gt_stats['gt_path'] is required to save evaluation results.")
+    gt_dict = load_pkl(gt_path)
     per_molecule_rmsd_stats = []
     for smi, res in rmsd_results.items():
         rmsd_matrix = res["rmsd"]
