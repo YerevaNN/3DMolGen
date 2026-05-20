@@ -96,7 +96,7 @@ def create_slurm_executor(
     executor.update_parameters(**params)
     
     # Disable srun to avoid PMIx/MPI plugin issues and srun command not found errors
-    if device in ["a100", "h100", "all"]:
+    if device in ["a100", "h100", "all", "research"]:
         logger.info("Disabling srun to avoid PMIx/MPI plugin issues.")
         executor.update_parameters(slurm_use_srun=False)
     

@@ -112,8 +112,13 @@ def _resolve_path_value(value: str | Path | Sequence[str | Path]) -> Path:
                 continue
             seen.add(candidate_path)
             resolved.append(candidate_path)
-            if candidate_path.exists():
-                return candidate_path
+            try:
+                if candidate_path.exists():
+                    return candidate_path
+            except OSError:
+                # Some shared mounts are present but not traversable for this user;
+                # skip them and continue through the configured fallbacks.
+                continue
 
     return resolved[0]
 
@@ -389,8 +394,12 @@ def get_data_path(key: str) -> Path:
         if rel_path.is_absolute():
             if default_path is None:
                 default_path = rel_path
-            if rel_path.exists():
-                return rel_path
+            try:
+                if rel_path.exists():
+                    return rel_path
+            except OSError:
+                # Shared mounts may be present but not accessible for this user.
+                continue
             continue
 
         rel_str = str(rel_candidate)
@@ -405,8 +414,12 @@ def get_data_path(key: str) -> Path:
                 candidate_path = base_path / rel_path
                 if default_path is None:
                     default_path = candidate_path
-                if candidate_path.exists():
-                    return candidate_path
+                try:
+                    if candidate_path.exists():
+                        return candidate_path
+                except OSError:
+                    # Skip unreadable fallback roots and keep trying the rest.
+                    continue
 
     if default_path is not None:
         return default_path
