@@ -29,9 +29,7 @@ RDLogger.DisableLog("rdApp.*")
 def read_mol(
     args: Tuple,
 ) -> Optional[Tuple[List[str], Dict[str, Any]]]:
-    mol_path, max_confs, precision, embedding_func, bin_size, ranges, do_filter, pickle_dir, _geom_root = args[:9]
-    bin_config = args[9] if len(args) > 9 else None
-    use_isomeric_smiles = args[10] if len(args) > 10 else False
+    mol_path, max_confs, precision, embedding_func, bin_size, ranges, do_filter, pickle_dir, bin_config, use_isomeric_smiles = args
     try:
         return _read_mol_impl(
             mol_path, max_confs, precision, embedding_func, bin_size, ranges, do_filter, pickle_dir,
@@ -196,7 +194,7 @@ def preprocess(
 
     split_name_to_index = {"train": 0, "valid": 1, "test": 2}
     requested_splits = [splits] if splits else list(split_name_to_index.keys())
-    log.info("Reading files from %s", geom_raw_path)
+    log.info("Reading files from {}", geom_raw_path)
 
 
     split_indices_array = np.load(indices_path, allow_pickle=True)
@@ -250,7 +248,6 @@ def preprocess(
                 parsed_ranges,
                 do_filter,
                 split_pickle_dirs[split_name],
-                geom_raw_path,
                 bin_config,
                 use_isomeric_smiles,
             )
@@ -461,13 +458,6 @@ if __name__ == "__main__":
         "--isomeric",
         action="store_true",
         help="Alias for --use_isomeric_smiles.",
-    )
-    parser.add_argument(
-        "--sort_by",
-        type=str,
-        choices=["energy", "weight", "none"],
-        default="energy",
-        help="Sort conformers by energy, weight, or keep original order.",
     )
     args = parser.parse_args()
 

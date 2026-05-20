@@ -137,7 +137,6 @@ def _process_big_data_mol_impl(
         "confs_count_pre_filter": len(mols),
         "confs_count_post_filter": len(samples),
         "nonisomeric_smiles_post_filter": len(nonisomeric_smiles),
-        "isomeric_smiles_post_filter": isomeric_smiles,
         "num_distinct_smiles_with_dot": len(dotted_smiles),
         "has_dotted_smiles": bool(dotted_smiles),
         "failures": local_failures,
@@ -155,8 +154,6 @@ def _process_big_data_by_idx(args: Tuple) -> Optional[Tuple]:
 
 
 
-
-
 def _collect_results(
     result,
     split_writer: JsonlSplitWriter,
@@ -166,7 +163,6 @@ def _collect_results(
     geom_to_iso_map: Dict[str, Set[str]],
     counters: Dict[str, int],
 ) -> None:
-    """Accumulate stats from one worker result into the running counters."""
     if result is None:
         failure_counts["unhandled_exception"] += 1
         return
@@ -358,24 +354,10 @@ def preprocess_big_data_shards(
     save_pickles: bool = True,
     batch_size: int = 100_000,
 ) -> None:
-    """Process shard pkl files produced by convert_big_data_format.py.
+    """Process shard_NNNN.pkl files one at a time to bound peak RAM.
 
-    Each shard is a ``{canonical_smiles: [Mol, Mol, ...]}`` dict.  Shards are
-    processed one at a time so peak RAM is bounded to a single shard.
-
-    When *shard_id* is given the outputs are written to an isolated
-    subdirectory ``dest_path/shard_NNNN/`` so that parallel SLURM array
-    tasks never collide.  Use ``combine_shard_outputs()`` afterwards to
-    merge them into the final directory.
-
-    Parameters
-    ----------
-    input_dir:
-        Directory containing ``shard_NNNN.pkl`` files.
-    shard_id:
-        If given, process only that shard (0-based integer matching the
-        ``NNNN`` suffix).  Useful for SLURM array jobs.  ``None`` processes
-        all shards in order.
+    With shard_id set, outputs go to dest_path/shard_NNNN/ so parallel
+    SLURM array tasks don't collide; run combine_shard_outputs() afterwards.
     """
     import glob as _glob
 
@@ -436,16 +418,7 @@ def combine_shard_outputs(
     split_name: str = "train",
     delete_shard_dirs: bool = False,
 ) -> None:
-    """Merge per-shard output directories into a single unified output.
-
-    Expects ``dest_path/shard_NNNN/`` directories produced by
-    ``preprocess_big_data_shards()`` with ``shard_id`` set.
-
-    The combined output lives directly under *dest_path*:
-      - ``processed_strings/<split>/`` — all JSONL chunks renamed sequentially
-      - ``processed_pickles/<split>/`` — all pickle files moved/copied
-      - ``<split>_geom_to_isomeric_smiles.jsonl`` — concatenation of all mapping files
-    """
+    """Merge shard_NNNN/ subdirs into dest_path/processed_strings, processed_pickles, and a combined mapping JSONL."""
     import glob as _glob
     import shutil
 
