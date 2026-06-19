@@ -13,6 +13,7 @@ base_paths:
     - "/mnt/weka/vtarasov/torsional_gdrive/extracted"
     - "/data/molgen/GEOM_data/torsional_gdrive/extracted"
   ckpts_root:
+    - "/mnt/weka/fgeikyan/checkpoints"
     - "/mnt/weka/vtarasov/checkpoints"
     - "/data/chem-project/checkpoints"
   hf_yerevann_root:
@@ -37,10 +38,10 @@ base_paths:
     - "/mnt/weka/vtarasov/checkpoints/grpo"
     - "/data/chem-project/checkpoints/conf_grpo"
     - "/nfs/h100/raid/chem/checkpoints/conf_grpo"
-  gen_results_root: "/mnt/weka/vtarasov/outputs/outputs/gen_results/"
-  eval_results_root: "/mnt/weka/vtarasov/outputs/outputs/eval_results"
-  pretrain_results_root: "/mnt/weka/vtarasov/outputs/outputs/pretrain_results"
-  pretrain_logs_root: "/mnt/weka/vtarasov/outputs/outputs/pretrain_logs"
+  gen_results_root: "/mnt/weka/fgeikyan/outputs/outputs/gen_results/"
+  eval_results_root: "/mnt/weka/fgeikyan/3dmolgen_bigdata/outputs/eval_results"
+  pretrain_results_root: "/mnt/weka/fgeikyan/outputs/outputs/pretrain_results"
+  pretrain_logs_root: "/mnt/weka/fgeikyan/outputs/outputs/pretrain_logs"
   wandb_root: "wandb_runs"
   qwen3_0.6b_base_model:
     - "/mnt/weka/vtarasov/Qwen3-0.6B-Base"
@@ -62,7 +63,10 @@ ckpts:
 
 data:
   clean_smi: "clean_smi.pickle"
-  distinct_smi: "tmp/distinct_smi_filtered_13.pickle"
+  distinct_smi:
+    - "/mnt/weka/fgeikyan/tokenizer/distinct_smi_filtered_13.pickle"
+    - "/data/molgen/tmp/distinct_smi_filtered_13.pickle"
+    - "tmp/distinct_smi_filtered_13.pickle"
   xl_smi: "xl_smi.pickle"
   qm9_smi: "qm9_smi.pickle"
   revisited_smi: "/home/vtarasov/code/3DMolGen/data/revisited_smi.pickle"
@@ -202,6 +206,19 @@ data:
   big_data_train:
     - "3DBigData_formatted/processed/bigdata_uniform_binned_isomeric/processed_strings/train"
 
+  fsq_big_data_train:
+    - "/mnt/weka/fgeikyan/fsq/3dbigdata_fsq_4096_shuffled/processed_strings/train"
+
+  fsq_conformers_train:
+    - "/mnt/weka/fgeikyan/fsq/geom_fsq_4096/processed_strings/train"
+    - "/data/vtarasov/geom_fsq_4096/processed_strings/train"
+  fsq_conformers_valid:
+    - "/mnt/weka/fgeikyan/fsq/geom_fsq_4096/processed_strings/valid"
+    - "/data/vtarasov/geom_fsq_4096/processed_strings/valid"
+  fsq_conformers_test:
+    - "/mnt/weka/fgeikyan/fsq/geom_fsq_4096/processed_strings/test"
+    - "/data/vtarasov/geom_fsq_4096/processed_strings/test"
+
 
 tokenizers:
   llama3_chem_v1: "src/molgen3D/training/tokenizers/Llama-3.2-chem-1B-v1"
@@ -209,6 +226,8 @@ tokenizers:
   qwen3_0.6b_origin: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_original"
   qwen3_0.6b_binned: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_binned"
   qwen3_0.6b_binned_258: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_binned_258"
+  qwen3_0.6b_fsq_4096: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_fsq_4096"
+  qwen3_1.7b_fsq_4096: "src/molgen3D/training/tokenizers/Qwen3_tokenizer_fsq_4096"
 
 models:
   # ---------- BASE MODELS ----------

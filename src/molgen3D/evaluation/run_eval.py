@@ -1,8 +1,9 @@
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import os
 from pathlib import Path
 import time
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -25,11 +26,10 @@ def _compute_key_matrix(key: str, true_confs: List, gen_mols: List, use_alignmol
     n_true = len(true_confs)
     n_gen = len(gen_mols)
     mat = np.full((n_true, n_gen), np.nan, dtype=float)
-    # Generated molecules are preprocessed with RemoveHs; normalize references
-    # the same way so RMSD compares equivalent graph representations.
-    ref_confs = [rdkit_utils.RemoveHs(ref_mol) for ref_mol in true_confs]
-    for i_true, ref_mol in enumerate(ref_confs):
-        row = np.array([rdkit_utils._best_rmsd(gen_mol, ref_mol, use_alignmol) for gen_mol in gen_mols], dtype=float)
+    for i_true, ref_mol in enumerate(true_confs):
+        ref_mol_normalized = rdkit_utils._normalize_coords(ref_mol)
+        row = np.array([rdkit_utils._best_rmsd(gen_mol, ref_mol_normalized, use_alignmol) for gen_mol in gen_mols], dtype=float)
+        # row = np.array([rdkit_utils._best_rmsd(gen_mol, ref_mol, use_alignmol) for gen_mol in gen_mols], dtype=float)
         if row.shape == (n_gen,):
             mat[i_true] = row
     all_nan = bool(np.isnan(mat).all())
@@ -44,11 +44,12 @@ def compute_rmsd_matrix(true_data: Dict, gen_data: Dict[str, List], args: argpar
         if not gen_mols:
             missing.append(key)
             continue
-        work_items.append((key, true_data[key]["confs"], gen_mols))
+        true_confs = rdkit_utils.process_molecules_remove_hs({key: true_data[key]["confs"]})[key]
+        work_items.append((key, true_confs, gen_mols))
     if not work_items:
         return rmsd_results, missing, all_nan_keys
     total_rows = int(sum(len(confs) for _, confs, _ in work_items))
-    with ThreadPoolExecutor(max_workers=args.num_workers) as ex:
+    with ProcessPoolExecutor(max_workers=args.num_workers) as ex:
         futures = [ex.submit(_compute_key_matrix, key, confs, gen_mols, args.use_alignmol) for key, confs, gen_mols in work_items]
         with tqdm(total=total_rows, desc="RMSD rows", unit="row") as pbar:
             for fut in as_completed(futures):
@@ -153,7 +154,6 @@ def run_posebusters_wrapper(gen_data: Dict[str, List], config: str, max_workers:
         traceback.print_exc()
         return None, None, None
 
-
 def get_missing_evaluation_dirs(gen_base: str, eval_base: str, max_recent: Optional[int]) -> List[str]:
     gen_path = Path(gen_base)
     eval_path = Path(eval_base)
@@ -181,13 +181,8 @@ def derive_eval_base_from_gen(gen_base: str) -> str:
         return str(Path(*parts))
     return str(p.parent / "eval_results")
 
-def process_generation_pickle(
-    gens_dict: Dict,
-    gt_dict: Dict,
-    gens_path: str,
-    results_path: str,
-    args: argparse.Namespace,
-) -> bool:
+def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
+                              results_path: str, args: argparse.Namespace) -> bool:
 
     t0 = time.time()
     # Process generated molecules and calculate total count
@@ -254,11 +249,7 @@ def process_generation_pickle(
     return True
 
 
-def run_evaluation(directory_name: str, gen_base: str, eval_base: str, args_dict: dict) -> bool:
-    # Convert args_dict back to Namespace for compatibility
-    from types import SimpleNamespace
-    args = SimpleNamespace(**args_dict)
-    
+def run_evaluation(directory_name: str, gen_base: str, eval_base: str, args: argparse.Namespace) -> bool:
     print(f"Starting evaluation for: {directory_name}")
     
     gens_path = os.path.join(gen_base, directory_name)
@@ -271,30 +262,37 @@ def run_evaluation(directory_name: str, gen_base: str, eval_base: str, args_dict
         return False
     gens_dict = load_pkl(gen_pickle_path)
 
-    gt_path = get_data_path(f"{args.test_set}_smi")
-    gt_dict = load_pkl(gt_path)
-    print(f"Loaded {len(gt_dict)} ground truth geom_smiles from {gt_path}")
+    gt_dict = load_pkl(get_data_path(f"{args.test_set}_smi"))
+    print(f"Loaded {len(gt_dict)} ground truth geom_smiles")
     
-    results_path = os.path.join(eval_base, f"{directory_name}")
-    return process_generation_pickle(
-        gens_dict=gens_dict,
-        gt_dict=gt_dict,
-        gens_path=gens_path,
-        results_path=results_path,
-        args=args,
-    )
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    dir_basename = Path(directory_name).name
+    results_path = os.path.join(eval_base, f"{dir_basename}_{timestamp}")
+    print(f"Results will be saved to: {results_path}")
+    return process_generation_pickle(gens_dict, gt_dict, gens_path, results_path, args)
 
 def run_directory_mode(args) -> None:
     gen_base = get_base_path("gen_results_root")
-    eval_base = derive_eval_base_from_gen(gen_base)
+    if args.output_dir:
+        eval_base = str(Path(args.output_dir).expanduser().resolve())
+    else:
+        eval_base = derive_eval_base_from_gen(gen_base)
 
     if args.specific_dir:
-        # Check if the specific directory exists before proceeding
-        gens_path = os.path.join(gen_base, args.specific_dir)
-        if not os.path.exists(gens_path):
-            print(f"Error: Specified directory does not exist: {gens_path}")
+        specific_path = Path(args.specific_dir).expanduser()
+        if not specific_path.is_absolute():
+            specific_path = Path(gen_base) / specific_path
+        specific_path = specific_path.resolve()
+        gen_base_path = Path(gen_base).resolve()
+
+        if not specific_path.exists():
+            print(f"Error: Specified directory does not exist: {specific_path}")
             return
-        directories = [args.specific_dir]
+
+        if specific_path == gen_base_path:
+            directories = get_missing_evaluation_dirs(gen_base, eval_base, args.max_recent)
+        else:
+            directories = [str(specific_path)]
     else:
         directories = get_missing_evaluation_dirs(gen_base, eval_base, args.max_recent)
     if not directories:
@@ -311,20 +309,17 @@ def run_directory_mode(args) -> None:
                 print(f"Failed to evaluate: {directory}")
     else:
         # Use submitit for remote execution
-        executor = create_slurm_executor(device=args.device, job_type="eval", num_gpus=0, num_cpus=80)
-        # Convert args to dict for better pickling
-        args_dict = vars(args)
+        executor = create_slurm_executor(device=args.device, job_type="eval", num_gpus=0, num_cpus=args.num_workers)
         jobs = []
-        with executor.batch():
-            for directory in directories:
-                job = executor.submit(
-                    run_evaluation,
-                    directory_name=directory,
-                    gen_base=gen_base,
-                    eval_base=eval_base,
-                    args_dict=args_dict,
-                )
-                jobs.append((directory, job))
+        for directory in directories:
+            job = executor.submit(
+                run_evaluation,
+                directory_name=directory,
+                gen_base=gen_base,
+                eval_base=eval_base,
+                args=args,
+            )
+            jobs.append((directory, job))
         print(f"Submitted {len(jobs)} jobs to {args.device}")
         for directory, job in jobs:
             print(f"  - {directory}: Job ID {job.job_id}")
@@ -334,17 +329,12 @@ def main() -> None:
     parser.add_argument("--use-alignmol", action="store_true", help="Use AlignMol instead of GetBestRMS")
     parser.add_argument("--posebusters", type=str, default="None", choices=["mol", "redock", "None"], help="PoseBusters config")
     parser.add_argument("--batch-size", type=int, default=64, help="Batch size of true-conformer rows per worker task")
-    parser.add_argument("--device", type=str, choices=["local", "a100", "h100", "all", "research"], default="local", help="Slurm partition")
-    parser.add_argument("--num-workers", type=int, default=80, help="Number of workers for evaluation")
+    parser.add_argument("--device", type=str, choices=["local", "a100", "h100", "all"], default="local", help="Slurm partition")
+    parser.add_argument("--num-workers", type=int, default=10, help="Number of workers for evaluation")
     parser.add_argument("--max-recent", type=int, default=3, help="Max recent missing directories to evaluate")
     parser.add_argument("--specific-dir", type=str, default=None, help="Specific directory to evaluate")
-    parser.add_argument(
-        "--test_set",
-        type=str,
-        default="distinct",
-        choices=["clean", "distinct", "xl", "qm9", "valid", "revisited"],
-        help="Test set to evaluate",
-    )
+    parser.add_argument("--output-dir", type=str, default=None, help="Base directory for eval results (overrides the gen_results-derived default)")
+    parser.add_argument("--test_set", type=str, default="distinct", choices=["clean", "distinct", "xl", "qm9"], help="Test set to evaluate")
     args = parser.parse_args()
     
     run_directory_mode(args)

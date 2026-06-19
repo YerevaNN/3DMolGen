@@ -45,6 +45,7 @@ EMBEDDING_REGISTRY = {
     "cartesian_binned_v2": encode_cartesian_binned_v2,
     "uniform_binned": encode_cartesian_with_config,
     "quantile_binned": encode_cartesian_with_config,
+    "fsq": None,
 }
 
 REVISITED_SPLIT_FILE_MAP = {"train": "train", "valid": "val", "test": "test"}
@@ -134,6 +135,9 @@ def save_grouped_pickle(output_path: str, iso_to_confs: Dict[str, List[Dict[str,
 def get_embedding_func_and_config(
     embedding_type: str,
     bin_config_path: Optional[str] = None,
+    fsq_ckpt_path: Optional[str] = None,
+    fsq_device: str = "auto",
+    fsq_max_tokens: Optional[int] = 218,
 ):
     bin_config = None
     if embedding_type in ("uniform_binned", "quantile_binned"):
@@ -150,6 +154,24 @@ def get_embedding_func_and_config(
             bin_config.H,
             bin_config.n_bins,
         )
+    if embedding_type == "fsq":
+        from molgen3D.data_processing.smiles_encoder_decoder_fsq import (
+            configure_fsq_encoder,
+            encode_cartesian_fsq,
+        )
+
+        configure_fsq_encoder(
+            ckpt_path=fsq_ckpt_path,
+            device=fsq_device,
+            max_tokens=fsq_max_tokens,
+        )
+        log.info(
+            "Loaded FSQ coordinate encoder | ckpt={} | device={} | max_tokens={}",
+            fsq_ckpt_path or "auto",
+            fsq_device,
+            fsq_max_tokens,
+        )
+        return encode_cartesian_fsq, bin_config
     if embedding_type not in EMBEDDING_REGISTRY:
         raise ValueError(
             f"Unsupported embedding_type '{embedding_type}'. Options: {sorted(EMBEDDING_REGISTRY)}"
