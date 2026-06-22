@@ -1,7 +1,9 @@
 """RDKit utility functions - imported locally to avoid pickling issues."""
 
+import numpy as np
 from rdkit import Chem
 from rdkit.Chem.rdmolops import RemoveHs
+from rdkit.Geometry import Point3D
 
 
 def clean_confs(smi, confs):
@@ -49,46 +51,36 @@ def process_molecules_remove_hs(model_preds):
     return {smi: [RemoveHs(m) for m in confs] for smi, confs in model_preds.items()}
 
 
+def _normalize_coords(mol):
+    """Center molecule coordinates by subtracting the mean of atom positions.
+    
+    Equivalent to: feats[mask_bool, V:] -= feats[mask_bool, V:].mean(axis=0)
+    """
+    mol = Chem.Mol(mol)
+    if mol.GetNumConformers() == 0:
+        return mol
+    conformer = mol.GetConformer()
+    n_atoms = mol.GetNumAtoms()
+    if n_atoms == 0:
+        return mol
+    
+    coords = np.array([conformer.GetAtomPosition(i) for i in range(n_atoms)])
+    mean_coords = coords.mean(axis=0)
+    coords -= mean_coords
+    
+    for i in range(n_atoms):
+        conformer.SetAtomPosition(i, Point3D(coords[i, 0], coords[i, 1], coords[i, 2]))
+    return mol
+
+
 def _best_rmsd(probe, ref, use_alignmol: bool):
     """Calculate RMSD between two molecules."""
     from rdkit.Chem import rdMolAlign as MA
-    from rdkit import Chem
 
     try:
         if use_alignmol:
             return float(MA.AlignMol(probe, ref))
         return float(MA.GetBestRMS(probe, ref))
     except Exception:
-        # Fallback: strip stereochemistry and retry. This rescues cases where
-        # molecules share the same graph but stereo labels prevent matching.
-        try:
-            probe_no_stereo = Chem.Mol(probe)
-            ref_no_stereo = Chem.Mol(ref)
-            Chem.RemoveStereochemistry(probe_no_stereo)
-            Chem.RemoveStereochemistry(ref_no_stereo)
-
-            if use_alignmol:
-                return float(MA.AlignMol(probe_no_stereo, ref_no_stereo))
-
-            # Try explicit atom maps with chirality disabled.
-            matches = probe_no_stereo.GetSubstructMatches(
-                ref_no_stereo,
-                uniquify=False,
-                useChirality=False,
-                maxMatches=2048,
-            )
-            if matches:
-                best = None
-                for match in matches:
-                    atom_map = [(int(match[i]), i) for i in range(len(match))]
-                    rms = float(MA.GetBestRMS(probe_no_stereo, ref_no_stereo, map=atom_map))
-                    if best is None or rms < best:
-                        best = rms
-                if best is not None:
-                    return best
-
-            return float(MA.GetBestRMS(probe_no_stereo, ref_no_stereo))
-        except Exception:
-            import numpy as np
-            return np.nan
+        return np.nan
 

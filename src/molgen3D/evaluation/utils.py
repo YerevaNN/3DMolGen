@@ -48,35 +48,7 @@ def create_slurm_executor(
     if submitit is None:
         raise RuntimeError("submitit is not available")
 
-    # Set SLURM_CONF if not already set (needed for sbatch to work)
-    if device in ["a100", "h100", "all"]:
-        if not os.environ.get("SLURM_CONF"):
-            # Try common SLURM config paths
-            possible_paths = [
-                "/cm/shared/apps/slurm/etc/slurm/slurm.conf",
-                "/etc/slurm/slurm.conf",
-                "/usr/local/etc/slurm.conf",
-                "/opt/slurm/etc/slurm.conf",
-            ]
-            
-            slurm_conf_found = None
-            for path in possible_paths:
-                if os.path.exists(path):
-                    slurm_conf_found = path
-                    break
-            
-            if slurm_conf_found:
-                os.environ["SLURM_CONF"] = slurm_conf_found
-                logger.info(f"Using SLURM_CONF: {slurm_conf_found}")
-            else:
-                logger.warning(
-                    "SLURM_CONF is not set and no default config found. "
-                    "Tried: " + ", ".join(possible_paths) + ". "
-                    "sbatch may fail to locate slurmctld."
-                )
-
-    # Use project outputs directory for SLURM logs
-    folder = f"outputs/slurm_jobs/{job_type}/job_%j"
+    folder = str(Path("/home/chem-project/fsq/3DMolGen/outputs/slurm_jobs") / job_type / "job_%j")
 
     if device == "local":
         executor = submitit.LocalExecutor(folder=folder)
@@ -91,15 +63,10 @@ def create_slurm_executor(
         mem_gb=memory_gb,
         nodes=1,
         slurm_additional_parameters={"partition": device},
+        slurm_use_srun=False,  # CPU-only jobs don't need srun (avoids hostname resolution errors)
     )
 
     executor.update_parameters(**params)
-    
-    # Disable srun to avoid PMIx/MPI plugin issues and srun command not found errors
-    if device in ["a100", "h100", "all", "research"]:
-        logger.info("Disabling srun to avoid PMIx/MPI plugin issues.")
-        executor.update_parameters(slurm_use_srun=False)
-    
     return executor
 
 def find_generation_pickles_path(directory_path: str) -> str:
@@ -110,18 +77,13 @@ def find_generation_pickles_path(directory_path: str) -> str:
     return None  # No pickle files found
 
 def same_molecular_graph(gt: str, gen: str) -> bool:
-    try:
-        m1 = Chem.MolFromSmiles(gt)
-        m2 = Chem.MolFromSmiles(gen)
-        if m1 is None or m2 is None:
-            return False
-        c1 = Chem.MolToSmiles(Chem.RemoveHs(m1), canonical=True, isomericSmiles=False)
-        c2 = Chem.MolToSmiles(Chem.RemoveHs(m2), canonical=True, isomericSmiles=False)
-        return c1 == c2
-    except Exception:
-        # Catch any RDKit exceptions (e.g., KekulizeException) and return False
-        # If we can't process the molecules, we can't determine if they're the same
+    m1 = Chem.MolFromSmiles(gt)
+    m2 = Chem.MolFromSmiles(gen)
+    if m1 is None or m2 is None:
         return False
+    c1 = Chem.MolToSmiles(Chem.RemoveHs(m1), canonical=True, isomericSmiles=False)
+    c2 = Chem.MolToSmiles(Chem.RemoveHs(m2), canonical=True, isomericSmiles=False)
+    return c1 == c2
 
 def format_float(value: Optional[float], decimals: int = 4) -> str:
     """Format float to specified decimal places (truncated, not rounded)."""
