@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=torchtitan-qwen3-bigdata-1e-pairs
-#SBATCH --cpus-per-task=32
+#SBATCH --job-name=torchtitan-qwen3-17b-pre-4e-8e-4-bigdata-revisited
+#SBATCH --cpus-per-task=64
 #SBATCH --partition=research
-#SBATCH --nodes=1
+#SBATCH --nodes=3
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
-#SBATCH --mem=256Gb
+#SBATCH --mem=200G
 #SBATCH --time=6-00:00:00
 #SBATCH --output=outputs/slurm_jobs/titan/%j.out
 #SBATCH --error=outputs/slurm_jobs/titan/%j.err
@@ -21,7 +21,7 @@ export WANDB_CONFIG=${WANDB_CONFIG:-'{"run_type": "pretrain"}'}
 # export TORCH_FSDP_FLATTEN_PARAMETERS=${TORCH_FSDP_FLATTEN_PARAMETERS:-0}
 # Disable DTensor FSDP so embedding weights stay real tensors for probes
 # export TORCH_FSDP_USE_DTENSOR=${TORCH_FSDP_USE_DTENSOR:-0}
-export TORCH_COMPILE=${TORCH_COMPILE:-0}
+export TORCH_COMPILE=${TORCH_COMPILE:-1}
 export TOKENIZERS_PARALLELISM=${TOKENIZERS_PARALLELISM:-false}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-2}
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -77,7 +77,7 @@ if ! command -v scontrol >/dev/null 2>&1; then
   unset _slurm_candidates _slurm_dir _vd
 fi
 
-TRAIN_TOML=${TRAIN_TOML:-src/molgen3D/config/pretrain/qwen3_06b_revisited_uniform_binned_isomeric_4e_from_bigdata.toml}
+TRAIN_TOML=${TRAIN_TOML:-src/molgen3D/config/pretrain/qwen3_4b_bigdata.toml}
 
 _DEFAULT_DESCRIPTION=$(python3 - <<'PY' "$TRAIN_TOML"
 import pathlib, re, sys

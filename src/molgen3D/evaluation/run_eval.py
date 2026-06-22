@@ -342,7 +342,7 @@ def main() -> None:
         "--test_set",
         type=str,
         default="distinct",
-        choices=["clean", "distinct", "xl", "qm9", "valid", "revisited"],
+        choices=["clean", "distinct", "xl", "qm9", "valid", "revisited", "casf16"],
         help="Test set to evaluate",
     )
     args = parser.parse_args()

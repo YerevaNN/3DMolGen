@@ -4,7 +4,7 @@ import os
 import cloudpickle  # type: ignore
 import argparse
 from pathlib import Path
-from collections import Counter, OrderedDict
+from collections import Counter, OrderedDict, defaultdict
 import random
 import numpy as np
 from molgen3D.evaluation.rdkit_utils import correct_smiles, clean_confs
@@ -70,6 +70,59 @@ def _resolve_base_path(base_path: str | None) -> Path:
         candidate = Path(base_path).expanduser()
         return candidate if candidate.is_absolute() else candidate.resolve()
     return get_base_path("geom_dataset_root")
+
+
+def process_casf16_dataset(variant: str, casf16_dir: Path | None) -> dict:
+    if casf16_dir is None:
+        casf16_dir = get_base_path("casf16_root")
+    subdir = "ligands" if variant == "casf16" else "ligands_opt"
+    ligand_dir = Path(casf16_dir) / subdir
+    output_name = "casf16_ligands_smi.pickle" if variant == "casf16" else "casf16_ligands_opt_smi.pickle"
+    output_path = get_base_path("data_root") / output_name
+
+    print(f"Processing {variant.upper()} from {ligand_dir}")
+    print(f"Output: {output_path}")
+
+    mol_files = defaultdict(list)
+    for f in sorted(ligand_dir.glob("*.mol2")):
+        parts = f.stem.split("_conf")
+        base = parts[0] if len(parts) > 1 else f.stem
+        mol_files[base].append(f)
+
+    processed = {}
+    mol_count, conf_count = 0, 0
+    for base, files in sorted(mol_files.items()):
+        mols = []
+        for f in sorted(files):
+            mol = Chem.MolFromMol2File(str(f), sanitize=True, removeHs=True)
+            if mol is None or mol.GetNumConformers() == 0:
+                print(f"  Failed: {f}")
+                continue
+            mols.append(mol)
+        if not mols:
+            continue
+        geom_smiles = Chem.MolToSmiles(mols[0], isomericSmiles=True)
+        sub_smiles_counts = Counter(
+            [Chem.MolToSmiles(Chem.RemoveHs(m), canonical=True, isomericSmiles=True) for m in mols]
+        )
+        processed[geom_smiles] = {
+            "geom_smiles": geom_smiles,
+            "confs": mols,
+            "num_confs": len(mols),
+            "sub_smiles_counts": sub_smiles_counts,
+            "corrected_smi": None,
+        }
+        mol_count += 1
+        conf_count += len(mols)
+
+    sorted_data = OrderedDict(
+        sorted(processed.items(), key=lambda item: len(item[0]))
+    )
+    with open(output_path, "wb") as fh:
+        cloudpickle.dump(sorted_data, fh, protocol=4)
+
+    print(f"[{variant.upper()}] {mol_count} molecules | {conf_count} conformers -> {output_path}")
+    return {"dataset": variant, "molecules": mol_count, "conformers": conf_count, "output_path": str(output_path)}
 
 
 def process_dataset(dataset: str, process_type: str, base_path: Path) -> dict:
@@ -170,16 +223,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset",
         type=str,
-        choices=["drugs", "qm9", "xl", "all"],
+        choices=["drugs", "qm9", "xl", "all", "casf16", "casf16_opt"],
         required=True,
-        help="Dataset to process (or 'all' to process every dataset).",
+        help="Dataset to process (or 'all' to process every GEOM dataset).",
     )
     parser.add_argument(
         "--process_type",
         type=str,
         default="distinct",
         choices=["distinct", "clean"],
-        help="Process type (default: distinct)",
+        help="Process type for GEOM datasets (default: distinct)",
     )
     parser.add_argument(
         "--base_path",
@@ -187,28 +240,36 @@ if __name__ == "__main__":
         default=None,
         help=(
             "Optional override for the dataset root on disk. "
-            "Defaults to the 'geom_dataset_root' base path configured in paths.yaml."
+            "For GEOM datasets defaults to 'geom_dataset_root' in paths.yaml. "
+            "For casf16/casf16_opt defaults to 'casf16_root' in paths.yaml."
         ),
     )
-    
+
     args = parser.parse_args()
-    
-    resolved_base_path = _resolve_base_path(args.base_path)
-    print(f"Resolved base path to {resolved_base_path}")
 
-    if args.dataset.lower() == "all":
-        datasets_to_run = DATASET_ORDER
+    _CASF16_VARIANTS = ("casf16", "casf16_opt")
+    if args.dataset.lower() in _CASF16_VARIANTS:
+        casf16_dir = Path(args.base_path).expanduser() if args.base_path else None
+        stats = process_casf16_dataset(args.dataset.lower(), casf16_dir)
+        aggregate_stats = [stats]
+        total_mols, total_confs = stats["molecules"], stats["conformers"]
     else:
-        datasets_to_run = (args.dataset.lower(),)
+        resolved_base_path = _resolve_base_path(args.base_path)
+        print(f"Resolved base path to {resolved_base_path}")
 
-    aggregate_stats = []
-    total_mols, total_confs = 0, 0
+        if args.dataset.lower() == "all":
+            datasets_to_run = DATASET_ORDER
+        else:
+            datasets_to_run = (args.dataset.lower(),)
 
-    for ds in datasets_to_run:
-        stats = process_dataset(ds, args.process_type, resolved_base_path)
-        aggregate_stats.append(stats)
-        total_mols += stats["molecules"]
-        total_confs += stats["conformers"]
+        aggregate_stats = []
+        total_mols, total_confs = 0, 0
+
+        for ds in datasets_to_run:
+            stats = process_dataset(ds, args.process_type, resolved_base_path)
+            aggregate_stats.append(stats)
+            total_mols += stats["molecules"]
+            total_confs += stats["conformers"]
 
     print("\n=== Processing summary ===")
     for stats in aggregate_stats:

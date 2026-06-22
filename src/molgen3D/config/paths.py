@@ -150,7 +150,7 @@ def _get_ckpt_base_path(root_rel: str, base_paths: dict) -> Path:
                 return _resolve_path_value(base_paths[key])
         return _resolve_path_value(default)
 
-    if root_rel.startswith("qwen3_06b"):
+    if root_rel.startswith("qwen3_06b") or root_rel.startswith("qwen3_17b") or root_rel.startswith("qwen3_4b"):
         return _resolve_from_keys("qwen_yerevann_root", "hf_yerevann_root")
     if "qwen3" in root_rel:
         return _resolve_from_keys("qwen3_grpo_root", "grpo_root")

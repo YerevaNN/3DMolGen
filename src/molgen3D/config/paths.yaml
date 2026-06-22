@@ -37,6 +37,8 @@ base_paths:
     - "/mnt/weka/vtarasov/checkpoints/grpo"
     - "/data/chem-project/checkpoints/conf_grpo"
     - "/nfs/h100/raid/chem/checkpoints/conf_grpo"
+  casf16_root:
+    - "/mnt/weka/vtarasov/CASF16"
   gen_results_root: "/mnt/weka/vtarasov/outputs/outputs/gen_results/"
   eval_results_root: "/mnt/weka/vtarasov/outputs/outputs/eval_results"
   pretrain_results_root: "/mnt/weka/vtarasov/outputs/outputs/pretrain_results"
@@ -47,6 +49,10 @@ base_paths:
     - "/data/chem-project/checkpoints/Qwen3-0.6B-Base"
     - "/nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b/Qwen3-0.6B-Base"
     - "/data/chem-project/checkpoints/yerevann/qwen3_06b/Qwen3-0.6B-Base"
+  qwen3_1.7b_base_model:
+    - "/mnt/weka/vtarasov/Qwen3-1.7B-Base"
+  qwen3_4b_base_model:
+    - "/mnt/weka/vtarasov/Qwen3-4B-Base"
   tokenizers_root: "src/molgen3D/training/tokenizers"
 
 ckpts:
@@ -55,6 +61,11 @@ ckpts:
     - "/data/chem-project/checkpoints/qwen3_06b"
     - "/nfs/h100/raid/chem/checkpoints/yerevann/qwen3_06b"
     - "/data/chem-project/checkpoints/yerevann/qwen3_06b"
+  qwen3_17b:
+    - "/mnt/weka/vtarasov/qwen3_17b"
+    - "/data/chem-project/checkpoints/qwen3_17b"
+    - "/nfs/h100/raid/chem/checkpoints/yerevann/qwen3_17b"
+    - "/data/chem-project/checkpoints/yerevann/qwen3_17b"
   qwen3_grpo:
     - "/mnt/weka/vtarasov/conf_grpo"
     - "/data/chem-project/checkpoints/conf_grpo"
@@ -69,6 +80,8 @@ data:
   icl_5_smi: "icl_5_smi.pickle"
   icl_10_smi: "icl_10_smi.pickle"
   icl_20_smi: "icl_20_smi.pickle"
+  casf16_smi: "casf16_ligands_smi.pickle"
+  casf16_opt_smi: "casf16_ligands_opt_smi.pickle"
 
 
   pretokenized_prompts: "3DMolGen_data/pretokenized_prompts.json"
@@ -200,7 +213,7 @@ data:
     - "geom_revisited_cartesian_isomeric_grouped/processed_strings/test"
 
   big_data_train:
-    - "3DBigData_formatted/processed/bigdata_uniform_binned_isomeric/processed_strings/train"
+    - "3DBigData_formatted/processed/bigdata_uniform_binned_isomeric/processed_strings_shuffled/train"
 
 
 tokenizers:
@@ -397,17 +410,47 @@ models:
       "4e": "step-82000-hf"
 
   qwen600_pre_binned_uniform_bigdata:
-    root: "qwen3_06b/260507-2158-3956-qwen3_06b_pre_1e_8e-4_bigdata_pairs/"
+    root: "qwen3_06b/260529-0500-ed69-qwen3_06b_pre_1e_8e-4_bigdata_shuffled_from_base/"
     steps:
-      "1e": "step-222000-hf"
+      "1e": "step-111000-hf"
 
   qw600_pre_binned_uniform_revisited_finetuned_from_bigdata:
-    root: "qwen3_06b/260508-1740-4135-qwen3_06b_finetuned_4e_uniform_binned_isomeric_from_bigdata/"
+    root: "qwen3_06b/260531-1815-e028-qwen3_06b_pre_4e_revisited_uniform_binned_isomeric_4e_from_bigdata/"
     steps:
-      "1e": "step-6800-hf"
-      "2e": "step-13600-hf"
-      "3e": "step-20400-hf"
-      "4e": "step-27200-hf"
+      "1e": "step-7400-hf"
+      "2e": "step-14800-hf"
+      "3e": "step-22200-hf"
+      "4e": "step-29600-hf"
+
+  qw1700_pre_binned_uniform_revisited_isomeric:
+    root: "qwen3_06b/260604-1210-70ee-qwen3_17b_pre_1e_8e-4_bigdata/"
+    steps:
+      "1e": "step-7400-hf"
+      "2e": "step-14800-hf"
+      "3e": "step-22200-hf"
+      "4e": "step-29600-hf"
+
+  qw1700_pre_binned_uniform_bigdata:
+    root: "qwen3_06b/260604-2122-4afa-qwen3_17b_pre_1e_8e-4_bigdata"
+    steps:
+      "1e": "step-74000-hf"
+
+  qwen1700_pre_binned_uniform_revisited_isomeric_4e_from_bigdata:
+    root: "qwen3_06b/260605-1759-63ed-qwen3_17b_pre_1e_8e-4_bigdata"
+    steps:
+      "1e": "step-6600-hf"
+      "2e": "step-13200-hf"
+      "3e": "step-19800-hf"
+      "4e": "step-26400-hf"
+
+  qwen4000_pre_binned_uniform_revisited_isomeric:
+    root: "qwen3_06b/260620-1821-52cf-qwen3_4b_pre_4e_8e-4_revisited"
+    steps:
+      "1e": "step-5000-hf"
+      "2e": "step-10000-hf"
+      "3e": "step-15000-hf"
+      "4e": "step-20000-hf"
+
 
   # ---------- GRPO / FINETUNED MODELS (same structure) ----------
 

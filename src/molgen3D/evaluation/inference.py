@@ -227,42 +227,48 @@ def run_inference(inference_config: dict):
         test_data = cloudpickle.load(test_data_file)
 
     mols_list = []
+    num_gens = inference_config.get("num_gens", 2)
     test_set: str = inference_config.get("test_set", "distinct")
     if test_set in ("clean"):
         for geom_smiles, data in test_data.items():
-            mols_list.extend([(geom_smiles, f"[SMILES]{data['corrected_smi']}[/SMILES]")] * data["num_confs"] * 2)
+            mols_list.extend([(geom_smiles, f"[SMILES]{data['corrected_smi']}[/SMILES]")] * num_gens)
     elif test_set == "distinct":
         logger.info("Processing as distinct dataset")
         for geom_smiles, data in test_data.items():
             for sub_smiles, count in data["sub_smiles_counts"].items():
-                mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * count * 2)
+                mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * num_gens)
     elif test_set == "xl":
         logger.info("Processing as xl dataset")
         for geom_smiles, data in test_data.items():
             for sub_smiles, count in data["sub_smiles_counts"].items():
-                mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * count * 2)
+                mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * num_gens)
     elif test_set == "qm9":
         logger.info("Processing as qm9 dataset")
         for geom_smiles, data in test_data.items():
             for sub_smiles, count in data["sub_smiles_counts"].items():
-                mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * count * 2)
+                mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * num_gens)
     elif test_set == "valid":
         logger.info("Processing as validation dataset")
         # Validation set format: {smiles: [mol_obj1, mol_obj2, ...]}
         for geom_smiles, mol_list in test_data.items():
             for sub_smiles, count in data["sub_smiles_counts"].items():
-                mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * count * 2)
+                mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * num_gens)
     elif test_set == "icl":
         logger.info("Processing as icl dataset")
         for geom_smiles, data in test_data.items():
             icl_prompt = data.get('icl_prompt')
             if icl_prompt:
-                mols_list.extend([(geom_smiles, icl_prompt)] * data.get("num_confs", 1) * 2)
+                mols_list.extend([(geom_smiles, icl_prompt)] * num_gens)
     elif test_set == "revisited":
         logger.info("Processing as revisited dataset")
         for geom_smiles, data in test_data.items():
             for sub_smiles, count in data["sub_smiles_counts"].items():
-                mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * count * 2)
+                mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * num_gens)
+    elif test_set in ("casf16", "casf16_opt"):
+        logger.info(f"Processing as {test_set} dataset")
+        for geom_smiles, data in test_data.items():
+            for sub_smiles, count in data["sub_smiles_counts"].items():
+                mols_list.extend([(geom_smiles, f"[SMILES]{sub_smiles}[/SMILES]")] * num_gens)
     logger.info(f"mols_list length: {len(mols_list)}, mols_list_distinct: {len(set(mols_list))}, mols_list: {mols_list[:10]}")
 
     mols_list.sort(key=lambda x: len(x[0]))
@@ -408,7 +414,7 @@ def launch_inference_from_cli(
     # Base configuration template
     base_inference_config = {
         "model_path": get_ckpt("qw600_pre_binned_revisited_cartesian_isomeric", "4e"),
-        "tokenizer_path": get_tokenizer_path("qwen3_0.6b_custom"),
+        "tokenizer_path": get_tokenizer_path("qwen3_0.6b_binned_258"),
         "torch_dtype": "bfloat16",
         "batch_size": 128,
         "num_gens": gen_num_codes["2k_per_conf"],
@@ -425,7 +431,24 @@ def launch_inference_from_cli(
 
     if grid_run_inference:
         param_grid = [
-            ("qwen600_pre_binned_uniform_bigdata", "1e"),
+            # ("qwen600_pre_binned_uniform_bigdata", "1e"),
+            # ("qw600_pre_binned_uniform_revisited_finetuned_from_bigdata", "1e"),
+            # ("qw600_pre_binned_uniform_revisited_finetuned_from_bigdata", "2e"),
+            # ("qw600_pre_binned_uniform_revisited_finetuned_from_bigdata", "3e"),
+            # ("qw600_pre_binned_uniform_revisited_finetuned_from_bigdata", "4e"), 
+            # ("qw1700_pre_binned_uniform_revisited_isomeric", "1e"),
+            # ("qw1700_pre_binned_uniform_revisited_isomeric", "2e"),
+            # ("qw1700_pre_binned_uniform_revisited_isomeric", "3e"),
+            # ("qw1700_pre_binned_uniform_revisited_isomeric", "4e"),
+            # ("qw1700_pre_binned_uniform_bigdata", "1e"), 
+            # ("qwen1700_pre_binned_uniform_revisited_isomeric_4e_from_bigdata", "1e"), 
+            # ("qwen1700_pre_binned_uniform_revisited_isomeric_4e_from_bigdata", "2e"),
+            # ("qwen1700_pre_binned_uniform_revisited_isomeric_4e_from_bigdata", "3e"),
+            # ("qwen1700_pre_binned_uniform_revisited_isomeric_4e_from_bigdata", "4e"),
+            ("qwen4000_pre_binned_uniform_revisited_isomeric", "1e"),
+            ("qwen4000_pre_binned_uniform_revisited_isomeric", "2e"),
+            ("qwen4000_pre_binned_uniform_revisited_isomeric", "3e"),
+            ("qwen4000_pre_binned_uniform_revisited_isomeric", "4e"),
         ]
         jobs = []
         def _build_grid_config(base_config, model_key_epoch, test_set_name):
@@ -515,8 +538,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--test_set",
         type=str,
-        choices=["clean", "distinct", "corrected", "xl", "qm9", "valid", "revisited"],
-        default=None,
+        choices=["clean", "distinct", "corrected", "xl", "qm9", "valid", "revisited", "casf16", "casf16_opt"],
+        default="revisited",
     )
     parser.add_argument("--binned", action="store_true", default=False)
     parser.add_argument(

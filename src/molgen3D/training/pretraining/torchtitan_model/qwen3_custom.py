@@ -24,8 +24,7 @@ from molgen3D.training.pretraining.helpers.wsds_scheduler import (
     build_wsds_lr_schedulers,
 )
 
-# NOTE: These are Qwen3-0.6B specific. If you change
-# the base model, update these values.
+# Tokenizer vocab sizes are shared across all dense Qwen3 variants (0.6B, 1.7B, 4B, …).
 QWEN3_BASE_VOCAB = 151_669
 QWEN3_PADDED_VOCAB = 151_936
 

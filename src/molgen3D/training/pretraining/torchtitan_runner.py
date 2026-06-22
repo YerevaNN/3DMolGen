@@ -514,6 +514,42 @@ def _enable_runtime_log(logs_dir: Path, rotate_existing: bool = False) -> None:
     _TEE_ENABLED = True
 
 
+def _inject_lm_head_into_patched(patched_dir: Path) -> None:
+    """Inject lm_head.weight into a patched checkpoint dir (single or sharded)."""
+    index_path = patched_dir / "model.safetensors.index.json"
+    if index_path.exists():
+        index = json.loads(index_path.read_text())
+        weight_map = index["weight_map"]
+        if "lm_head.weight" in weight_map:
+            return
+        embed_shard = weight_map.get("model.embed_tokens.weight")
+        if embed_shard is None:
+            raise RuntimeError(
+                f"model.embed_tokens.weight not found in {index_path}"
+            )
+        shard_path = patched_dir / embed_shard
+        tensors = load_safetensor(shard_path)
+        if "lm_head.weight" not in tensors:
+            _log_rank(
+                "Adding lm_head.weight to shard %s by copying model.embed_tokens.weight",
+                shard_path,
+            )
+            tensors["lm_head.weight"] = tensors["model.embed_tokens.weight"].clone()
+            save_safetensor(tensors, shard_path)
+        weight_map["lm_head.weight"] = embed_shard
+        index_path.write_text(json.dumps(index, indent=2))
+    else:
+        patched_model = patched_dir / "model.safetensors"
+        tensors = load_safetensor(patched_model)
+        if "lm_head.weight" not in tensors and "model.embed_tokens.weight" in tensors:
+            _log_rank(
+                "Adding lm_head.weight to HF checkpoint at %s by copying model.embed_tokens.weight",
+                patched_model,
+            )
+            tensors["lm_head.weight"] = tensors["model.embed_tokens.weight"].clone()
+            save_safetensor(tensors, patched_model)
+
+
 def _ensure_hf_checkpoint_has_lm_head(hf_dir: Path) -> Path:
     """
     TorchTitan expects `lm_head.weight` inside the HF checkpoint. Official
@@ -522,48 +558,30 @@ def _ensure_hf_checkpoint_has_lm_head(hf_dir: Path) -> Path:
     and inject the missing tensor so repeated launches can reuse the patched
     copy.
 
+    Supports both single-file checkpoints (model.safetensors) and sharded
+    checkpoints (model-NNNNN-of-MMMMM.safetensors + model.safetensors.index.json).
+
     Only global rank 0 performs the copy/patch; all other ranks wait on a
     `.ready` sentinel file to avoid simultaneous writes corrupting the model.
     """
     patched_dir = hf_dir / "patched_for_titan"
-    patched_model = patched_dir / "model.safetensors"
     sentinel = patched_dir / ".ready"
 
     if _current_rank() == 0:
-        needs_patching = True
-        if sentinel.exists():
-            needs_patching = False
-        elif patched_model.exists():
-            # Legacy copy (created without sentinel) or interrupted attempt.
-            # Load to verify integrity and add lm_head if missing.
-            try:
-                tensors = load_safetensor(patched_model)
-                if "lm_head.weight" not in tensors and "model.embed_tokens.weight" in tensors:
-                    embed = tensors["model.embed_tokens.weight"]
-                    tensors["lm_head.weight"] = embed.clone()
-                    save_safetensor(tensors, patched_model)
-                sentinel.touch()
-                needs_patching = False
-            except Exception:
-                # Corrupted — remove and redo
-                shutil.rmtree(patched_dir)
-
-        if needs_patching:
+        if not sentinel.exists():
             patched_dir.mkdir(parents=True, exist_ok=True)
+            # Copy any files not yet present (handles interrupted prior runs).
             for item in hf_dir.iterdir():
-                if item.is_file():
-                    shutil.copy(item, patched_dir / item.name)
-                elif item.is_dir() and item.name != "patched_for_titan":
-                    shutil.copytree(item, patched_dir / item.name)
-            tensors = load_safetensor(patched_model)
-            if "lm_head.weight" not in tensors and "model.embed_tokens.weight" in tensors:
-                _log_rank(
-                    "Adding lm_head.weight to HF checkpoint at %s by copying model.embed_tokens.weight",
-                    patched_model,
-                )
-                embed = tensors["model.embed_tokens.weight"]
-                tensors["lm_head.weight"] = embed.clone()
-                save_safetensor(tensors, patched_model)
+                dst = patched_dir / item.name
+                if item.is_file() and not dst.exists():
+                    shutil.copy(item, dst)
+                elif item.is_dir() and item.name != "patched_for_titan" and not dst.exists():
+                    shutil.copytree(item, dst)
+            try:
+                _inject_lm_head_into_patched(patched_dir)
+            except Exception:
+                shutil.rmtree(patched_dir)
+                raise
             sentinel.touch()
     else:
         deadline = time.time() + 600
