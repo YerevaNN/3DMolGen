@@ -1,9 +1,9 @@
 # CASF Geometric Analysis Revision (1219 ligands)
 
-- Root: `/mnt/weka/mbedrosian/conformer_sets_ref_chembl3d_exact_intersection_pb_full_dynamic_chembl_count`
-- Generation: `/mnt/weka/mbedrosian/conformer_sets_ref_chembl3d_exact_intersection_pb_full_dynamic_chembl_count/generation`
-- CASF crystal ligands: `/mnt/weka/mbedrosian/code/3DMolGen/src/molgen3D/pharmacophore/data/CASF16_REF/ligands`
-- CASF optimized ligands: `/mnt/weka/mbedrosian/code/3DMolGen/src/molgen3D/pharmacophore/data/CASF16/ligands_opt`
+- Root: `/mnt/weka/mbedrosian/pharma_generation_analysis/ref_pb_full_dynamic_chembl_count`
+- Generation: `/mnt/weka/mbedrosian/pharma_generation_analysis/ref_pb_full_dynamic_chembl_count/generation`
+- CASF crystal ligands: `/mnt/weka/mbedrosian/data/casf16/CASF16_REF/ligands`
+- CASF optimized ligands: `/mnt/weka/mbedrosian/data/casf16/CASF16/ligands_opt`
 - Ligands with ChEMBL3D map: 1219 / 1219
 - Clash cutoff: 0.7
 
