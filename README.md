@@ -1,5 +1,7 @@
 # 3DMolGen
 
+> **CASF benchmark:** The CASF–ChEMBL3D conformer benchmark pipeline, dashboard, and bundled results moved to the standalone [`casf-benchmark`](../casf-benchmark) repository at `/home/mbedrosian/code/casf-benchmark`.
+
 3DMolGen is a Python package for 3D molecular conformer generation using language models. It provides a complete training and inference pipeline for autoregressive models that generate molecular conformations by predicting 3D coordinates alongside SMILES topology.
 
 ## Overview
