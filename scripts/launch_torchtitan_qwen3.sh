@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=torchtitan-qwen3
-#SBATCH --cpus-per-task=64
-#SBATCH --partition=a100
+#SBATCH --job-name=torchtitan-qwen3-bigdata-1e-pairs
+#SBATCH --cpus-per-task=32
+#SBATCH --partition=research
 #SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
-#SBATCH --mem=200G
+#SBATCH --mem=256Gb
 #SBATCH --time=6-00:00:00
 #SBATCH --output=outputs/slurm_jobs/titan/%j.out
 #SBATCH --error=outputs/slurm_jobs/titan/%j.err
 
-export WANDB_ENTITY=${WANDB_ENTITY:-menuab_team}
+export WANDB_ENTITY=${WANDB_ENTITY:-vover-yerevann}
 export WANDB_PROJECT=${WANDB_PROJECT:-3dmolgen}
 export WANDB_GROUP=${WANDB_GROUP:-pretrain}
 export WANDB_JOB_TYPE=${WANDB_JOB_TYPE:-pretrain}
@@ -23,39 +24,60 @@ export WANDB_CONFIG=${WANDB_CONFIG:-'{"run_type": "pretrain"}'}
 export TORCH_COMPILE=${TORCH_COMPILE:-0}
 export TOKENIZERS_PARALLELISM=${TOKENIZERS_PARALLELISM:-false}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-2}
-
-TRAIN_TOML=${TRAIN_TOML:-src/molgen3D/config/pretrain/qwen3_06b.toml}
-
-# Prebuild validation .idx files to avoid stalls when validation starts.
-if [[ "${PREBUILD_VALIDATION_IDX:-1}" == "1" ]]; then
-  python3 - <<'PY' "$TRAIN_TOML"
-import pathlib
-import sys
-try:
-    import tomllib  # Python 3.11+
-except ModuleNotFoundError:
-    import tomli as tomllib  # Python <3.11
-
-toml_path = pathlib.Path(sys.argv[1]).resolve()
-repo_root = toml_path.parent.parent.parent
-sys.path.insert(0, str(repo_root))
-
-from molgen3D.config.paths import resolve_tag  # type: ignore
-from molgen3D.training.pretraining.dataprocessing.utils import expand_paths, build_line_index  # type: ignore
-
-cfg = toml_path.read_text()
-data = tomllib.loads(cfg)
-validation = data.get("validation", {}) or {}
-dataset_path = validation.get("dataset_path") or ""
-if not dataset_path:
-    raise SystemExit(0)
-if ":" in dataset_path:
-    dataset_path = str(resolve_tag(dataset_path))
-paths = expand_paths([dataset_path])
-for path in paths:
-    build_line_index(path)
-PY
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export ENABLE_NCCL_DEBUG=${ENABLE_NCCL_DEBUG:-0}
+if [[ "${ENABLE_NCCL_DEBUG}" == "1" ]]; then
+  export NCCL_DEBUG=${NCCL_DEBUG:-INFO}
+  export NCCL_DEBUG_SUBSYS=${NCCL_DEBUG_SUBSYS:-INIT,NET}
 fi
+
+# Limit IB Completion Queue allocation to avoid ibv_create_cq ENOMEM when
+# multiple ranks set up connections simultaneously on the same HCA. Each NCCL
+# channel creates CQs; capping channels and QPs/connection keeps total CQ
+# count within the HCA's device-memory limit.
+#
+# CollNet and NVLS are for specialized switch/NVLink topologies not present
+# in this 2-node IB cluster. Disabling them eliminates ~22 unnecessary extra
+# channels (6 collnet + 16 nvls) that each create IB CQs.
+export NCCL_IB_QPS_PER_CONNECTION=${NCCL_IB_QPS_PER_CONNECTION:-1}
+export NCCL_MAX_NCHANNELS=${NCCL_MAX_NCHANNELS:-8}
+export NCCL_COLLNET_ENABLE=${NCCL_COLLNET_ENABLE:-0}
+export NCCL_NVLS_ENABLE=${NCCL_NVLS_ENABLE:-0}
+
+# Do not auto-force NCCL_IB_HCA across nodes: interface names can differ by
+# host. If you need to constrain HCAs, set NCCL_IB_HCA explicitly yourself.
+
+# Slurm batch jobs land on compute nodes with a stripped PATH that may omit
+# the Slurm binaries, even when they are installed locally. Prepend any known
+# Slurm bin directory we can find so `scontrol`, `srun`, etc. are reachable.
+# This is required on heterogeneous clusters (e.g. Bright Cluster Manager)
+# where login nodes ship `/opt/slurm/bin` but compute nodes only have
+# `/cm/local/apps/slurm/current/bin`.
+if ! command -v scontrol >/dev/null 2>&1; then
+  _slurm_candidates=(
+    /opt/slurm/bin /opt/slurm/sbin
+    /usr/local/bin /usr/local/sbin
+    /usr/bin /usr/sbin
+    /cm/shared/apps/slurm/current/bin /cm/shared/apps/slurm/current/sbin
+    /cm/local/apps/slurm/current/bin  /cm/local/apps/slurm/current/sbin
+  )
+  # Fallback to version-pinned Bright Cluster dirs (e.g. .../slurm/25.05/bin)
+  # in case the `current` symlink is missing on this node.
+  shopt -s nullglob
+  for _vd in /cm/local/apps/slurm/[0-9]* /cm/shared/apps/slurm/[0-9]*; do
+    [[ -d "${_vd}" ]] && _slurm_candidates+=("${_vd}/bin" "${_vd}/sbin")
+  done
+  shopt -u nullglob
+  for _slurm_dir in "${_slurm_candidates[@]}"; do
+    if [[ -x "${_slurm_dir}/scontrol" ]] && [[ ":${PATH}:" != *":${_slurm_dir}:"* ]]; then
+      export PATH="${_slurm_dir}:${PATH}"
+      break
+    fi
+  done
+  unset _slurm_candidates _slurm_dir _vd
+fi
+
+TRAIN_TOML=${TRAIN_TOML:-src/molgen3D/config/pretrain/qwen3_06b_revisited_uniform_binned_isomeric_4e_from_bigdata.toml}
 
 _DEFAULT_DESCRIPTION=$(python3 - <<'PY' "$TRAIN_TOML"
 import pathlib, re, sys
@@ -91,19 +113,80 @@ if [[ -n "${SLURM_JOB_ID:-}" ]]; then
   echo "Updated Slurm job name to: ${JOB_NAME_TRUNC}"
 fi
 
-MASTER_ADDR=${MASTER_ADDR:-$(hostname)}
+# === Multi-node topology (no srun: head SSHes into workers) ===
+WORKSPACE_DIR=${SLURM_SUBMIT_DIR:-$PWD}
+cd "${WORKSPACE_DIR}"
+export PYTHONPATH="${WORKSPACE_DIR}/src${PYTHONPATH:+:${PYTHONPATH}}"
+
+if [[ -n "${SLURM_JOB_NODELIST:-}" ]]; then
+  if ! command -v scontrol >/dev/null 2>&1; then
+    echo "ERROR: scontrol not found on PATH; cannot expand SLURM_JOB_NODELIST='${SLURM_JOB_NODELIST}'." >&2
+    echo "       Searched: /opt/slurm/{bin,sbin}, /usr/{local/,}{bin,sbin}, /cm/{shared,local}/apps/slurm/current/{bin,sbin}." >&2
+    echo "       Update PATH or add the correct slurm bin dir to the candidate list at the top of this script." >&2
+    exit 1
+  fi
+  NODELIST_ARR=( $(scontrol show hostnames "$SLURM_JOB_NODELIST") )
+else
+  NODELIST_ARR=( "$(hostname -s)" )
+fi
+NNODES=${NNODES:-${#NODELIST_ARR[@]}}
+if (( NNODES < 1 )); then
+  echo "ERROR: NNODES resolved to ${NNODES}; failed to determine cluster topology." >&2
+  exit 1
+fi
+MASTER_ADDR=${MASTER_ADDR:-${NODELIST_ARR[0]}}
 MASTER_PORT=${MASTER_PORT:-$(( (RANDOM % 20000) + 20000 ))}
-_DEFAULT_GPUS=$(grep -E '^#SBATCH --gres=gpu:' "$0" | sed 's/.*gpu:\([0-9]*\).*/\1/' | head -1)
-NGPU_PER_NODE=${SLURM_GPUS_ON_NODE:-${NGPU_PER_NODE:-${_DEFAULT_GPUS:-8}}}
-NNODES=${SLURM_NNODES:-1}
-NODE_RANK=${SLURM_NODEID:-0}
 export MASTER_ADDR MASTER_PORT
 
-TMP_TOML=$(mktemp /tmp/qwen3_runXXXXXX.toml)
-cleanup() {
-  rm -f "${TMP_TOML}"
+_autodetect_socket_iface() {
+  local _target="$1"
+  local _route
+  _route=$(ip -o route get "${_target}" 2>/dev/null | awk '
+    {
+      for (i = 1; i <= NF; i++) {
+        if ($i == "dev" && (i + 1) <= NF) {
+          print $(i + 1)
+          exit
+        }
+      }
+    }')
+  if [[ -n "${_route}" ]]; then
+    if [[ -z "${NCCL_SOCKET_IFNAME:-}" ]]; then
+      export NCCL_SOCKET_IFNAME="${_route}"
+      echo "Auto-set NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME} (route to ${_target})"
+    fi
+    if [[ -z "${GLOO_SOCKET_IFNAME:-}" ]]; then
+      export GLOO_SOCKET_IFNAME="${_route}"
+      echo "Auto-set GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME} (route to ${_target})"
+    fi
+  fi
 }
-trap cleanup EXIT
+_autodetect_socket_iface "${MASTER_ADDR}"
+
+_DEFAULT_GPUS=$(grep -E '^#SBATCH --gres=gpu:' "$0" | sed 's/.*gpu:\([0-9]*\).*/\1/' | head -1)
+NGPU_PER_NODE=${SLURM_GPUS_ON_NODE:-${NGPU_PER_NODE:-${_DEFAULT_GPUS:-8}}}
+
+echo "Topology: nnodes=${NNODES} gpus_per_node=${NGPU_PER_NODE} master=${MASTER_ADDR}:${MASTER_PORT} nodes=[${NODELIST_ARR[*]}]"
+
+# Place TMP_TOML in the shared workspace so worker nodes can read it (workers
+# cannot see /tmp on the head node).
+mkdir -p outputs/slurm_jobs/titan/tmp
+TMP_TOML=$(mktemp "${WORKSPACE_DIR}/outputs/slurm_jobs/titan/tmp/qwen3_runXXXXXX.toml")
+
+WORKER_BOOTSTRAP=""
+if (( NNODES > 1 )) && [[ -n "${SLURM_JOB_ID:-}" ]]; then
+  WORKER_BOOTSTRAP="${WORKSPACE_DIR}/outputs/slurm_jobs/titan/tmp/${SLURM_JOB_ID}.worker.sh"
+fi
+
+SSH_PIDS=()
+cleanup() {
+  for pid in "${SSH_PIDS[@]:-}"; do
+    [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
+  done
+  rm -f "${TMP_TOML}"
+  [[ -n "${WORKER_BOOTSTRAP}" ]] && rm -f "${WORKER_BOOTSTRAP}"
+}
+trap cleanup EXIT INT TERM
 
 python3 - <<'PY' "$TRAIN_TOML" "$TMP_TOML" "$RUN_NAME" "$DESCRIPTION"
 import pathlib
@@ -159,10 +242,118 @@ if [[ -z "${SLURM_JOB_ID:-}" ]]; then
   fi
 fi
 
-exec "${CPU_PIN_CMD[@]}" torchrun \
+TORCHRUN_BIN=$(command -v torchrun)
+
+# Forward selected comm/fabric env vars to SSH-launched worker nodes.
+# SSH typically does not preserve arbitrary env from the head node.
+FORWARD_ENV_VARS=(
+  CUDA_VISIBLE_DEVICES CUDA_DEVICE_ORDER
+  TORCH_NCCL_ASYNC_ERROR_HANDLING TORCH_DISTRIBUTED_DEBUG GLOO_SOCKET_IFNAME
+  NCCL_DEBUG NCCL_DEBUG_SUBSYS NCCL_SOCKET_IFNAME NCCL_SOCKET_FAMILY
+  NCCL_IB_DISABLE NCCL_IB_HCA NCCL_IB_GID_INDEX NCCL_IB_TC
+  NCCL_IB_QPS_PER_CONNECTION NCCL_MAX_NCHANNELS NCCL_COLLNET_ENABLE NCCL_NVLS_ENABLE
+  NCCL_NET NCCL_NET_GDR_LEVEL NCCL_P2P_DISABLE
+  UCX_TLS UCX_NET_DEVICES
+  FI_PROVIDER FI_EFA_USE_DEVICE_RDMA
+)
+FORWARDED_ENV_BLOCK=""
+for _env_name in "${FORWARD_ENV_VARS[@]}"; do
+  _env_val="${!_env_name:-}"
+  if [[ -n "${_env_val}" ]]; then
+    _escaped_env_val=$(printf "%q" "${_env_val}")
+    FORWARDED_ENV_BLOCK+="export ${_env_name}=${_escaped_env_val}"$'\n'
+  fi
+done
+unset _env_name _env_val _escaped_env_val
+
+# === Fan out to worker nodes via SSH (replacement for srun) ===
+if [[ -n "${WORKER_BOOTSTRAP}" ]]; then
+  # Generate a worker bootstrap script that exports the same env, then runs
+  # torchrun with the appropriate node_rank passed as $1.
+  cat > "${WORKER_BOOTSTRAP}" <<EOF
+#!/usr/bin/env bash
+set -e
+cd '${WORKSPACE_DIR}'
+export PATH='${PATH}'
+export WANDB_ENTITY='${WANDB_ENTITY}'
+export WANDB_PROJECT='${WANDB_PROJECT}'
+export WANDB_GROUP='${WANDB_GROUP}'
+export WANDB_JOB_TYPE='${WANDB_JOB_TYPE}'
+export WANDB_CONFIG='${WANDB_CONFIG}'
+export WANDB_RUN_NAME='${RUN_NAME}'
+export PYTHONPATH='${PYTHONPATH}'
+export TORCH_COMPILE='${TORCH_COMPILE}'
+export TOKENIZERS_PARALLELISM='${TOKENIZERS_PARALLELISM}'
+export OMP_NUM_THREADS='${OMP_NUM_THREADS}'
+export PYTORCH_CUDA_ALLOC_CONF='${PYTORCH_CUDA_ALLOC_CONF}'
+export MASTER_ADDR='${MASTER_ADDR}'
+export MASTER_PORT='${MASTER_PORT}'
+${FORWARDED_ENV_BLOCK}
+# Per-node socket interface selection: pick route-to-master unless user
+# explicitly set NCCL_SOCKET_IFNAME / GLOO_SOCKET_IFNAME.
+if [[ -z "\${NCCL_SOCKET_IFNAME:-}" ]] || [[ -z "\${GLOO_SOCKET_IFNAME:-}" ]]; then
+  _route_if=\$(ip -o route get '${MASTER_ADDR}' 2>/dev/null | awk '
+    {
+      for (i = 1; i <= NF; i++) {
+        if (\$i == "dev" && (i + 1) <= NF) {
+          print \$(i + 1)
+          exit
+        }
+      }
+    }')
+  if [[ -n "\${_route_if}" ]]; then
+    if [[ -z "\${NCCL_SOCKET_IFNAME:-}" ]]; then
+      export NCCL_SOCKET_IFNAME="\${_route_if}"
+      echo "[worker] Auto-set NCCL_SOCKET_IFNAME=\${NCCL_SOCKET_IFNAME} (route to ${MASTER_ADDR})"
+    fi
+    if [[ -z "\${GLOO_SOCKET_IFNAME:-}" ]]; then
+      export GLOO_SOCKET_IFNAME="\${_route_if}"
+      echo "[worker] Auto-set GLOO_SOCKET_IFNAME=\${GLOO_SOCKET_IFNAME} (route to ${MASTER_ADDR})"
+    fi
+  fi
+  unset _route_if
+fi
+NODE_RANK=\$1
+echo "[worker rank=\${NODE_RANK} host=\$(hostname)] launching torchrun"
+exec '${TORCHRUN_BIN}' \\
+  --nproc_per_node=${NGPU_PER_NODE} \\
+  --master_addr='${MASTER_ADDR}' \\
+  --master_port=${MASTER_PORT} \\
+  --nnodes=${NNODES} \\
+  --node_rank="\${NODE_RANK}" \\
+  -m molgen3D.training.pretraining.torchtitan_runner \\
+  --train-toml '${TMP_TOML}'
+EOF
+  chmod +x "${WORKER_BOOTSTRAP}"
+
+  for ((i=1; i<NNODES; i++)); do
+    target="${NODELIST_ARR[i]}"
+    worker_log="${WORKSPACE_DIR}/outputs/slurm_jobs/titan/${SLURM_JOB_ID}.rank${i}.log"
+    echo "Launching node_rank=${i} on ${target} via SSH (log: ${worker_log})"
+    ssh -n -o StrictHostKeyChecking=no -o ServerAliveInterval=30 "${target}" \
+      "bash '${WORKER_BOOTSTRAP}' ${i}" \
+      > "${worker_log}" 2>&1 &
+    SSH_PIDS+=("$!")
+  done
+fi
+
+echo "Launching torchrun on host=$(hostname) node_rank=0/${NNODES} master=${MASTER_ADDR}:${MASTER_PORT} nproc_per_node=${NGPU_PER_NODE}"
+
+"${CPU_PIN_CMD[@]}" torchrun \
   --nproc_per_node="${NGPU_PER_NODE}" \
+  --master_addr="${MASTER_ADDR}" \
   --master_port="${MASTER_PORT}" \
   --nnodes="${NNODES}" \
-  --node_rank="${NODE_RANK}" \
+  --node_rank=0 \
   -m molgen3D.training.pretraining.torchtitan_runner \
   --train-toml "${TMP_TOML}"
+TORCH_EXIT=$?
+
+# Wait for SSH-launched workers to finish so their output is collected.
+if [[ ${#SSH_PIDS[@]} -gt 0 ]]; then
+  for pid in "${SSH_PIDS[@]}"; do
+    wait "$pid" || true
+  done
+fi
+
+exit ${TORCH_EXIT}
