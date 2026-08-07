@@ -159,7 +159,7 @@ def _plan_run_layout(
     dump_folder = getattr(job_section, "dump_folder", None) or "pretrain_runs"
     # Logs should sit directly under the pretrain logs root per run.
     logs_root = paths.get_pretrain_logs_path(Path())
-    ckpts_root = paths.get_root_path("qwen_yerevann_root", Path("qwen3_06b"))
+    ckpts_root = paths.get_root_path("ckpts_root", Path("qwen3_06b"))
     wandb_root = paths.get_wandb_path(Path())
 
     if run_settings.init_mode == "resume":
