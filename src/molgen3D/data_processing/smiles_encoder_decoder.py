@@ -1,6 +1,10 @@
 import ast
+import json
 import math
 import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
 from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit.Chem.rdchem import ChiralType
@@ -85,6 +89,7 @@ def strip_smiles(s: str) -> str:
     # Remove any tags that might be present
     s = s.replace("[CONFORMER]", "").replace("[/CONFORMER]", "")
     s = s.replace("[SMILES]", "").replace("[/SMILES]", "")
+    s = re.sub(r"\[SERIALIZATION\].*?\[/SERIALIZATION\]", "", s, flags=re.IGNORECASE | re.DOTALL)
     s = s.replace(";", "")
 
     s = _WHITESPACE_RE.sub('', s)
@@ -616,6 +621,95 @@ def bins_to_coords(bin_indices, bins, use_bin_center=False):
     return np.array(coords)
 
 
+@dataclass
+class BinConfig:
+    mode: str
+    L: float
+    H: float
+    n_bins: int
+    edges: np.ndarray
+    digit_width: int = 3
+
+    def __post_init__(self):
+        self.digit_width = max(3, len(str(self.n_bins + 1)))
+
+    @classmethod
+    def load(cls, path: str) -> "BinConfig":
+        with open(path) as f:
+            obj = json.load(f)
+        return cls(
+            mode=obj["mode"],
+            L=obj["L"],
+            H=obj["H"],
+            n_bins=obj["n_bins"],
+            edges=np.array(obj["edges"], dtype=np.float64),
+        )
+
+
+def _decode_scalar(idx: int, config: BinConfig) -> float:
+    if idx <= 0:
+        return config.L
+    if idx > config.n_bins:
+        return config.H
+    return float((config.edges[idx - 1] + config.edges[idx]) / 2.0)
+
+
+def decode_cartesian_with_config(enriched_string: str, config: BinConfig):
+    normalized = enriched_string.replace(";", "")
+    tokens = tokenize_enriched_v2(normalized, config.digit_width)
+
+    smiles_parts = []
+    coords = []
+    for token in tokens:
+        if token["type"] == "atom_with_coords":
+            desc = token["atom_desc"]
+            desc_inner = desc[1:-1]
+            if desc_inner in _ORGANIC_SUBSET:
+                smiles_parts.append(desc_inner)
+            else:
+                smiles_parts.append(desc)
+
+            ix, iy, iz = (int(round(v)) for v in token["coords"])
+            x = _decode_scalar(ix, config)
+            y = _decode_scalar(iy, config)
+            z = _decode_scalar(iz, config)
+            coords.append((x, y, z))
+        else:
+            smiles_parts.append(token["text"])
+
+    smiles = "".join(smiles_parts)
+    mol = Chem.MolFromSmiles(smiles, sanitize=False)
+    if mol is None:
+        raise ValueError(f"Failed to parse rebuilt SMILES: {smiles}")
+    if mol.GetNumAtoms() != len(coords):
+        raise ValueError(
+            f"Atom count mismatch: mol has {mol.GetNumAtoms()} atoms, "
+            f"coords list has {len(coords)} entries."
+        )
+
+    Chem.SanitizeMol(mol)
+
+    conformer = Chem.Conformer(mol.GetNumAtoms())
+    for idx, (x, y, z) in enumerate(coords):
+        conformer.SetAtomPosition(idx, Point3D(x, y, z))
+    mol.AddConformer(conformer, assignId=True)
+    return mol
+
+
+def normalize_serialization_tag(serialization_tag: str) -> str:
+    mode = str(serialization_tag).strip().lower()
+    aliases = {
+        "binned": "cartesian_binned",
+        "cartesian_binned_v2": "cartesian_binned",
+        "uniform_binned": "uniform",
+        "quantile_binned": "quantile",
+    }
+    normalized = aliases.get(mode, mode)
+    valid_modes = {"cartesian", "cartesian_binned", "uniform", "quantile"}
+    if normalized not in valid_modes:
+        raise ValueError(f"Unsupported serialization mode: {serialization_tag}")
+    return normalized
+
 
 def encode_cartesian_binned(mol, bin_size, ranges=None):
     """
@@ -855,3 +949,31 @@ def decode_cartesian_binned_v2(enriched_string, bins, use_bin_center=True):
         conformer.SetAtomPosition(idx, Point3D(x, y, z))
     mol.AddConformer(conformer, assignId=True)
     return mol
+
+
+def decode_conformer_by_serialization(
+    enriched_string: str,
+    serialization_tag: str,
+    *,
+    bins=None,
+    uniform_config_path: Optional[str] = None,
+    quantile_config_path: Optional[str] = None,
+):
+    mode = str(serialization_tag)
+    if mode == "cartesian":
+        return decode_cartesian_v2(enriched_string)
+    if mode == "cartesian_binned":
+        if bins is None:
+            raise ValueError("`bins` must be provided for cartesian_binned decoding.")
+        return decode_cartesian_binned_v2(enriched_string, bins)
+    if mode == "uniform":
+        cfg_path = uniform_config_path or str(
+            Path(__file__).resolve().parents[1] / "config" / "bin_configs" / "uniform_bins.json"
+        )
+        return decode_cartesian_with_config(enriched_string, BinConfig.load(cfg_path))
+    if mode == "quantile":
+        cfg_path = quantile_config_path or str(
+            Path(__file__).resolve().parents[1] / "config" / "bin_configs" / "quantile_bins.json"
+        )
+        return decode_cartesian_with_config(enriched_string, BinConfig.load(cfg_path))
+    raise ValueError(f"Unsupported serialization mode: {serialization_tag}")
