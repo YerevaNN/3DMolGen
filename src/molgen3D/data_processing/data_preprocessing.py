@@ -19,9 +19,11 @@ from molgen3D.data_processing.utils import (
     save_processed_pickle,
 )
 from molgen3D.data_processing.smiles_encoder_decoder import (
+    BinConfig,
     encode_cartesian_v2,
     encode_cartesian_binned,
     encode_cartesian_binned_v2,
+    encode_cartesian_with_config,
 )
 from molgen3D.utils.utils import load_pkl
 
@@ -29,12 +31,14 @@ RDLogger.DisableLog("rdApp.*")
 
 
 def read_mol(
-    args: Tuple[str, int, int, Any, float, List[Tuple[float, float]], bool, str, str]
+    args: Tuple,
 ) -> Optional[Tuple[List[str], Dict[str, Any]]]:
-    mol_path, max_confs, precision, embedding_func, bin_size, ranges, do_filter, pickle_dir, _geom_root = args
+    mol_path, max_confs, precision, embedding_func, bin_size, ranges, do_filter, pickle_dir, _geom_root = args[:9]
+    bin_config = args[9] if len(args) > 9 else None
     try:
         return _read_mol_impl(
-            mol_path, max_confs, precision, embedding_func, bin_size, ranges, do_filter, pickle_dir
+            mol_path, max_confs, precision, embedding_func, bin_size, ranges, do_filter, pickle_dir,
+            bin_config=bin_config,
         )
     except Exception as exc:
         log.error("Unhandled exception in read_mol | path={} | error={}", mol_path, exc)
@@ -50,6 +54,7 @@ def _read_mol_impl(
     ranges: List[Tuple[float, float]],
     do_filter: bool,
     pickle_dir: str,
+    bin_config: Optional[BinConfig] = None,
 ) -> Tuple[List[str], Dict[str, Any]]:
     mol_object = load_pkl(mol_path)
     geom_smiles = mol_object["smiles"]
@@ -75,7 +80,9 @@ def _read_mol_impl(
                 continue
 
         try:
-            if embedding_func in (encode_cartesian_binned, encode_cartesian_binned_v2):
+            if embedding_func is encode_cartesian_with_config:
+                embedded_smile, iso_smile = embedding_func(mol, bin_config)
+            elif embedding_func in (encode_cartesian_binned, encode_cartesian_binned_v2):
                 embedded_smile, iso_smile = embedding_func(mol, bin_size=bin_size, ranges=ranges)
             else:
                 embedded_smile, iso_smile = embedding_func(mol, precision=precision)
@@ -158,6 +165,7 @@ def preprocess(
     bin_size: float = 0.104,
     ranges: str = "[-13.0, 13.0], [-13.0, 13.0], [-13.0, 13.0]",
     filter_ranges: str = None,
+    bin_config_path: Optional[str] = None,
 ) -> None:
     if dest_path is None:
         raise ValueError("dest_path must be provided for preprocessing output")
@@ -167,7 +175,21 @@ def preprocess(
         "cartesian": encode_cartesian_v2,
         "cartesian_binned": encode_cartesian_binned,
         "cartesian_binned_v2": encode_cartesian_binned_v2,
+        "uniform_binned": encode_cartesian_with_config,
+        "quantile_binned": encode_cartesian_with_config,
     }
+
+    # Load BinConfig for uniform_binned / quantile_binned
+    bin_config = None
+    if embedding_type in ("uniform_binned", "quantile_binned"):
+        if bin_config_path is None:
+            raise ValueError(
+                f"--bin_config_path is required for embedding_type={embedding_type!r}. "
+                f"Generate one with: python scripts/fit_bins.py"
+            )
+        bin_config = BinConfig.load(bin_config_path)
+        log.info("Loaded BinConfig from {} | mode={} L={:.4f} H={:.4f} n_bins={}",
+                 bin_config_path, bin_config.mode, bin_config.L, bin_config.H, bin_config.n_bins)
     if embedding_type not in embedding_registry:
         raise ValueError(f"Unsupported embedding_type '{embedding_type}'. Options: {sorted(embedding_registry)}")
     embedding_func = embedding_registry[embedding_type]
@@ -250,6 +272,7 @@ def preprocess(
                 do_filter,
                 split_pickle_dirs[split_name],
                 geom_raw_path,
+                bin_config,
             )
             for path in mol_paths
         ]
@@ -379,7 +402,8 @@ if __name__ == "__main__":
         "--embedding_type",
         "-et",
         type=str,
-        choices=["cartesian", "cartesian_v2", "cartesian_binned", "cartesian_binned_v2"],
+        choices=["cartesian", "cartesian_v2", "cartesian_binned", "cartesian_binned_v2",
+                 "uniform_binned", "quantile_binned"],
         default="cartesian_v2",
         help="Embedding type to use for enrichment.",
     )
@@ -446,6 +470,12 @@ if __name__ == "__main__":
         default=None,
         help="Filter ranges for binned embedding.",
     )
+    parser.add_argument(
+        "--bin_config_path",
+        type=str,
+        default=None,
+        help="Path to BinConfig JSON (required for uniform_binned / quantile_binned).",
+    )
     args = parser.parse_args()
 
     dest_path = osp.join(args.dest, args.run_name)
@@ -471,5 +501,6 @@ if __name__ == "__main__":
         bin_size=args.bin_size,
         ranges=args.ranges,
         filter_ranges=args.filter_ranges,
+        bin_config_path=args.bin_config_path,
     )
     
