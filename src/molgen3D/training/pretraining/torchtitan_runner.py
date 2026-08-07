@@ -159,7 +159,7 @@ def _plan_run_layout(
     dump_folder = getattr(job_section, "dump_folder", None) or "pretrain_runs"
     # Logs should sit directly under the pretrain logs root per run.
     logs_root = paths.get_pretrain_logs_path(Path())
-    ckpts_root = paths.get_root_path("qwen_yerevann_root", Path("qwen3_06b"))
+    ckpts_root = paths.get_root_path("ckpts_root", Path("qwen3_06b"))
     wandb_root = paths.get_wandb_path(Path())
 
     if run_settings.init_mode == "resume":
@@ -207,7 +207,6 @@ def _load_tokenizer_details(tokenizer_path: Path) -> TokenizerDetails:
     tokenizer = AutoTokenizer.from_pretrained(
         str(tokenizer_path),
         use_fast=True,
-        fix_mistral_regex=True,
     )
     ensure_tokenizer_pad_token(tokenizer)
     vocab_size = len(tokenizer)
@@ -522,30 +521,59 @@ def _ensure_hf_checkpoint_has_lm_head(hf_dir: Path) -> Path:
     mutating the original download, clone it under `patched_for_titan/` once
     and inject the missing tensor so repeated launches can reuse the patched
     copy.
+
+    Only global rank 0 performs the copy/patch; all other ranks wait on a
+    `.ready` sentinel file to avoid simultaneous writes corrupting the model.
     """
-    model_file = hf_dir / "model.safetensors"
     patched_dir = hf_dir / "patched_for_titan"
     patched_model = patched_dir / "model.safetensors"
+    sentinel = patched_dir / ".ready"
 
-    if not patched_model.exists():
-        patched_dir.mkdir(parents=True, exist_ok=True)
-        for item in hf_dir.iterdir():
-            if item.is_file():
-                shutil.copy(item, patched_dir / item.name)
-            elif item.is_dir() and item.name != "patched_for_titan":
-                target = patched_dir / item.name
-                if not target.exists():
-                    shutil.copytree(item, target)
+    if _current_rank() == 0:
+        needs_patching = True
+        if sentinel.exists():
+            needs_patching = False
+        elif patched_model.exists():
+            # Legacy copy (created without sentinel) or interrupted attempt.
+            # Load to verify integrity and add lm_head if missing.
+            try:
+                tensors = load_safetensor(patched_model)
+                if "lm_head.weight" not in tensors and "model.embed_tokens.weight" in tensors:
+                    embed = tensors["model.embed_tokens.weight"]
+                    tensors["lm_head.weight"] = embed.clone()
+                    save_safetensor(tensors, patched_model)
+                sentinel.touch()
+                needs_patching = False
+            except Exception:
+                # Corrupted — remove and redo
+                shutil.rmtree(patched_dir)
 
-    tensors = load_safetensor(patched_model)
-    if "lm_head.weight" not in tensors and "model.embed_tokens.weight" in tensors:
-        _log_rank(
-            "Adding lm_head.weight to HF checkpoint at %s by copying model.embed_tokens.weight",
-            patched_model,
-        )
-        embed = tensors["model.embed_tokens.weight"]
-        tensors["lm_head.weight"] = embed.clone()
-        save_safetensor(tensors, patched_model)
+        if needs_patching:
+            patched_dir.mkdir(parents=True, exist_ok=True)
+            for item in hf_dir.iterdir():
+                if item.is_file():
+                    shutil.copy(item, patched_dir / item.name)
+                elif item.is_dir() and item.name != "patched_for_titan":
+                    shutil.copytree(item, patched_dir / item.name)
+            tensors = load_safetensor(patched_model)
+            if "lm_head.weight" not in tensors and "model.embed_tokens.weight" in tensors:
+                _log_rank(
+                    "Adding lm_head.weight to HF checkpoint at %s by copying model.embed_tokens.weight",
+                    patched_model,
+                )
+                embed = tensors["model.embed_tokens.weight"]
+                tensors["lm_head.weight"] = embed.clone()
+                save_safetensor(tensors, patched_model)
+            sentinel.touch()
+    else:
+        deadline = time.time() + 600
+        while not sentinel.exists():
+            if time.time() > deadline:
+                raise RuntimeError(
+                    f"Timed out waiting for patched checkpoint at {sentinel}"
+                )
+            time.sleep(2)
+
     return patched_dir
 
 
@@ -599,6 +627,20 @@ def launch_qwen3_pretrain(cfg: QwenPretrainRunConfig) -> None:
 
     set_active_job_config(job_config)
     init_logger()
+
+    # Pre-initialize torch.distributed with a multi-backend group so that
+    # CPU-tensor collectives (e.g. dist.gather_object used by DCP's planning
+    # phase) route through GLOO instead of NCCL.  Using NCCL for those ops
+    # exhausts InfiniBand Completion Queues on the IB HCA, causing
+    # ibv_create_cq ENOMEM → NCCL Error 2 at the first collective.
+    # TorchTitan's init_distributed() skips re-initialization when
+    # is_initialized() returns True, so this pre-init takes precedence.
+    if not dist.is_initialized():
+        from datetime import timedelta
+        dist.init_process_group(
+            backend="cuda:nccl,cpu:gloo",
+            timeout=timedelta(seconds=job_config.comm.init_timeout_seconds),
+        )
 
     trainer: Optional[Trainer] = None
     try:
