@@ -1,3 +1,4 @@
+import ast
 import os
 import os.path as osp
 import re
@@ -7,15 +8,22 @@ import random
 import numpy as np
 import cloudpickle
 from collections import defaultdict
-from typing import Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 from pathlib import Path
+from loguru import logger as log
 from rdkit.Chem.rdchem import HybridizationType
 from rdkit.Chem.rdchem import BondType as BT
 from rdkit.Chem.rdchem import ChiralType
 from rdkit import Chem
 from rdkit.Geometry import Point3D
 
-from molgen3D.data_processing.smiles_encoder_decoder import encode_cartesian_v2
+from molgen3D.data_processing.smiles_encoder_decoder import (
+    BinConfig,
+    encode_cartesian_binned,
+    encode_cartesian_binned_v2,
+    encode_cartesian_v2,
+    encode_cartesian_with_config,
+)
 
 dihedral_pattern = Chem.MolFromSmarts('[*]~[*]~[*]~[*]')
 chirality = {ChiralType.CHI_TETRAHEDRAL_CW: -1.,
@@ -29,6 +37,17 @@ drugs_types = {'H': 0, 'Li': 1, 'B': 2, 'C': 3, 'N': 4, 'O': 5, 'F': 6, 'Na': 7,
                'P': 11, 'S': 12, 'Cl': 13, 'K': 14, 'Ca': 15, 'V': 16, 'Cr': 17, 'Mn': 18, 'Cu': 19, 'Zn': 20,
                'Ga': 21, 'Ge': 22, 'As': 23, 'Se': 24, 'Br': 25, 'Ag': 26, 'In': 27, 'Sb': 28, 'I': 29, 'Gd': 30,
                'Pt': 31, 'Au': 32, 'Hg': 33, 'Bi': 34}
+
+EMBEDDING_REGISTRY = {
+    "cartesian_v2": encode_cartesian_v2,
+    "cartesian": encode_cartesian_v2,
+    "cartesian_binned": encode_cartesian_binned,
+    "cartesian_binned_v2": encode_cartesian_binned_v2,
+    "uniform_binned": encode_cartesian_with_config,
+    "quantile_binned": encode_cartesian_with_config,
+}
+
+REVISITED_SPLIT_FILE_MAP = {"train": "train", "valid": "val", "test": "test"}
 
 def encode_cartesian_raw(mol, precision=4):
     """Legacy compatibility wrapper for the enriched representation."""
@@ -103,6 +122,183 @@ def save_processed_pickle(
 
     return output_path
 
+
+def save_grouped_pickle(output_path: str, iso_to_confs: Dict[str, List[Dict[str, Any]]]) -> None:
+    parent = osp.dirname(output_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(output_path, "wb") as fh:
+        pickle.dump(iso_to_confs, fh)
+
+
+def get_embedding_func_and_config(
+    embedding_type: str,
+    bin_config_path: Optional[str] = None,
+):
+    bin_config = None
+    if embedding_type in ("uniform_binned", "quantile_binned"):
+        if bin_config_path is None:
+            raise ValueError(
+                f"--bin_config_path is required for embedding_type={embedding_type!r}."
+            )
+        bin_config = BinConfig.load(bin_config_path)
+        log.info(
+            "Loaded BinConfig from {} | mode={} L={:.4f} H={:.4f} n_bins={}",
+            bin_config_path,
+            bin_config.mode,
+            bin_config.L,
+            bin_config.H,
+            bin_config.n_bins,
+        )
+    if embedding_type not in EMBEDDING_REGISTRY:
+        raise ValueError(
+            f"Unsupported embedding_type '{embedding_type}'. Options: {sorted(EMBEDDING_REGISTRY)}"
+        )
+    return EMBEDDING_REGISTRY[embedding_type], bin_config
+
+
+def parse_coordinate_ranges(ranges: str) -> List[Tuple[float, float]]:
+    try:
+        parsed_ranges = ast.literal_eval(f"[{ranges}]")
+        return [tuple(r) for r in parsed_ranges]
+    except Exception as exc:
+        log.error("Failed to parse ranges: {} | failure={}", ranges, exc)
+        return [(-13.0, 13.0), (-13.0, 13.0), (-13.0, 13.0)]
+
+
+def get_coordinate_ranges_for_embedding(
+    ranges: Optional[str] = None,
+    *,
+    bin_config: Optional[BinConfig] = None,
+) -> List[Tuple[float, float]]:
+    if bin_config is not None:
+        return bin_config.coordinate_ranges()
+    if ranges is None:
+        ranges = "[-13.0, 13.0], [-13.0, 13.0], [-13.0, 13.0]"
+    return parse_coordinate_ranges(ranges)
+
+
+def encode_mol_with_embedding(
+    mol: Chem.Mol,
+    embedding_func,
+    *,
+    precision: int,
+    bin_size: float,
+    ranges: List[Tuple[float, float]],
+    bin_config: Optional[BinConfig] = None,
+):
+    if embedding_func is encode_cartesian_with_config:
+        if bin_config is None:
+            raise ValueError("BinConfig is required for config-driven encoding.")
+        return embedding_func(mol, bin_config)
+    if embedding_func in (encode_cartesian_binned, encode_cartesian_binned_v2):
+        return embedding_func(mol, bin_size=bin_size, ranges=ranges)
+    return embedding_func(mol, precision=precision)
+
+
+def get_revisited_split_path(
+    geom_raw_path: str,
+    split_name: str,
+    use_centered: bool = False,
+) -> str:
+    if split_name not in REVISITED_SPLIT_FILE_MAP:
+        raise ValueError(f"Unsupported revisited split: {split_name!r}")
+    suffix = "_data_centered.pickle" if use_centered else "_data.pickle"
+    file_stem = REVISITED_SPLIT_FILE_MAP[split_name]
+    return osp.join(geom_raw_path, f"{file_stem}{suffix}")
+
+
+def center_conformer(mol: Chem.Mol) -> Chem.Mol:
+    """Return a copy of *mol* with its conformer translated so the centroid is at the origin.
+
+    The centroid is the unweighted mean of all heavy-atom positions (hydrogen
+    positions are included if present in the conformer).  A shallow copy is
+    returned so the original mol is never mutated.
+    """
+    mol = Chem.RWMol(mol)
+    conf = mol.GetConformer()
+    pos = conf.GetPositions()          # (N, 3) numpy array
+    centroid = pos.mean(axis=0)
+    for i, (x, y, z) in enumerate(pos - centroid):
+        conf.SetAtomPosition(i, Point3D(x, y, z))
+    return mol.GetMol()
+
+
+def copy_single_conformer_mol(mol: Chem.Mol) -> Chem.Mol:
+    copied = Chem.Mol(mol)
+    if copied.GetNumConformers() > 1:
+        conf = Chem.Conformer(copied.GetConformer(0))
+        copied.RemoveAllConformers()
+        copied.AddConformer(conf, assignId=True)
+    return copied
+
+
+def _get_prop_float(props: Dict[str, Any], key: str) -> Optional[float]:
+    if key in props:
+        try:
+            return float(props[key])
+        except Exception:
+            return None
+    return None
+
+
+def extract_conf_meta(
+    conf_meta: Optional[Dict[str, Any]],
+    mol: Chem.Mol,
+) -> Tuple[Optional[float], Optional[float], Optional[int]]:
+    energy = weight = None
+    conf_id = None
+
+    if conf_meta:
+        if "totalenergy" in conf_meta:
+            energy = conf_meta.get("totalenergy")
+        elif "relativeenergy" in conf_meta:
+            energy = conf_meta.get("relativeenergy")
+
+        if "boltzmannweight" in conf_meta:
+            weight = conf_meta.get("boltzmannweight")
+        elif "weight" in conf_meta:
+            weight = conf_meta.get("weight")
+
+        if "geom_id" in conf_meta:
+            conf_id = conf_meta.get("geom_id")
+
+    if mol is not None:
+        mol_props = mol.GetPropsAsDict()
+        if energy is None:
+            energy = _get_prop_float(mol_props, "totalenergy")
+        if weight is None:
+            weight = _get_prop_float(mol_props, "boltzmannweight")
+        if conf_id is None and "geom_id" in mol_props:
+            try:
+                conf_id = int(mol_props["geom_id"])
+            except Exception:
+                conf_id = None
+
+        if mol.GetNumConformers() > 0:
+            conf_props = mol.GetConformer().GetPropsAsDict()
+            if energy is None:
+                energy = _get_prop_float(conf_props, "totalenergy")
+            if weight is None:
+                weight = _get_prop_float(conf_props, "boltzmannweight")
+            if conf_id is None and "geom_id" in conf_props:
+                try:
+                    conf_id = int(conf_props["geom_id"])
+                except Exception:
+                    conf_id = None
+
+    try:
+        energy = float(energy) if energy is not None else None
+    except Exception:
+        energy = None
+
+    try:
+        weight = float(weight) if weight is not None else None
+    except Exception:
+        weight = None
+
+    return energy, weight, conf_id
+
 class JsonlSplitWriter:
     def __init__(self, base_dir: str, split_name: str, chunk_size: int = 1_000_000):
         self.split_name = split_name
@@ -120,9 +316,12 @@ class JsonlSplitWriter:
             if len(self.buffer) >= self.chunk_size:
                 self._flush()
 
-    def close(self) -> None:
+    def flush(self) -> None:
         if self.buffer:
             self._flush()
+
+    def close(self) -> None:
+        self.flush()
 
     def _flush(self) -> None:
         random.shuffle(self.buffer)
@@ -167,6 +366,74 @@ def filter_mols(
         k += 1
         if k == num_confs:
             break
+
+    return selected
+
+
+def filter_revisited_mols(
+    smiles: Optional[str],
+    mols: List[Chem.Mol],
+    failures: Dict[str, int] = defaultdict(int),
+    max_confs: int = 30,
+) -> List[Chem.Mol]:
+    if smiles and "." in smiles:
+        failures["dot_in_smiles"] += 1
+        return []
+
+    mol_from_smiles = Chem.MolFromSmiles(smiles) if smiles else None
+    if mol_from_smiles is None:
+        failures["mol_from_smiles_failed"] += 1
+        return []
+
+    num_confs = len(mols)
+    if max_confs is not None:
+        num_confs = max_confs
+
+    selected: List[Chem.Mol] = []
+    k = 0
+    for mol in mols:
+        if mol is None:
+            failures["missing_mol"] += 1
+            continue
+
+        num_neighbors = [len(a.GetNeighbors()) for a in mol.GetAtoms()]
+        if not num_neighbors or np.max(num_neighbors) > 4:
+            failures["large_degree"] += 1
+            continue
+
+        selected.append(mol)
+        k += 1
+        if k == num_confs:
+            break
+
+    return selected
+
+
+def filter_revisited_conformers_keep_dotted(
+    smiles: Optional[str],
+    mols: List[Chem.Mol],
+    failures: Dict[str, int],
+) -> List[Tuple[Chem.Mol, int]]:
+    if smiles and "." in smiles:
+        failures["dot_in_smiles"] += 1
+
+    mol_from_smiles = Chem.MolFromSmiles(smiles) if smiles else None
+    if mol_from_smiles is None:
+        failures["mol_from_smiles_failed"] += 1
+        return []
+
+    selected: List[Tuple[Chem.Mol, int]] = []
+    for idx, mol in enumerate(mols):
+        if mol is None:
+            failures["missing_mol"] += 1
+            continue
+
+        num_neighbors = [len(a.GetNeighbors()) for a in mol.GetAtoms()]
+        if not num_neighbors or np.max(num_neighbors) > 4:
+            failures["large_degree"] += 1
+            continue
+
+        selected.append((mol, idx))
 
     return selected
 
