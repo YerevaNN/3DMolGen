@@ -48,7 +48,7 @@ def create_slurm_executor(
     if submitit is None:
         raise RuntimeError("submitit is not available")
 
-    folder = str(Path("/home/chem-project/fsq/3DMolGen/outputs/slurm_jobs") / job_type / "job_%j")
+    folder = str(Path("outputs/slurm_jobs") / job_type / "job_%j")
 
     if device == "local":
         executor = submitit.LocalExecutor(folder=folder)
@@ -69,12 +69,32 @@ def create_slurm_executor(
     executor.update_parameters(**params)
     return executor
 
-def find_generation_pickles_path(directory_path: str) -> str:
-    for r, _, fs in os.walk(directory_path):
-        for f in fs:
-            if f.endswith(".pickle") or f.endswith(".pkl"):
+GENERATION_PICKLE_NAMES = ("generation_results.pickle", "generation_results.pkl")
+EVAL_ARTIFACT_PICKLE_NAMES = {"rmsd_matrix.pickle", "posebusters.pickle"}
+
+def find_generation_pickles_path(directory_path: str) -> Optional[str]:
+    """Locate the generation pickle inside a generation directory.
+
+    Evaluation results are written next to the generations (eval_<timestamp>/), so a
+    plain walk can return rmsd_matrix.pickle or posebusters.pickle instead of the
+    generations themselves.
+    """
+    for name in GENERATION_PICKLE_NAMES:
+        candidate = os.path.join(directory_path, name)
+        if os.path.isfile(candidate):
+            return candidate
+
+    fallback = None
+    for r, dirs, fs in os.walk(directory_path):
+        dirs[:] = sorted(d for d in dirs if not d.startswith("eval_"))
+        for f in sorted(fs):
+            if f in EVAL_ARTIFACT_PICKLE_NAMES or not f.endswith((".pickle", ".pkl")):
+                continue
+            if f in GENERATION_PICKLE_NAMES:
                 return os.path.join(r, f)
-    return None  # No pickle files found
+            if fallback is None:
+                fallback = os.path.join(r, f)
+    return fallback  # None if no generation pickle was found
 
 def same_molecular_graph(gt: str, gen: str) -> bool:
     m1 = Chem.MolFromSmiles(gt)
@@ -89,6 +109,8 @@ def format_float(value: Optional[float], decimals: int = 4) -> str:
     """Format float to specified decimal places (truncated, not rounded)."""
     if value is None or np.isnan(value):
         return "N/A"
+    if np.isinf(value):
+        return "inf" if value > 0 else "-inf"
     # Truncate instead of round
     factor = 10 ** decimals
     truncated = math.floor(abs(value) * factor) / factor

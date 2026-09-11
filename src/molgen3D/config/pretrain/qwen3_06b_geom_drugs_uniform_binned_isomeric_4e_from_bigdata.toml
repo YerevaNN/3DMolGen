@@ -1,5 +1,5 @@
 [job]
-description = "qwen3_4b_pre_1e_8e-4_bigdata"
+description = "qwen3_06b_pre_4e_geom_drugs_uniform_binned_isomeric_from_bigdata"
 dump_folder = "pretrain_runs"
 print_config = true
 custom_config_module = "molgen3D.training.pretraining.config.custom_job_config"
@@ -7,32 +7,32 @@ custom_config_module = "molgen3D.training.pretraining.config.custom_job_config"
 [molgen_run]
 init_mode = "hf_pretrain" # scratch | hf_pretrain | resume
 tokenizer_tag = "tokenizers:qwen3_0.6b_binned_258"
-base_model_tag = "base_paths:qwen3_4b_base_model"
+base_model_tag = "/mnt/weka/vtarasov/checkpoints/qwen3_06b/260529-0500-ed69-qwen3_06b_pre_1e_8e-4_bigdata_shuffled_from_base/step-111000-hf"
 
 [model]
 name = "molgen_qwen3"
-flavor = "4B"
+flavor = "0.6B"
 hf_assets_path = "src/molgen3D/training/tokenizers/Qwen3_tokenizer_binned_258"
 
 [experimental]
 custom_import = "molgen3D.training.pretraining.torchtitan_model.qwen3_custom"
 
 [training]
-gc_freq = 100
+gc_freq = 1000
 seq_len = 4096
-local_batch_size = 4
-global_batch_size = 96
-steps = 110000
+local_batch_size = 2
+global_batch_size = 48
+steps = 27200
 max_norm = 1.0
 dtype = "bfloat16"
 dataset = "molgen_jsonl"
-dataset_path = "data:big_data_train"
+dataset_path = "data:geom_drugs_uniform_binned_isomeric_train"
 
 [validation]
 enable = true
 dataset = "molgen_jsonl"
-dataset_path = "data:revisited_uniform_binned_isomeric_valid"
-local_batch_size = 4
+dataset_path = "data:geom_drugs_uniform_binned_isomeric_valid"
+local_batch_size = 2
 seq_len = 4096
 freq = 500
 steps = 200
@@ -41,13 +41,13 @@ num_val_molecules = 10
 numerical_validation_freq = 10000
 
 [molgen_data]
-train_path = "data:big_data_train"
+train_path = "data:geom_drugs_uniform_binned_isomeric_train"
 tokenizer_key = "qwen3_0.6b_binned_258"
 min_emb_len = 0
 shuffle_lines = true
 infinite = true
 seed = 2025
-num_workers = 4
+num_workers = 8
 pin_memory = true
 drop_last = true
 persistent_workers = false
@@ -67,19 +67,19 @@ weight_decay = 0.1
 [wsds_scheduler]
 enable = true
 warmup_steps = 500
-checkpoints = [110000]
+checkpoints = [6800, 13600, 20400, 27200]
 lr_min = 0
 decay_frac = 0.1
 
 [checkpoint]
 enable = true
-interval = 11000
+interval = 6800
 keep_latest_k = 4
 folder = "checkpoint"
 create_seed_checkpoint = false
 initial_load_model_only = true
 initial_load_in_hf = true
-initial_load_path = "base_paths:qwen3_4b_base_model"
+initial_load_path = "/mnt/weka/vtarasov/checkpoints/qwen3_06b/260529-0500-ed69-qwen3_06b_pre_1e_8e-4_bigdata_shuffled_from_base/step-111000-hf"
 last_save_in_hf = true
 async_mode = "async"
 
@@ -90,7 +90,7 @@ save_for_all_ranks = false
 save_tb_folder = "tb"
 
 [parallelism]
-data_parallel_replicate_degree = 3
-data_parallel_shard_degree = 8
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
 tensor_parallel_degree = 1
 fsdp_reshard_after_forward = "default"

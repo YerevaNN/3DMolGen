@@ -226,6 +226,7 @@ sampling_configs = {
 gen_num_codes = {
     "1x_per_mol": 1,
     "2x_per_mol": 2,
+    "10x_per_mol": 10,
     "1k_per_conf": "1k",
     "2k_per_conf": "2k",
     "1000_per_mol": 1000

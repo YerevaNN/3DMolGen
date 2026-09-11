@@ -13,6 +13,7 @@ from tqdm import tqdm
 from molgen3D.config.paths import get_base_path, get_data_path
 from molgen3D.data_processing.utils import load_pkl
 from molgen3D.evaluation import rdkit_utils
+from molgen3D.evaluation.rdkit_utils import _compute_key_matrix
 from molgen3D.evaluation.posebusters_check import bust_full_gens
 from molgen3D.evaluation.utils import (
     DEFAULT_THRESHOLDS,
@@ -20,20 +21,7 @@ from molgen3D.evaluation.utils import (
     create_slurm_executor,
     find_generation_pickles_path,
 )
-from molgen3D.evaluation.write_eval_results import save_evaluation_results
-
-def _compute_key_matrix(key: str, true_confs: List, gen_mols: List, use_alignmol: bool) -> Tuple[str, Dict[str, object], bool]:
-    n_true = len(true_confs)
-    n_gen = len(gen_mols)
-    mat = np.full((n_true, n_gen), np.nan, dtype=float)
-    for i_true, ref_mol in enumerate(true_confs):
-        ref_mol_normalized = rdkit_utils._normalize_coords(ref_mol)
-        row = np.array([rdkit_utils._best_rmsd(gen_mol, ref_mol_normalized, use_alignmol) for gen_mol in gen_mols], dtype=float)
-        # row = np.array([rdkit_utils._best_rmsd(gen_mol, ref_mol, use_alignmol) for gen_mol in gen_mols], dtype=float)
-        if row.shape == (n_gen,):
-            mat[i_true] = row
-    all_nan = bool(np.isnan(mat).all())
-    return key, {"n_true": n_true, "n_model": n_gen, "rmsd": mat}, all_nan
+from molgen3D.evaluation.write_eval_results import save_evaluation_results, save_posebusters_only_results
 
 def compute_rmsd_matrix(true_data: Dict, gen_data: Dict[str, List], args: argparse.Namespace) -> Tuple[Dict, List[str], List[str]]:
     missing, all_nan_keys = [], []
@@ -181,6 +169,45 @@ def derive_eval_base_from_gen(gen_base: str) -> str:
         return str(Path(*parts))
     return str(p.parent / "eval_results")
 
+def _num_confs(value) -> int:
+    if isinstance(value, dict) and "confs" in value:
+        return len(value["confs"])
+    if isinstance(value, list):
+        return len(value)
+    return 0
+
+def process_posebusters_only_pickle(gens_dict: Dict, gens_path: str,
+                                     results_path: str, args: argparse.Namespace) -> bool:
+    t0 = time.time()
+    processed_gen_data = rdkit_utils.process_molecules_remove_hs(gens_dict)
+
+    gen_stats = {
+        "total_molecules_num": len(processed_gen_data),
+        "total_conformers_num": sum(_num_confs(value) for value in processed_gen_data.values()),
+        "gen_path": gens_path,
+    }
+
+    posebusters_by_smiles, posebusters_summary, pass_rate = run_posebusters_wrapper(
+        processed_gen_data, args.posebusters, args.num_workers
+    )
+    if pass_rate is not None:
+        print(f"Overall Pass percentage: {pass_rate:2f}%\n")
+
+    durations = {
+        "Total processing": time.time() - t0,
+        "PoseBusters processing": time.time() - t0,
+    }
+
+    save_posebusters_only_results(
+        posebusters_full_results=posebusters_by_smiles,
+        posebusters_summary=posebusters_summary,
+        pass_rate=pass_rate,
+        durations=durations,
+        results_path=results_path,
+        gen_stats=gen_stats,
+    )
+    return True
+
 def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
                               results_path: str, args: argparse.Namespace) -> bool:
 
@@ -197,14 +224,14 @@ def process_generation_pickle(gens_dict: Dict, gt_dict: Dict, gens_path: str,
     gen_stats = {
         "total_molecules_num": len(processed_gen_data),
         "total_conformers_num": sum(_num_confs(value) for value in processed_gen_data.values()),
-        "gen_path": gens_path,  
+        "gen_path": gens_path,
     }
     gt_stats = {
         "total_molecules_num": len(gt_dict),
         "total_conformers_num": sum(_num_confs(value) for value in gt_dict.values()),
         "gt_path": get_data_path(f"{args.test_set}_smi"),
     }
-    
+
     t_prep = time.time()
     rmsd_results, missing, all_nan_keys = compute_rmsd_matrix(gt_dict, processed_gen_data, args)
     t_rmsd = time.time()
@@ -262,13 +289,16 @@ def run_evaluation(directory_name: str, gen_base: str, eval_base: str, args: arg
         return False
     gens_dict = load_pkl(gen_pickle_path)
 
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Save the eval results next to the generation pickle
+    results_path = os.path.join(str(Path(gen_pickle_path).parent), f"eval_{timestamp}")
+    print(f"Results will be saved to: {results_path}")
+
+    if args.posebusters_only:
+        return process_posebusters_only_pickle(gens_dict, gens_path, results_path, args)
+
     gt_dict = load_pkl(get_data_path(f"{args.test_set}_smi"))
     print(f"Loaded {len(gt_dict)} ground truth geom_smiles")
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dir_basename = Path(directory_name).name
-    results_path = os.path.join(eval_base, f"{dir_basename}_{timestamp}")
-    print(f"Results will be saved to: {results_path}")
     return process_generation_pickle(gens_dict, gt_dict, gens_path, results_path, args)
 
 def run_directory_mode(args) -> None:
@@ -328,20 +358,25 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="High-performance evaluation for 3DMolGen with dictionary ground truth")
     parser.add_argument("--use-alignmol", action="store_true", help="Use AlignMol instead of GetBestRMS")
     parser.add_argument("--posebusters", type=str, default="None", choices=["mol", "redock", "None"], help="PoseBusters config")
+    parser.add_argument("--posebusters-only", action="store_true", help="Skip CovMat/RMSD computation and run only PoseBusters (requires --posebusters)")
     parser.add_argument("--batch-size", type=int, default=64, help="Batch size of true-conformer rows per worker task")
-    parser.add_argument("--device", type=str, choices=["local", "a100", "h100", "all"], default="local", help="Slurm partition")
+    parser.add_argument("--device", type=str, choices=["local", "a100", "h100", "all", "research", "research_cpu"], default="research_cpu", help="Slurm partition")
     parser.add_argument("--num-workers", type=int, default=10, help="Number of workers for evaluation")
     parser.add_argument("--max-recent", type=int, default=3, help="Max recent missing directories to evaluate")
     parser.add_argument("--specific-dir", type=str, default=None, help="Specific directory to evaluate")
+    parser.add_argument("--output-dir", type=str, default=None, help="Directory to save evaluation results (defaults to a path derived from the generation results root)")
     parser.add_argument(
         "--test_set",
         type=str,
         default="distinct",
-        choices=["clean", "distinct", "xl", "qm9", "valid", "revisited", "casf16"],
+        choices=["clean", "distinct", "xl", "qm9", "valid", "revisited", "casf16", "rnp", "druglike"],
         help="Test set to evaluate",
     )
     args = parser.parse_args()
-    
+
+    if args.posebusters_only and args.posebusters == "None":
+        parser.error("--posebusters-only requires --posebusters to be set to 'mol' or 'redock'")
+
     run_directory_mode(args)
 
 if __name__ == "__main__":

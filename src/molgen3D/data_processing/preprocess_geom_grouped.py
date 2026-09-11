@@ -96,7 +96,7 @@ def _read_mol_impl(
     Set[str],
     Dict[str, List[Dict[str, Any]]],
 ]:
-    mol_path, max_confs, precision, embedding_func, bin_size, ranges, sort_by = args
+    mol_path, max_confs, precision, embedding_func, bin_size, ranges, sort_by = args[:7]
     bin_config = args[7] if len(args) > 7 else None
     use_isomeric_smiles = args[8] if len(args) > 8 else False
     mol_object = load_pkl(mol_path)

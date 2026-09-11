@@ -7,7 +7,7 @@ custom_config_module = "molgen3D.training.pretraining.config.custom_job_config"
 [molgen_run]
 init_mode = "hf_pretrain" # scratch | hf_pretrain | resume
 tokenizer_tag = "tokenizers:qwen3_0.6b_binned_258"
-base_model_tag = "base_paths:qwen3_4b_base_model"
+base_model_tag = "/mnt/weka/vtarasov/checkpoints/qwen3_06b/260704-0307-3b43-qwen3_4b_pre_1e_8e-4_bigdata/step-110000-hf"
 
 [model]
 name = "molgen_qwen3"
@@ -79,7 +79,7 @@ folder = "checkpoint"
 create_seed_checkpoint = false
 initial_load_model_only = true
 initial_load_in_hf = true
-initial_load_path = "base_paths:qwen3_4b_base_model"
+initial_load_path = "/mnt/weka/vtarasov/checkpoints/qwen3_06b/260704-0307-3b43-qwen3_4b_pre_1e_8e-4_bigdata/step-110000-hf"
 last_save_in_hf = true
 async_mode = "disabled"
 

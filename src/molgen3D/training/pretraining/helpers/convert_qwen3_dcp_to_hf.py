@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
+import re
 from typing import Dict, Tuple, Optional, List
 import shutil
 
@@ -20,7 +22,7 @@ from transformers import AutoTokenizer, Qwen3Config, Qwen3ForCausalLM
 
 from torchtitan.models.qwen3.model.args import Qwen3ModelArgs
 from torchtitan.models.qwen3.model.state_dict_adapter import Qwen3StateDictAdapter
-from molgen3D.config.paths import get_tokenizer_path
+from molgen3D.config.paths import get_base_path, get_tokenizer_path
 # from torchtitan.tools.logging import logger
 
 
@@ -57,6 +59,19 @@ _DTYPE_MAP = {
     "fp16": torch.float16,
     "half": torch.float16,
 }
+
+# Run directories are named e.g. "...-qwen3_06b_pre_..."/"...-qwen3_17b_..."/"...-qwen3_4b_...".
+# Note: the *container* folder these live under is historically always called
+# "qwen3_06b" regardless of the actual model size, so size must be inferred from
+# the run directory's own name, not from any ancestor directory.
+_SIZE_TO_BASE_MODEL_KEY: Dict[str, str] = {
+    "06b": "qwen3_0.6b_base_model",
+    "17b": "qwen3_1.7b_base_model",
+    "4b": "qwen3_4b_base_model",
+}
+_RUN_NAME_SIZE_PATTERN = re.compile(r"qwen3[_-]?(06b|17b|4b)(?![0-9])", re.IGNORECASE)
+
+DEFAULT_BULK_CHECKPOINTS_ROOT: str = "/mnt/weka/vtarasov/checkpoints/qwen3_06b"
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +121,26 @@ def _looks_like_hf_model_dir(path: Path) -> bool:
         "model.safetensors.index.json",
     ]
     return any((path / name).exists() for name in expected_files)
+
+
+def _infer_hf_assets_path_from_run_name(run_name: str) -> Optional[Path]:
+    """Infer the patched-for-Titan base-model HF assets dir from a run directory name."""
+    match = _RUN_NAME_SIZE_PATTERN.search(run_name)
+    if not match:
+        return None
+    size = match.group(1).lower()
+    base_key = _SIZE_TO_BASE_MODEL_KEY[size]
+    try:
+        base_model_path = get_base_path(base_key)
+    except KeyError:
+        return None
+
+    patched_path = base_model_path / "patched_for_titan"
+    if _looks_like_hf_model_dir(patched_path):
+        return patched_path
+    if _looks_like_hf_model_dir(base_model_path):
+        return base_model_path
+    return None
 
 
 def _load_tokenizer(tokenizer_path: Path):
@@ -874,12 +909,35 @@ class DcpToHfConfig:
         Either a single step directory (…/step-200) or a run root directory
         that contains multiple step-* subdirectories. If you pass a specific
         .distcp file, we will automatically strip to its parent step-XXX dir.
+        Required unless --bulk is set.
+
+    bulk:
+        If True, ignore dcp_path and instead scan `checkpoints_root` for run
+        directories missing their HF conversion (no sibling step-XXX-hf dir),
+        converting them most-recently-modified first (capped by max_recent).
+        For each checkpoint, the HF base-model assets (patched for Titan) are
+        inferred from the run directory name -- "...qwen3_06b..." -> 0.6B,
+        "...qwen3_17b..." -> 1.7B, "...qwen3_4b..." -> 4B -- unless
+        --hf-assets-path is given, which overrides the inference for all of
+        them.
+
+    checkpoints_root:
+        Root directory to scan in bulk mode (defaults to the shared
+        checkpoints/qwen3_06b directory on /mnt/weka/vtarasov, which holds
+        runs for all model sizes despite the folder name).
+
+    max_recent:
+        In bulk mode, cap the number of missing checkpoints converted, most
+        recently modified first. None (default) converts everything missing.
 
     dry_run:
         If True, only print what would be exported without writing any HF
         checkpoints.
     """
-    dcp_path: str
+    dcp_path: Optional[str] = None
+    bulk: bool = False
+    checkpoints_root: Optional[str] = None
+    max_recent: Optional[int] = None
     dry_run: bool = False
     hf_assets_path: Optional[str] = None
     tokenizer_path: Optional[str] = None
@@ -920,10 +978,143 @@ def _find_step_dirs(root: Path) -> List[Path]:
     return step_dirs
 
 
-def main(cfg: DcpToHfConfig) -> None:
-    root = Path(cfg.dcp_path)
+def _resolve_hf_assets_path(
+    run_dir: Path,
+    job_cfg: Dict,
+    *,
+    override: Optional[str] = None,
+) -> Path:
+    if override:
+        hf_base = Path(override)
+        if not _looks_like_hf_model_dir(hf_base):
+            raise FileNotFoundError(f"--hf-assets-path does not look like an HF model dir: {hf_base}")
+        return hf_base
 
-    step_dirs = _find_step_dirs(root)
+    hf_assets = job_cfg.get("model", {}).get("hf_assets_path")
+    if hf_assets and _looks_like_hf_model_dir(Path(hf_assets)):
+        return Path(hf_assets)
+
+    fallback = job_cfg.get("checkpoint", {}).get("initial_load_path")
+    if fallback and _looks_like_hf_model_dir(Path(fallback)):
+        print(f"[WARN] Using checkpoint.initial_load_path for HF assets: {fallback}")
+        return Path(fallback)
+
+    inferred = _infer_hf_assets_path_from_run_name(run_dir.name)
+    if inferred is not None:
+        print(f"[INFO] Inferred HF assets path from run name '{run_dir.name}': {inferred}")
+        return inferred
+
+    raise ValueError(
+        "Unable to resolve HF assets path. Provide --hf-assets-path, ensure "
+        "job_config.json has model.hf_assets_path or checkpoint.initial_load_path, "
+        f"or name the run directory with a recognizable size tag {tuple(_SIZE_TO_BASE_MODEL_KEY)}."
+    )
+
+
+def _convert_step_dir(
+    step_dir: Path,
+    *,
+    hf_assets_override: Optional[str] = None,
+    tokenizer_override: Optional[str] = None,
+) -> Optional[Path]:
+    try:
+        job_cfg = _load_run_config(step_dir)
+        run_metadata = _collect_run_metadata(job_cfg, tokenizer_override=tokenizer_override)
+        _, dtype = _resolve_expected_dtype(job_cfg)
+        hf_base = _resolve_hf_assets_path(step_dir.parent, job_cfg, override=hf_assets_override)
+        return export_qwen3_dcp_step_to_hf(
+            step_dir,
+            hf_base,
+            out_dir=None,
+            expected_specs=run_metadata,
+            expected_dtype=dtype,
+            job_cfg=job_cfg,
+        )
+    except Exception as exc:
+        print(f"[ERROR] Failed to convert {step_dir.name}: {_format_exception(exc)}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Bulk conversion (analogous to run_eval.py's --max-recent mode)
+# ---------------------------------------------------------------------------
+
+def _run_dir_has_missing_candidates(dirnames: List[str], filenames: List[str]) -> bool:
+    return "config.json" in filenames and any(
+        name.startswith("step-") and not name.endswith("-hf") for name in dirnames
+    )
+
+
+def _iter_run_dirs(root: Path):
+    """Yield run directories (contain config.json + step-* subdirs) under root."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        current = Path(dirpath)
+        if _run_dir_has_missing_candidates(dirnames, filenames):
+            yield current
+        # Step dirs can contain hundreds of .distcp shards; never descend into them.
+        dirnames[:] = [d for d in dirnames if not d.startswith("step-")]
+
+
+def _find_missing_step_dirs(run_dir: Path) -> List[Path]:
+    step_dirs = [
+        p for p in sorted(run_dir.iterdir())
+        if p.is_dir() and p.name.startswith("step-") and not p.name.endswith("-hf")
+    ]
+    return [p for p in step_dirs if not (run_dir / f"{p.name}-hf").exists()]
+
+
+def _collect_missing_conversions(checkpoints_root: Path, max_recent: Optional[int]) -> List[Path]:
+    if not checkpoints_root.exists():
+        raise FileNotFoundError(f"Checkpoints root does not exist: {checkpoints_root}")
+
+    missing: List[Tuple[Path, float]] = []
+    for run_dir in _iter_run_dirs(checkpoints_root):
+        for step_dir in _find_missing_step_dirs(run_dir):
+            missing.append((step_dir, step_dir.stat().st_mtime))
+
+    missing.sort(key=lambda item: item[1], reverse=True)
+    step_dirs = [p for p, _ in missing]
+    if max_recent is not None and len(step_dirs) > max_recent:
+        step_dirs = step_dirs[:max_recent]
+    return step_dirs
+
+
+def run_bulk_conversion(cfg: DcpToHfConfig) -> None:
+    checkpoints_root = Path(cfg.checkpoints_root) if cfg.checkpoints_root else Path(DEFAULT_BULK_CHECKPOINTS_ROOT)
+    step_dirs = _collect_missing_conversions(checkpoints_root, cfg.max_recent)
+
+    if not step_dirs:
+        print(f"[INFO] No missing checkpoint conversions found under {checkpoints_root}")
+        return
+
+    print(f"[INFO] Found {len(step_dirs)} checkpoint(s) missing HF conversion under {checkpoints_root}")
+    for step_dir in step_dirs:
+        inferred = cfg.hf_assets_path or _infer_hf_assets_path_from_run_name(step_dir.parent.name)
+        note = inferred if inferred else "unresolved (no size tag match; will fall back to job_config.json)"
+        print(f"  - {step_dir.parent.name}/{step_dir.name}  [{note}]")
+
+    if cfg.dry_run:
+        print("[INFO] DRY RUN: no conversions performed")
+        return
+
+    for i, step_dir in enumerate(step_dirs, 1):
+        print(f"[INFO] Converting {i}/{len(step_dirs)}: {step_dir.parent.name}/{step_dir.name}")
+        _convert_step_dir(
+            step_dir,
+            hf_assets_override=cfg.hf_assets_path,
+            tokenizer_override=cfg.tokenizer_path,
+        )
+
+
+def main(cfg: DcpToHfConfig) -> None:
+    if cfg.bulk:
+        run_bulk_conversion(cfg)
+        return
+
+    if not cfg.dcp_path:
+        raise ValueError("--dcp-path is required unless --bulk is set")
+
+    step_dirs = _find_step_dirs(Path(cfg.dcp_path))
 
     if cfg.dry_run:
         print(f"[INFO] DRY RUN: Would process {len(step_dirs)} checkpoint(s)")
@@ -936,39 +1127,11 @@ def main(cfg: DcpToHfConfig) -> None:
     for i, step_dir in enumerate(step_dirs, 1):
         if len(step_dirs) > 1:
             print(f"[INFO] Processing {i}/{len(step_dirs)}: {step_dir.name}")
-        try:
-            job_cfg = _load_run_config(step_dir)
-            run_metadata = _collect_run_metadata(job_cfg, tokenizer_override=cfg.tokenizer_path)
-            dtype_str, dtype = _resolve_expected_dtype(job_cfg)
-            hf_assets = cfg.hf_assets_path or job_cfg.get("model", {}).get("hf_assets_path")
-            if not hf_assets or not _looks_like_hf_model_dir(Path(hf_assets)):
-                fallback = job_cfg.get("checkpoint", {}).get("initial_load_path")
-                if fallback and _looks_like_hf_model_dir(Path(fallback)):
-                    print(
-                        f"[WARN] Using checkpoint.initial_load_path for HF assets: {fallback}"
-                    )
-                    hf_assets = fallback
-            if not hf_assets:
-                raise ValueError(
-                    "Unable to resolve HF assets path. Provide --hf-assets-path "
-                    "or ensure job_config.json has model.hf_assets_path or "
-                    "checkpoint.initial_load_path."
-                )
-            hf_base = Path(hf_assets)
-            if not hf_base.exists():
-                raise FileNotFoundError(
-                    f"HF assets path recorded in config does not exist: {hf_base}"
-                )
-            out_dir = export_qwen3_dcp_step_to_hf(
-                step_dir,
-                hf_base,
-                out_dir=None,
-                expected_specs=run_metadata,
-                expected_dtype=dtype,
-                job_cfg=job_cfg,
-            )
-        except Exception as exc:
-            print(f"[ERROR] Failed to convert {step_dir.name}: {_format_exception(exc)}")
+        _convert_step_dir(
+            step_dir,
+            hf_assets_override=cfg.hf_assets_path,
+            tokenizer_override=cfg.tokenizer_path,
+        )
 
 
 if __name__ == "__main__":

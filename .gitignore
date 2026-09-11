@@ -29,3 +29,5 @@ dist/
 *.log
 *.csv
 *.ipynb
+
+druglike_curated_shortlist.tsv

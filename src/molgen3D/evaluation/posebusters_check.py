@@ -249,29 +249,28 @@ def _collect_posebusters_report(
         else:
             # here we are using the ProcessPoolExecutor to run the worker function for each chunk of conformers
             with ProcessPoolExecutor(max_workers=max_workers) as executor:
-                # here we are submitting the worker function for each chunk of conformers to the ProcessPoolExecutor
-                futures = [
-                    executor.submit(worker_fn, task, config, full_report)  # type: ignore[arg-type]
-                    for task in tasks
-                    if (isinstance(task, tuple) and task[1] > task[0]) or (not isinstance(task, tuple) and task)
-                ]
-                total_tasks = len(futures)
-                completed = 0
-                # as tasks finish, we log progress to stdout if log_progress is True
-                for future in as_completed(futures):
-                    result = future.result()
-                    # here we are appending the result of the worker function to the frames list
-                    if isinstance(result, pd.DataFrame) and not result.empty:
-                        frames.append(result)
-                    if log_progress and total_tasks:
-                        completed += 1
-                        percent = (completed / total_tasks) * 100.0
-                        logger.info(
-                            "PoseBusters tasks: %d/%d completed (%.1f%%)",
-                            completed,
-                            total_tasks,
-                            percent,
-                        )
+                # here we are submitting the worker function for each chunk of conformers to the ProcessPoolExecutor,
+                # keeping the number of conformers per task so the progress bar advances per conformer
+                futures = {}
+                for task in tasks:
+                    task_size = task[1] - task[0] if isinstance(task, tuple) else len(task)
+                    if task_size <= 0:
+                        continue
+                    future = executor.submit(worker_fn, task, config, full_report)  # type: ignore[arg-type]
+                    futures[future] = task_size
+                # as tasks finish, we advance the progress bar by the size of the finished chunk
+                with tqdm(
+                    total=sum(futures.values()),
+                    desc="PoseBusters",
+                    unit="conf",
+                    disable=not log_progress,
+                ) as pbar:
+                    for future in as_completed(futures):
+                        result = future.result()
+                        # here we are appending the result of the worker function to the frames list
+                        if isinstance(result, pd.DataFrame) and not result.empty:
+                            frames.append(result)
+                        pbar.update(futures[future])
     finally:
         if use_fork_sharing:
             # here we are clearing the shared conformers list
