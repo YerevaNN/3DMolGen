@@ -16,7 +16,7 @@ import math
 import os
 import re
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
 
 import numpy as np
 import torch
@@ -69,6 +69,14 @@ DEFAULT_FSQ_CKPT_CANDIDATES = (
 
 _FSQ_ENCODER: Optional["MolFSQModel"] = None
 _FSQ_ENCODER_CONFIG: Optional[dict[str, object]] = None
+
+
+class FSQRepresentation(NamedTuple):
+    """Cached continuous and discrete representations for one input conformer."""
+
+    tokens: list[str]
+    latents: np.ndarray
+    codes: np.ndarray
 
 
 def _truncate(x: float, precision: int = 4) -> str:
@@ -372,6 +380,18 @@ class MolFSQModel(nn.Module):
         return features, lengths
 
     def encode_texts(self, enriched_smiles_list: list[str]) -> list[str]:
+        representations = self.encode_representations(enriched_smiles_list)
+        return [
+            build_fsq_string(enriched_smiles, representation.codes)
+            for enriched_smiles, representation in zip(
+                enriched_smiles_list, representations
+            )
+        ]
+
+    def encode_representations(
+        self, enriched_smiles_list: list[str]
+    ) -> list[FSQRepresentation]:
+        """Encode inputs once and return pre-quantization latents plus FSQ codes."""
         if not enriched_smiles_list:
             return []
 
@@ -386,12 +406,23 @@ class MolFSQModel(nn.Module):
             emb = self.tok_emb(x)
             pos_emb = self._get_pos_emb(x.size(1), x.device, emb.dtype)
             z = self.enc(emb + pos_emb, src_key_padding_mask=pad_mask)
-            _, indices = self.quant(self.pre_q(z))
+            latents = self.pre_q(z)
+            _, indices = self.quant(latents)
 
+        latents_np = latents.detach().cpu().numpy()
         indices_np = indices.detach().cpu().numpy()
         return [
-            build_fsq_string(enriched_smiles, indices_np[i, : int(length)])
-            for i, (enriched_smiles, length) in enumerate(zip(enriched_smiles_list, lengths))
+            FSQRepresentation(
+                tokens=[
+                    str(token.get("atom_desc", token.get("text")))
+                    for token in tokenize_enriched(enriched_smiles)
+                ],
+                latents=latents_np[i, : int(length)].copy(),
+                codes=indices_np[i, : int(length)].astype(np.int64, copy=True),
+            )
+            for i, (enriched_smiles, length) in enumerate(
+                zip(enriched_smiles_list, lengths)
+            )
         ]
 
     def encode_text(self, enriched_smiles: str) -> str:
@@ -399,17 +430,116 @@ class MolFSQModel(nn.Module):
 
     def decode_text(self, fsq_text: str, precision: int = 4) -> str:
         tokens, codes_np = parse_fsq_text(fsq_text)
-        indices = torch.from_numpy(codes_np).unsqueeze(0).to(self.device, dtype=torch.int32)
-        xv = torch.from_numpy(tokens_to_vocab_onehot(tokens)).unsqueeze(0).to(
-            self.device, dtype=self.dtype
-        )
+        return self.decode_tokens_with_codes(tokens, codes_np, precision=precision)
+
+    def _decode_tokens_with_quantized_input(
+        self,
+        tokens: list[str],
+        quantized_input: torch.Tensor,
+        precision: int,
+    ) -> str:
+        return self._decode_tokens_batch_with_quantized_input(
+            tokens, quantized_input, precision
+        )[0]
+
+    def _decode_tokens_batch_with_quantized_input(
+        self,
+        tokens: list[str],
+        quantized_input: torch.Tensor,
+        precision: int,
+    ) -> list[str]:
+        batch_size = quantized_input.shape[0]
+        xv = torch.from_numpy(tokens_to_vocab_onehot(tokens)).unsqueeze(0).expand(
+            batch_size, -1, -1
+        ).to(self.device, dtype=self.dtype)
 
         with torch.inference_mode():
-            quant = self.quant.indices_to_codes(indices).to(dtype=self.dtype, device=self.device)
-            decoder_input = self.post_q(torch.cat([xv, quant], dim=-1))
+            decoder_input = self.post_q(torch.cat([xv, quantized_input], dim=-1))
             pos_emb = self._get_pos_emb(len(tokens), decoder_input.device, decoder_input.dtype)
-            recon = self.out(self.dec(decoder_input + pos_emb))[0].detach().cpu().numpy()
-        return format_enriched_from_tokens_and_coords(tokens, recon, precision=precision)
+            recon = self.out(self.dec(decoder_input + pos_emb)).detach().cpu().numpy()
+        return [
+            format_enriched_from_tokens_and_coords(tokens, coords, precision=precision)
+            for coords in recon
+        ]
+
+    def decode_tokens_with_codes(
+        self,
+        tokens: list[str],
+        codes,
+        precision: int = 4,
+    ) -> str:
+        codes_np = np.asarray(codes, dtype=np.int64)
+        if codes_np.shape != (len(tokens),):
+            raise ValueError(
+                f"Expected {len(tokens)} FSQ codes, got shape {codes_np.shape}"
+            )
+        indices = torch.from_numpy(codes_np).unsqueeze(0).to(
+            self.device, dtype=torch.int32
+        )
+        quant = self.quant.indices_to_codes(indices).to(
+            dtype=self.dtype, device=self.device
+        )
+        return self._decode_tokens_with_quantized_input(tokens, quant, precision)
+
+    def decode_tokens_with_latents(
+        self,
+        tokens: list[str],
+        latents,
+        precision: int = 4,
+    ) -> str:
+        """Decode continuous pre-quantization latents without re-quantizing them."""
+        latents_np = np.asarray(latents, dtype=np.float32)
+        expected_shape = (len(tokens), len(self.levels))
+        if latents_np.shape != expected_shape:
+            raise ValueError(
+                f"Expected latent shape {expected_shape}, got {latents_np.shape}"
+            )
+        quantized_input = torch.from_numpy(latents_np).unsqueeze(0).to(
+            self.device, dtype=self.dtype
+        )
+        return self._decode_tokens_with_quantized_input(
+            tokens, quantized_input, precision
+        )
+
+    def decode_tokens_with_code_batch(
+        self,
+        tokens: list[str],
+        codes,
+        precision: int = 4,
+    ) -> list[str]:
+        codes_np = np.asarray(codes, dtype=np.int64)
+        if codes_np.ndim != 2 or codes_np.shape[1] != len(tokens):
+            raise ValueError(
+                f"Expected a [batch, {len(tokens)}] FSQ code array, "
+                f"got shape {codes_np.shape}"
+            )
+        indices = torch.from_numpy(codes_np).to(self.device, dtype=torch.int32)
+        quant = self.quant.indices_to_codes(indices).to(
+            dtype=self.dtype, device=self.device
+        )
+        return self._decode_tokens_batch_with_quantized_input(
+            tokens, quant, precision
+        )
+
+    def decode_tokens_with_latent_batch(
+        self,
+        tokens: list[str],
+        latents,
+        precision: int = 4,
+    ) -> list[str]:
+        latents_np = np.asarray(latents, dtype=np.float32)
+        expected_tail = (len(tokens), len(self.levels))
+        if latents_np.ndim != 3 or latents_np.shape[1:] != expected_tail:
+            raise ValueError(
+                f"Expected a [batch, {expected_tail[0]}, {expected_tail[1]}] "
+                f"latent array, got shape {latents_np.shape}"
+            )
+        quantized_input = torch.from_numpy(latents_np).to(
+            self.device, dtype=self.dtype
+        )
+        return self._decode_tokens_batch_with_quantized_input(
+            tokens, quantized_input, precision
+        )
 
 
 def configure_fsq_encoder(

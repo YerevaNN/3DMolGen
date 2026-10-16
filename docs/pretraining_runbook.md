@@ -172,6 +172,12 @@ During training, TorchTitan flattens logits and labels, drops the `ignore_index`
 - Frequent tokens like `[SMILES]` and `<|endoftext|>` contribute real gradients until they hit the padded tail.
 - Rare tokens (e.g., unusual SMILES fragments) produce higher per-token losses, which explains occasional spikes in `global_max_loss` and `grad_norm`.
 
+### Compute-matched epoch estimate
+
+Moved to `notes.md` §1 "Compute control", which is the single home for the
+derivation, the measured `a`, and the resulting epoch count. The helper is
+`src/molgen3D/training/pretraining/helpers/compute_matching_epochs.py`.
+
 ---
 
 ## 5. Putting It All Together

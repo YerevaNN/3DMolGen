@@ -1,0 +1,53 @@
+arm: fsq
+run_id: bindgpt_coordtoken_geom_scratch_suffix
+training:
+  epochs: 1
+  optimizer: AdamW
+  learning_rate: 0.0005
+  warmup_steps: 100
+  schedule: cosine
+  weight_decay: 0.01
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  adam_eps: 1.0e-08
+  max_grad_norm: 1.0
+  dtype: bfloat16
+  target_tokens_per_step: 1600000
+  global_example_batch_size: 2048
+  micro_batch_size: 32
+  bucket_width: 64
+  max_sequence_length: 2048
+  seed: 17
+  checkpoint_fractions:
+  - 0.25
+  - 0.5
+  - 0.75
+  - 1.0
+  smiles_randomization: false
+  random_rotations: false
+decoding:
+  temperature: 1.0
+  top_p: 1.0
+  top_k: 50
+  do_sample: true
+  num_beams: 1
+  max_new_tokens: 1536
+  sampling_seed: 2023
+conformer_eval:
+  threshold: 0.75
+  generations_per_reference: 2
+  max_attempt_multiplier: 4
+  use_alignmol: false
+  failure_budget: 0.01
+unconditional_eval:
+  target_valid_connected: 1000
+  max_attempts: 20000
+  batch_size: 256
+  primary_reference: test
+fsq_checkpoint: /mnt/weka/fgeikyan/fsq/new_checkpoints/full_d1024_v4096_b128_lr0_0001_20260327_131937/last-v2.ckpt
+layout: suffix
+provenance:
+  training_code_revision: c24de75b78f8892a87d358cafb5bcf058f4d6f5a
+  evaluation_code_revision: c24de75b78f8892a87d358cafb5bcf058f4d6f5a
+  fsq_code_revision: c24de75b78f8892a87d358cafb5bcf058f4d6f5a
+  slurm_cluster: unknown

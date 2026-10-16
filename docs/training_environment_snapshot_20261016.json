@@ -1,0 +1,47 @@
+{
+  "/mnt/weka/fgeikyan/fsq_remote/3DMolGen/.venv/lib/python3.10/site-packages": {
+    "exists": true,
+    "packages": {
+      "tyro": "1.0.5",
+      "scipy": "1.15.3",
+      "triton": "3.6.0+git9844da95",
+      "numpy": "2.2.6",
+      "einops": "0.8.2",
+      "accelerate": "1.12.0",
+      "submitit": "1.5.4",
+      "torchtitan": "0.2.1",
+      "torchdata": "0.11.0",
+      "rdkit": "2025.9.3",
+      "wandb": "0.24.0",
+      "loguru": "0.7.3",
+      "pytest": "9.0.2",
+      "cloudpickle": "3.1.2",
+      "transformers": "4.57.6",
+      "safetensors": "0.7.0",
+      "torch": "2.11.0.dev20260125+cu130",
+      "datasets": "4.5.0",
+      "pandas": "2.3.3",
+      "tokenizers": "0.22.2"
+    }
+  },
+  "/mnt/weka/fgeikyan/tokenizer/conda_envs/train/lib/python3.10/site-packages": {
+    "exists": true,
+    "packages": {
+      "transformers": "4.57.6",
+      "loguru": "0.7.3",
+      "submitit": "1.5.4",
+      "numpy": "2.2.6",
+      "scipy": "1.15.3",
+      "tokenizers": "0.22.2",
+      "cloudpickle": "3.1.2",
+      "triton": "3.2.0",
+      "torch": "2.6.0+cu124",
+      "pytest": "9.1.1",
+      "einops": "0.8.1",
+      "safetensors": "0.7.0",
+      "torchdata": "0.11.0",
+      "rdkit": "2025.9.3",
+      "pandas": "2.3.3"
+    }
+  }
+}

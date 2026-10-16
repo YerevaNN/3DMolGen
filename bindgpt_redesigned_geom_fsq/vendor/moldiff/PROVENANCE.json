@@ -1,0 +1,50 @@
+{
+ "repo": "https://github.com/pengxingang/MolDiff",
+ "branch": "master",
+ "commit": "db62fa1b3e946d842686424318cfc07f98ed5fcd",
+ "files": {
+  "evaluation.py": {
+   "source_path": "utils/evaluation.py",
+   "upstream_sha256": "ec1a7d291f34ee825846d81fc79b9961e629995da55a8695a08c43aa68513cd8",
+   "bytes": 15861,
+   "vendored_sha256": "ec1a7d291f34ee825846d81fc79b9961e629995da55a8695a08c43aa68513cd8"
+  },
+  "scoring_func.py": {
+   "source_path": "utils/scoring_func.py",
+   "upstream_sha256": "431ef7ead3d650babe067a6c96f54e4a4776a122b3939defc3c8ae7d169c311d",
+   "bytes": 9137,
+   "vendored_sha256": "3b3875db3d65c8bad595bdfeb86104828f54be4c53aa69cfb85ac4b96df3182a"
+  },
+  "sascorer.py": {
+   "source_path": "utils/sascorer.py",
+   "upstream_sha256": "b7f7b8f78e26b9c154a76a118048d13262dc67cce5fe54a3ae5e5bc7f37ede21",
+   "bytes": 5844,
+   "vendored_sha256": "a94563cfad0b83e858e87644c3aa7c1cbc23fdb34342eda0c0a0847c188d7f40"
+  },
+  "evaluate_all.py": {
+   "source_path": "scripts/evaluate_all.py",
+   "upstream_sha256": "957bb50e3bdfa5b80acf2f2c1f958dbbdfd92f80b781a917be9c318a1be4f51c",
+   "bytes": 8443,
+   "vendored_sha256": "a6d1c55a07145b851d673643a2bb42b0fb21de812e5dc85f6fb966c62346cff7"
+  },
+  "fpscores.pkl.gz": {
+   "source": "rdkit Contrib/SA_Score",
+   "sha256": "10dcef9340c873e7b987924461b0af5365eb8dd96be607203debe8ddf80c1e73",
+   "bytes": 3848394
+  }
+ },
+ "modifications": [
+  {
+   "file": "scoring_func.py",
+   "change": "import rewrites only; no metric logic touched"
+  },
+  {
+   "file": "evaluate_all.py",
+   "change": "import rewrites only; no metric logic touched"
+  },
+  {
+   "file": "sascorer.py",
+   "change": "replaced the removed rdkit.six shim with pickle / dict.items; scoring logic untouched"
+  }
+ ]
+}

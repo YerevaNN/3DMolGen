@@ -29,3 +29,30 @@ dist/
 *.log
 *.csv
 *.ipynb
+# BindGPT-Coord vs BindGPT-FSQ experiment: large derived artifacts.
+# Code, configs, docs, audits, manifest reports and the vendored evaluator are
+# tracked; extracted conformers, packed blobs, checkpoints and raw generations
+# are not.
+bindgpt_geom_fsq/data/
+bindgpt_geom_fsq/checkpoints/
+bindgpt_geom_fsq/generations/
+bindgpt_geom_fsq/logs/
+bindgpt_geom_fsq/environment/
+bindgpt_geom_fsq/manifests/molecules.csv
+bindgpt_geom_fsq/manifests/graph_index.jsonl
+bindgpt_geom_fsq/vendor/moldiff/fpscores.pkl.gz
+
+# Cluster datasets, experiment artifacts, and private session backups.
+data_handoff/
+.staging/
+claude-chats-backup-*/
+claude-chats-backup-*.tar.gz
+*.bak
+bindgpt_redesigned_geom_fsq/data/
+bindgpt_redesigned_geom_fsq/checkpoints/
+bindgpt_redesigned_geom_fsq/generations/
+bindgpt_redesigned_geom_fsq/logs/
+bindgpt_redesigned_geom_fsq/environment/
+bindgpt_redesigned_geom_fsq/manifests/molecules.csv
+bindgpt_redesigned_geom_fsq/manifests/graph_index.jsonl
+bindgpt_redesigned_geom_fsq/vendor/moldiff/fpscores.pkl.gz

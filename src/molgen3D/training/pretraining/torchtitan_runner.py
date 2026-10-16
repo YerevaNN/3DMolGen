@@ -59,6 +59,35 @@ def _log_rank(msg: str, *args) -> None:
         logger.info(msg, *args)
 
 
+def _patch_torchtitan_cpu_backend() -> None:
+    """Let TorchTitan initialize distributed once, with CPU collectives on Gloo."""
+    flag = os.environ.get("MOLGEN_FORCE_CPU_DIST_BACKEND", "1").lower()
+    if flag in {"0", "false", "no"}:
+        return
+
+    from torchtitan.distributed import utils as dist_utils
+
+    original = dist_utils.init_distributed
+    if getattr(original, "_molgen_cpu_backend_patch", False):
+        return
+
+    def _wrapped_init_distributed(
+        comm_config,
+        enable_cpu_backend: bool = False,
+        base_folder: str = "",
+        ranks=None,
+    ):
+        return original(
+            comm_config,
+            enable_cpu_backend=True or enable_cpu_backend,
+            base_folder=base_folder,
+            ranks=ranks,
+        )
+
+    _wrapped_init_distributed._molgen_cpu_backend_patch = True
+    dist_utils.init_distributed = _wrapped_init_distributed
+
+
 @dataclass
 class QwenPretrainRunConfig:
     train_toml: str = "src/molgen3D/config/pretrain/qwen3_06b.toml"
@@ -628,19 +657,7 @@ def launch_qwen3_pretrain(cfg: QwenPretrainRunConfig) -> None:
     set_active_job_config(job_config)
     init_logger()
 
-    # Pre-initialize torch.distributed with a multi-backend group so that
-    # CPU-tensor collectives (e.g. dist.gather_object used by DCP's planning
-    # phase) route through GLOO instead of NCCL.  Using NCCL for those ops
-    # exhausts InfiniBand Completion Queues on the IB HCA, causing
-    # ibv_create_cq ENOMEM → NCCL Error 2 at the first collective.
-    # TorchTitan's init_distributed() skips re-initialization when
-    # is_initialized() returns True, so this pre-init takes precedence.
-    if not dist.is_initialized():
-        from datetime import timedelta
-        dist.init_process_group(
-            backend="cuda:nccl,cpu:gloo",
-            timeout=timedelta(seconds=job_config.comm.init_timeout_seconds),
-        )
+    _patch_torchtitan_cpu_backend()
 
     trainer: Optional[Trainer] = None
     try:
@@ -666,8 +683,9 @@ def launch_qwen3_pretrain(cfg: QwenPretrainRunConfig) -> None:
     else:
         if trainer:
             trainer.close()
-        torch.distributed.destroy_process_group()
-        logger.info("Process group destroyed")
+        if dist.is_available() and dist.is_initialized():
+            dist.destroy_process_group()
+            logger.info("Process group destroyed")
 
 
 if __name__ == "__main__":

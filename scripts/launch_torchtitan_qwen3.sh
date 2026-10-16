@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=torchtitan-qwen3-bigdata-1e-pairs
+#SBATCH --job-name=torchtitan-qwen3-fsq-bigdata
 #SBATCH --cpus-per-task=32
 #SBATCH --partition=research
-#SBATCH --nodes=1
+#SBATCH --nodes=3
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --mem=256Gb
@@ -10,11 +10,14 @@
 #SBATCH --output=outputs/slurm_jobs/titan/%j.out
 #SBATCH --error=outputs/slurm_jobs/titan/%j.err
 
-export WANDB_ENTITY=${WANDB_ENTITY:-vover-yerevann}
+set -euo pipefail
+
+export WANDB_ENTITY=${WANDB_ENTITY:-filya-team}
 export WANDB_PROJECT=${WANDB_PROJECT:-3dmolgen}
 export WANDB_GROUP=${WANDB_GROUP:-pretrain}
 export WANDB_JOB_TYPE=${WANDB_JOB_TYPE:-pretrain}
 export WANDB_CONFIG=${WANDB_CONFIG:-'{"run_type": "pretrain"}'}
+export WANDB_MODE=${WANDB_MODE:-online}
 # Keep per-parameter tensors for FSDP to expose embedding rows (needed for grad probe)
 # export TORCH_FSDP_USE_ORIG_PARAMS=${TORCH_FSDP_USE_ORIG_PARAMS:-1}
 # Also disable parameter flattening so embedding rows remain addressable
@@ -77,9 +80,86 @@ if ! command -v scontrol >/dev/null 2>&1; then
   unset _slurm_candidates _slurm_dir _vd
 fi
 
-TRAIN_TOML=${TRAIN_TOML:-src/molgen3D/config/pretrain/qwen3_06b_revisited_uniform_binned_isomeric_4e_from_bigdata.toml}
+WORKSPACE_DIR=${SLURM_SUBMIT_DIR:-$PWD}
+cd "${WORKSPACE_DIR}"
+mkdir -p outputs/slurm_jobs/titan
 
-_DEFAULT_DESCRIPTION=$(python3 - <<'PY' "$TRAIN_TOML"
+EXTRA_SITE_PACKAGES=${EXTRA_SITE_PACKAGES:-}
+TRAINING_VENV_SITE_PACKAGES=${TRAINING_VENV_SITE_PACKAGES:-/mnt/weka/fgeikyan/fsq_remote/3DMolGen/.venv/lib/python3.10/site-packages}
+TRAINING_SHARED_LIB=${TRAINING_SHARED_LIB:-/mnt/weka/shared-cache/miniforge3/lib}
+if [[ -d "${TRAINING_SHARED_LIB}" ]]; then
+  export LD_LIBRARY_PATH="${TRAINING_SHARED_LIB}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+fi
+
+_pythonpath_entries=()
+if [[ -n "${EXTRA_SITE_PACKAGES}" ]]; then
+  _pythonpath_entries+=("${EXTRA_SITE_PACKAGES}")
+fi
+if [[ -d "${TRAINING_VENV_SITE_PACKAGES}" ]]; then
+  _pythonpath_entries+=("${TRAINING_VENV_SITE_PACKAGES}")
+fi
+_pythonpath_entries+=("${WORKSPACE_DIR}/src")
+if [[ -n "${PYTHONPATH:-}" ]]; then
+  _pythonpath_entries+=("${PYTHONPATH}")
+fi
+PYTHONPATH=$(IFS=:; echo "${_pythonpath_entries[*]}")
+export PYTHONPATH
+unset _pythonpath_entries
+
+if [[ -n "${EXTRA_SITE_PACKAGES}" ]]; then
+  :
+else
+  EXTRA_SITE_PACKAGES=""
+fi
+
+_python_candidates=()
+if [[ -n "${PYTHON_BIN:-}" ]]; then
+  _python_candidates+=("${PYTHON_BIN}")
+fi
+_python_candidates+=(
+  "${WORKSPACE_DIR}/.venv/bin/python"
+  "/mnt/weka/shared-cache/conda/python-3.10.20-h3c07f61_0_cpython/bin/python3.10"
+  "/mnt/weka/shared-cache/conda/python-3.10.18-hd6af730_0_cpython/bin/python3.10"
+  "/mnt/weka/shared-cache/conda/python-3.10.16-habfa6aa_3_cpython/bin/python3.10"
+  "/mnt/weka/fgeikyan/fsq_remote/3DMolGen/.venv/bin/python"
+)
+_system_python=$(command -v python3 || true)
+if [[ -n "${_system_python}" ]]; then
+  _python_candidates+=("${_system_python}")
+fi
+PYTHON_BIN=""
+for _python_candidate in "${_python_candidates[@]}"; do
+  if [[ ! -x "${_python_candidate}" ]]; then
+    continue
+  fi
+  if "${_python_candidate}" - <<'PY' >/dev/null 2>&1
+import importlib
+required = [
+    "tyro",
+    "torch",
+    "torchtitan.components",
+    "torchtitan.models.qwen3",
+    "molgen3D.training.pretraining.torchtitan_runner",
+    "molgen3D.training.pretraining.torchtitan_model.qwen3_custom",
+]
+for module_name in required:
+    importlib.import_module(module_name)
+PY
+  then
+    PYTHON_BIN="${_python_candidate}"
+    break
+  fi
+  echo "Skipping Python candidate without required training imports: ${_python_candidate}" >&2
+done
+unset _python_candidates _python_candidate _system_python
+if [[ ! -x "${PYTHON_BIN}" ]]; then
+  echo "No usable PYTHON_BIN found for TorchTitan training." >&2
+  exit 1
+fi
+
+TRAIN_TOML=${TRAIN_TOML:-src/molgen3D/config/pretrain/qwen3_06b_fsq_bigdata_from_base.toml}
+
+_DEFAULT_DESCRIPTION=$("${PYTHON_BIN}" - <<'PY' "$TRAIN_TOML"
 import pathlib, re, sys
 toml_path = pathlib.Path(sys.argv[1])
 text = toml_path.read_text()
@@ -95,7 +175,7 @@ echo "Using description: ${DESCRIPTION}"
 
 if [[ -z "${RUN_NAME:-}" ]]; then
   STAMP=$(date +%y%m%d-%H%M)
-  HASH=$(python3 - <<'PY'
+  HASH=$("${PYTHON_BIN}" - <<'PY'
 import secrets
 print(secrets.token_hex(2), end="")
 PY
@@ -114,9 +194,67 @@ if [[ -n "${SLURM_JOB_ID:-}" ]]; then
 fi
 
 # === Multi-node topology (no srun: head SSHes into workers) ===
-WORKSPACE_DIR=${SLURM_SUBMIT_DIR:-$PWD}
-cd "${WORKSPACE_DIR}"
-export PYTHONPATH="${WORKSPACE_DIR}/src${PYTHONPATH:+:${PYTHONPATH}}"
+echo "Python: ${PYTHON_BIN}"
+echo "PYTHONPATH: ${PYTHONPATH}"
+"${PYTHON_BIN}" - <<'PY'
+import importlib
+import sys
+
+required = [
+    "tyro",
+    "torch",
+    "torchtitan.components",
+    "torchtitan.models.qwen3",
+    "molgen3D.training.pretraining.torchtitan_runner",
+    "molgen3D.training.pretraining.torchtitan_model.qwen3_custom",
+]
+failed = []
+for module_name in required:
+    try:
+        importlib.import_module(module_name)
+    except Exception as exc:
+        failed.append((module_name, exc))
+if failed:
+    print("Training environment import check failed:", file=sys.stderr)
+    for module_name, exc in failed:
+        print(f"  {module_name}: {type(exc).__name__}: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+print("Training environment import check passed.", flush=True)
+PY
+
+if [[ "${PREBUILD_TRAIN_IDX:-1}" == "1" ]]; then
+  echo "Prebuilding train .idx files for ${TRAIN_TOML}"
+  "${PYTHON_BIN}" - <<'PY' "$TRAIN_TOML"
+import pathlib
+import sys
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
+from molgen3D.config.paths import resolve_tag
+from molgen3D.training.pretraining.dataprocessing.utils import (
+    build_line_index,
+    expand_paths,
+)
+
+toml_path = pathlib.Path(sys.argv[1])
+data = tomllib.loads(toml_path.read_text())
+molgen_data = data.get("molgen_data", {}) or {}
+training = data.get("training", {}) or {}
+dataset_path = molgen_data.get("train_path") or training.get("dataset_path") or ""
+if not dataset_path:
+    raise SystemExit("No train path found in molgen_data.train_path or training.dataset_path")
+if ":" in dataset_path:
+    dataset_path = str(resolve_tag(dataset_path))
+paths = expand_paths([dataset_path])
+print(f"Indexing {len(paths)} JSONL files from {dataset_path}", flush=True)
+for idx, path in enumerate(paths, start=1):
+    build_line_index(path)
+    if idx == 1 or idx % 50 == 0 or idx == len(paths):
+        print(f"Indexed {idx}/{len(paths)} files", flush=True)
+PY
+fi
 
 if [[ -n "${SLURM_JOB_NODELIST:-}" ]]; then
   if ! command -v scontrol >/dev/null 2>&1; then
@@ -149,7 +287,7 @@ _autodetect_socket_iface() {
           exit
         }
       }
-    }')
+    }') || true
   if [[ -n "${_route}" ]]; then
     if [[ -z "${NCCL_SOCKET_IFNAME:-}" ]]; then
       export NCCL_SOCKET_IFNAME="${_route}"
@@ -188,7 +326,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-python3 - <<'PY' "$TRAIN_TOML" "$TMP_TOML" "$RUN_NAME" "$DESCRIPTION"
+"${PYTHON_BIN}" - <<'PY' "$TRAIN_TOML" "$TMP_TOML" "$RUN_NAME" "$DESCRIPTION"
 import pathlib
 import sys
 
@@ -242,13 +380,12 @@ if [[ -z "${SLURM_JOB_ID:-}" ]]; then
   fi
 fi
 
-TORCHRUN_BIN=$(command -v torchrun)
-
 # Forward selected comm/fabric env vars to SSH-launched worker nodes.
 # SSH typically does not preserve arbitrary env from the head node.
 FORWARD_ENV_VARS=(
   CUDA_VISIBLE_DEVICES CUDA_DEVICE_ORDER
   TORCH_NCCL_ASYNC_ERROR_HANDLING TORCH_DISTRIBUTED_DEBUG GLOO_SOCKET_IFNAME
+  LD_LIBRARY_PATH
   NCCL_DEBUG NCCL_DEBUG_SUBSYS NCCL_SOCKET_IFNAME NCCL_SOCKET_FAMILY
   NCCL_IB_DISABLE NCCL_IB_HCA NCCL_IB_GID_INDEX NCCL_IB_TC
   NCCL_IB_QPS_PER_CONNECTION NCCL_MAX_NCHANNELS NCCL_COLLNET_ENABLE NCCL_NVLS_ENABLE
@@ -269,7 +406,7 @@ unset _env_name _env_val _escaped_env_val
 # === Fan out to worker nodes via SSH (replacement for srun) ===
 if [[ -n "${WORKER_BOOTSTRAP}" ]]; then
   # Generate a worker bootstrap script that exports the same env, then runs
-  # torchrun with the appropriate node_rank passed as $1.
+  # torch.distributed.run with the appropriate node_rank passed as $1.
   cat > "${WORKER_BOOTSTRAP}" <<EOF
 #!/usr/bin/env bash
 set -e
@@ -280,6 +417,7 @@ export WANDB_PROJECT='${WANDB_PROJECT}'
 export WANDB_GROUP='${WANDB_GROUP}'
 export WANDB_JOB_TYPE='${WANDB_JOB_TYPE}'
 export WANDB_CONFIG='${WANDB_CONFIG}'
+export WANDB_MODE='${WANDB_MODE}'
 export WANDB_RUN_NAME='${RUN_NAME}'
 export PYTHONPATH='${PYTHONPATH}'
 export TORCH_COMPILE='${TORCH_COMPILE}'
@@ -300,7 +438,7 @@ if [[ -z "\${NCCL_SOCKET_IFNAME:-}" ]] || [[ -z "\${GLOO_SOCKET_IFNAME:-}" ]]; t
           exit
         }
       }
-    }')
+    }') || true
   if [[ -n "\${_route_if}" ]]; then
     if [[ -z "\${NCCL_SOCKET_IFNAME:-}" ]]; then
       export NCCL_SOCKET_IFNAME="\${_route_if}"
@@ -314,8 +452,8 @@ if [[ -z "\${NCCL_SOCKET_IFNAME:-}" ]] || [[ -z "\${GLOO_SOCKET_IFNAME:-}" ]]; t
   unset _route_if
 fi
 NODE_RANK=\$1
-echo "[worker rank=\${NODE_RANK} host=\$(hostname)] launching torchrun"
-exec '${TORCHRUN_BIN}' \\
+echo "[worker rank=\${NODE_RANK} host=\$(hostname)] launching torch.distributed.run"
+exec '${PYTHON_BIN}' -m torch.distributed.run \\
   --nproc_per_node=${NGPU_PER_NODE} \\
   --master_addr='${MASTER_ADDR}' \\
   --master_port=${MASTER_PORT} \\
@@ -337,9 +475,9 @@ EOF
   done
 fi
 
-echo "Launching torchrun on host=$(hostname) node_rank=0/${NNODES} master=${MASTER_ADDR}:${MASTER_PORT} nproc_per_node=${NGPU_PER_NODE}"
+echo "Launching torch.distributed.run on host=$(hostname) node_rank=0/${NNODES} master=${MASTER_ADDR}:${MASTER_PORT} nproc_per_node=${NGPU_PER_NODE}"
 
-"${CPU_PIN_CMD[@]}" torchrun \
+"${CPU_PIN_CMD[@]}" "${PYTHON_BIN}" -m torch.distributed.run \
   --nproc_per_node="${NGPU_PER_NODE}" \
   --master_addr="${MASTER_ADDR}" \
   --master_port="${MASTER_PORT}" \

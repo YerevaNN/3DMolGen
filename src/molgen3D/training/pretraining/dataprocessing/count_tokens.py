@@ -19,7 +19,6 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from transformers import AutoTokenizer
 
 from molgen3D.config.paths import get_data_path, get_tokenizer_path
-from molgen3D.training.pretraining.dataprocessing.dataloader import build_dataloader
 
 try:  # optional faster JSON parser
     import orjson as _fast_json
@@ -27,6 +26,12 @@ except Exception:  # pragma: no cover
     _fast_json = None
 
 SUMMARY_PATH = Path(__file__).resolve().parent / "qwen_data_summary.txt"
+
+
+def _get_build_dataloader():
+    from molgen3D.training.pretraining.dataprocessing.dataloader import build_dataloader
+
+    return build_dataloader
 
 
 def list_jsonl_files(directory: str) -> List[Path]:
@@ -265,6 +270,43 @@ def _scan_isomer_stats(
     return raw_units, raw_confs, unique_smiles, samples
 
 
+def _peek_jsonl_format(files: List[Path]) -> str:
+    for file_path in files:
+        try:
+            with file_path.open("rb") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = _json_loads(line)
+                    except Exception:
+                        continue
+                    if "canonical_smiles" in obj and "embedded_smiles" in obj:
+                        return "flat"
+                    if "isomers" in obj:
+                        return "grouped"
+        except OSError:
+            continue
+    return "unknown"
+
+
+def _sample_isomer_units_prefix(
+    files: List[Path], sample_units: int
+) -> Tuple[Set[str], List[Tuple[str, List[str]]]]:
+    unique_smiles: Set[str] = set()
+    samples: List[Tuple[str, List[str]]] = []
+    if sample_units <= 0:
+        return unique_smiles, samples
+    for file_path in files:
+        for iso_smiles, confs in _iter_isomer_units(file_path):
+            unique_smiles.add(iso_smiles)
+            samples.append((iso_smiles, confs))
+            if len(samples) >= sample_units:
+                return unique_smiles, samples
+    return unique_smiles, samples
+
+
 def _sample_chunk_stats(
     sampled_units: List[Tuple[str, List[str]]],
     tokenizer,
@@ -290,6 +332,157 @@ def _sample_chunk_stats(
     avg_confs_emitted = confs_emitted / units
     avg_confs_dropped = confs_dropped / units
     return chunk_lengths, avg_confs_emitted, avg_confs_dropped
+
+
+def _get_fsq_token_ids(tokenizer) -> Set[int]:
+    vocab = tokenizer.get_vocab()
+    fsq_ids: Set[int] = set()
+    for token, token_id in vocab.items():
+        if token.startswith("<") and token.endswith(">") and token[1:-1].isdigit():
+            fsq_ids.add(int(token_id))
+    return fsq_ids
+
+
+def _sample_pair_unit_lengths_prefix(
+    files: List[Path],
+    tokenizer,
+    ctx_len: int,
+    sample_units: int,
+    min_emb_len: int = 0,
+) -> Tuple[List[int], int, int, int, int, int]:
+    lengths: List[int] = []
+    parsed_lines = 0
+    valid_units = 0
+    smiles_token_total = 0
+    conformer_token_total = 0
+    fsq_token_total = 0
+    if sample_units <= 0:
+        return (
+            lengths,
+            parsed_lines,
+            valid_units,
+            smiles_token_total,
+            conformer_token_total,
+            fsq_token_total,
+        )
+    max_unit_tokens = max(0, ctx_len - 1)
+    fsq_token_ids = _get_fsq_token_ids(tokenizer)
+    for file_path in files:
+        try:
+            with file_path.open("rb") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parsed_lines += 1
+                    try:
+                        obj = _json_loads(line)
+                    except Exception:
+                        continue
+                    canonical = (obj.get("canonical_smiles") or "").strip()
+                    embedded = (obj.get("embedded_smiles") or "").strip()
+                    if not canonical or not embedded or len(embedded) < min_emb_len:
+                        continue
+                    unit = (
+                        f"{_SMILES_OPEN}{canonical}{_SMILES_CLOSE}"
+                        f"{_CONF_OPEN}{embedded}{_CONF_CLOSE}"
+                    )
+                    tokens = tokenizer.encode(unit, add_special_tokens=False)
+                    if not tokens:
+                        continue
+                    smiles_ids = tokenizer.encode(canonical, add_special_tokens=False)
+                    conformer_ids = tokenizer.encode(embedded, add_special_tokens=False)
+                    valid_units += 1
+                    smiles_token_total += len(smiles_ids)
+                    conformer_token_total += len(conformer_ids)
+                    fsq_token_total += sum(1 for token_id in conformer_ids if token_id in fsq_token_ids)
+                    lengths.append(min(len(tokens), max_unit_tokens) + 1)
+                    if len(lengths) >= sample_units:
+                        return (
+                            lengths,
+                            parsed_lines,
+                            valid_units,
+                            smiles_token_total,
+                            conformer_token_total,
+                            fsq_token_total,
+                        )
+        except OSError:
+            continue
+    return (
+        lengths,
+        parsed_lines,
+        valid_units,
+        smiles_token_total,
+        conformer_token_total,
+        fsq_token_total,
+    )
+
+
+def _simulate_pairs_from_lengths(
+    unit_total_lengths: List[int],
+    ctx_len: int,
+    target_units: int,
+    lookahead_limit: int = 100,
+) -> Tuple[int, int, int]:
+    if not unit_total_lengths or target_units <= 0:
+        return 0, 0, 0
+
+    pending: List[int] = []
+    generated = 0
+    consumed = 0
+    sequences = 0
+    pad_total = 0
+    used_len = 0
+    sample_idx = 0
+    sample_count = len(unit_total_lengths)
+    lookahead_limit = max(1, int(lookahead_limit))
+
+    def refill() -> None:
+        nonlocal generated, sample_idx
+        while len(pending) < lookahead_limit + 1 and generated < target_units:
+            pending.append(unit_total_lengths[sample_idx])
+            sample_idx = (sample_idx + 1) % sample_count
+            generated += 1
+
+    while True:
+        refill()
+        if not pending:
+            break
+
+        available = ctx_len - used_len
+        limit = min(lookahead_limit, len(pending))
+        best_idx: Optional[int] = None
+        best_remaining: Optional[int] = None
+        for idx in range(limit):
+            length = pending[idx]
+            if length > available:
+                continue
+            remaining = available - length
+            if best_remaining is None or remaining < best_remaining:
+                best_idx = idx
+                best_remaining = remaining
+                if remaining == 0:
+                    break
+
+        if best_idx is not None:
+            used_len += pending.pop(best_idx)
+            consumed += 1
+            continue
+
+        if used_len > 0:
+            pad_total += ctx_len - used_len
+            sequences += 1
+            used_len = 0
+            continue
+
+        # Should only happen for untruncated overlong units; skip defensively.
+        pending.pop(0)
+
+    if used_len > 0:
+        pad_total += ctx_len - used_len
+        sequences += 1
+
+    return sequences, pad_total, consumed
 
 
 def _simulate_packing_from_chunks(
@@ -419,6 +612,13 @@ def _estimate_units_per_line(
                         obj = _json_loads(line)
                     except Exception:
                         continue
+                    if "canonical_smiles" in obj and "embedded_smiles" in obj:
+                        if obj.get("canonical_smiles") and obj.get("embedded_smiles"):
+                            units += 1
+                            lines += 1
+                        if lines >= max_lines:
+                            break
+                        continue
                     isomers = obj.get("isomers") or {}
                     if not isinstance(isomers, dict):
                         continue
@@ -449,6 +649,7 @@ def _sample_isomer_dataloader(
     seed: int,
     max_samples: int,
 ) -> Dict[str, float]:
+    build_dataloader = _get_build_dataloader()
     loader = build_dataloader(
         train_path=[str(p) for p in files],
         tokenizer_path=tokenizer_path,
@@ -666,6 +867,7 @@ def sample_dataloader(
     seed: int,
     serialization_mode: str,
 ) -> Optional[Dict[str, float]]:
+    build_dataloader = _get_build_dataloader()
     loader = build_dataloader(
         train_path=str(file_path),
         tokenizer_path=tokenizer_path,
@@ -983,6 +1185,140 @@ def _summarize_pairs_mode(
     }
 
 
+def _summarize_pairs_fast_estimate(
+    *,
+    files: List[Path],
+    tokenizer_path: str,
+    tokenizer,
+    tokenizer_info: Dict[str, object],
+    seq_len: int,
+    batch_size: int,
+    sample_units: int,
+    total_lines: int,
+    total_bytes: int,
+    lookahead_limit: int = 100,
+) -> Dict[str, Any]:
+    (
+        unit_lengths,
+        parsed_lines,
+        valid_sample_units,
+        sampled_smiles_tokens,
+        sampled_conformer_tokens,
+        sampled_fsq_tokens,
+    ) = _sample_pair_unit_lengths_prefix(
+        files,
+        tokenizer,
+        ctx_len=seq_len,
+        sample_units=sample_units,
+        min_emb_len=0,
+    )
+    if not unit_lengths:
+        raise RuntimeError("No pair units sampled; increase --sample-units.")
+
+    valid_ratio = (
+        float(valid_sample_units) / float(parsed_lines) if parsed_lines else 1.0
+    )
+    estimated_valid_lines = int(round(total_lines * valid_ratio))
+    target_units = min(
+        max(estimated_valid_lines, len(unit_lengths) * 20),
+        1_000_000,
+    )
+    sim_sequences, sim_pad, sim_units = _simulate_pairs_from_lengths(
+        unit_lengths,
+        ctx_len=seq_len,
+        target_units=target_units,
+        lookahead_limit=lookahead_limit,
+    )
+    if sim_units <= 0:
+        raise RuntimeError("Pair packing simulation produced no units.")
+
+    sequences_per_unit = sim_sequences / sim_units
+    pad_per_unit = sim_pad / sim_units
+    estimated_samples = int(math.ceil(estimated_valid_lines * sequences_per_unit))
+    estimated_batches = math.ceil(estimated_samples / batch_size) if batch_size else 0
+    estimated_pad = int(round(estimated_valid_lines * pad_per_unit))
+    estimated_tokens = estimated_samples * seq_len
+    estimated_effective = estimated_tokens - estimated_pad
+    avg_smiles_tokens_per_unit = (
+        sampled_smiles_tokens / valid_sample_units if valid_sample_units else 0.0
+    )
+    avg_conformer_tokens_per_unit = (
+        sampled_conformer_tokens / valid_sample_units if valid_sample_units else 0.0
+    )
+    avg_fsq_tokens_per_unit = (
+        sampled_fsq_tokens / valid_sample_units if valid_sample_units else 0.0
+    )
+    estimated_smiles_tokens = int(round(estimated_valid_lines * avg_smiles_tokens_per_unit))
+    estimated_conformer_tokens = int(round(estimated_valid_lines * avg_conformer_tokens_per_unit))
+    estimated_fsq_tokens = int(round(estimated_valid_lines * avg_fsq_tokens_per_unit))
+    avg_items_per_sample = (
+        estimated_valid_lines / estimated_samples if estimated_samples else 0.0
+    )
+    avg_pad_per_sample = (
+        estimated_pad / estimated_samples if estimated_samples else 0.0
+    )
+    avg_smiles_tokens_per_sample = (
+        estimated_smiles_tokens / estimated_samples if estimated_samples else 0.0
+    )
+    avg_conformer_tokens_per_sample = (
+        estimated_conformer_tokens / estimated_samples if estimated_samples else 0.0
+    )
+    avg_fsq_tokens_per_sample = (
+        estimated_fsq_tokens / estimated_samples if estimated_samples else 0.0
+    )
+
+    return {
+        "batch_size": batch_size,
+        "seq_len": seq_len,
+        "sampled_files": len(files),
+        "lines_target_total": parsed_lines,
+        "lines_consumed_total": valid_sample_units,
+        "sample_bytes_total": total_bytes,
+        "batches_sampled": sim_sequences,
+        "tokens_produced_sampled": sim_sequences * seq_len,
+        "effective_tokens_sampled": (sim_sequences * seq_len) - sim_pad,
+        "avg_items_per_sample": float(avg_items_per_sample),
+        "avg_pad_per_sample": float(avg_pad_per_sample),
+        "avg_smiles_tokens_per_sample": float(avg_smiles_tokens_per_sample),
+        "avg_conformer_tokens_per_sample": float(avg_conformer_tokens_per_sample),
+        "avg_fsq_tokens_per_sample": float(avg_fsq_tokens_per_sample),
+        "avg_smiles_tags_per_sample": float(avg_items_per_sample),
+        "avg_conformer_tags_per_sample": float(avg_items_per_sample),
+        "valid_ratio": float(valid_ratio),
+        "estimated_valid_lines": estimated_valid_lines,
+        "estimated_samples": estimated_samples,
+        "estimated_batches": estimated_batches,
+        "estimated_tokens": estimated_tokens,
+        "estimated_pad": estimated_pad,
+        "estimated_effective": estimated_effective,
+        "estimated_smiles_tokens": estimated_smiles_tokens,
+        "estimated_conformer_tokens": estimated_conformer_tokens,
+        "estimated_fsq_tokens": estimated_fsq_tokens,
+        "estimated_smiles_tags": estimated_valid_lines,
+        "estimated_conformer_tags": estimated_valid_lines,
+        "unique_smiles_tags": 0,
+        "total_smiles_tags": estimated_valid_lines,
+        "total_conformer_tags": estimated_valid_lines,
+        "total_fsq_tokens": estimated_fsq_tokens,
+        "total_units": estimated_valid_lines,
+        "total_samples": estimated_samples,
+        "total_tokens": estimated_tokens,
+        "verification": None,
+        "tokenizer_path": tokenizer_path,
+        "tokenizer_info": {
+            **dict(tokenizer_info),
+            "fast_estimate": True,
+            "jsonl_format": "flat",
+            "sample_units": len(unit_lengths),
+            "sampled_smiles_tokens": sampled_smiles_tokens,
+            "sampled_conformer_tokens": sampled_conformer_tokens,
+            "sampled_fsq_tokens": sampled_fsq_tokens,
+            "simulation_units": sim_units,
+            "lookahead_limit": lookahead_limit,
+        },
+    }
+
+
 def _summarize_isomer_units_sample_only(
     *,
     files: List[Path],
@@ -1097,9 +1433,16 @@ def _summarize_isomer_units_fast_estimate(
     total_lines: int,
     total_bytes: int,
 ) -> Dict[str, Any]:
-    raw_units, raw_confs, unique_smiles, sampled_units = _scan_isomer_stats(
-        files, sample_units, seed
-    )
+    jsonl_format = _peek_jsonl_format(files)
+    if jsonl_format == "flat":
+        raw_units = total_lines
+        raw_confs = total_lines
+        unique_smiles, sampled_units = _sample_isomer_units_prefix(files, sample_units)
+    else:
+        raw_units, raw_confs, unique_smiles, sampled_units = _scan_isomer_stats(
+            files, sample_units, seed
+        )
+
     chunk_lengths, avg_confs_emitted, avg_confs_dropped = _sample_chunk_stats(
         sampled_units, tokenizer, seq_len
     )
@@ -1108,7 +1451,7 @@ def _summarize_isomer_units_fast_estimate(
 
     avg_chunks_per_unit = len(chunk_lengths) / max(len(sampled_units), 1)
     est_chunks_total = int(round(raw_units * avg_chunks_per_unit))
-    target_chunks = max(est_chunks_total, len(chunk_lengths) * 20)
+    target_chunks = min(max(est_chunks_total, len(chunk_lengths) * 20), 1_000_000)
     (
         sim_sequences,
         sim_pad_end,
@@ -1133,6 +1476,10 @@ def _summarize_isomer_units_fast_estimate(
     confs_dropped = int(round(raw_units * avg_confs_dropped))
     confs_emitted = max(min(confs_emitted, raw_confs), 0)
     confs_dropped = max(raw_confs - confs_emitted, 0)
+    if jsonl_format == "flat" and sampled_units:
+        unique_smiles_count = int(round(raw_units * len(unique_smiles) / len(sampled_units)))
+    else:
+        unique_smiles_count = len(unique_smiles)
 
     return {
         "batch_size": batch_size,
@@ -1163,7 +1510,7 @@ def _summarize_isomer_units_fast_estimate(
         "estimated_conformer_tokens": 0,
         "estimated_smiles_tags": raw_units,
         "estimated_conformer_tags": confs_emitted,
-        "unique_smiles_tags": len(unique_smiles),
+        "unique_smiles_tags": unique_smiles_count,
         "total_smiles_tags": raw_units,
         "total_conformer_tags": raw_confs,
         "total_units": raw_units,
@@ -1182,6 +1529,8 @@ def _summarize_isomer_units_fast_estimate(
             "fast_estimate": True,
             "sample_units": len(sampled_units),
             "avg_chunks_per_unit": avg_chunks_per_unit,
+            "jsonl_format": jsonl_format,
+            "simulation_chunks": sim_chunks,
         },
     }
 
@@ -1331,6 +1680,25 @@ def summarize_dataset(
             )
             continue
 
+        if fast_estimate:
+            if _peek_jsonl_format(files) != "flat":
+                raise RuntimeError(
+                    "Fast pairs estimate currently supports flat JSONL "
+                    "(canonical_smiles + embedded_smiles) datasets only."
+                )
+            dataset_summary["tokenizers"][alias] = _summarize_pairs_fast_estimate(
+                files=files,
+                tokenizer_path=tokenizer_path,
+                tokenizer=tokenizer,
+                tokenizer_info=tokenizer_info,
+                seq_len=seq_len,
+                batch_size=batch_size,
+                sample_units=sample_units,
+                total_lines=total_lines,
+                total_bytes=total_bytes,
+            )
+            continue
+
         dataset_summary["tokenizers"][alias] = _summarize_pairs_mode(
             files=files,
             file_stats=file_stats,
@@ -1359,6 +1727,7 @@ def _debug_print_samples(
         return
 
     print(f"\nPRINTING {num_samples} DECODED SAMPLES ({serialization_mode} mode):")
+    build_dataloader = _get_build_dataloader()
     loader = build_dataloader(
         train_path=[str(p) for p in files],
         tokenizer_path=tokenizer_path,
@@ -1438,6 +1807,7 @@ def print_train_report(summary: Optional[Dict[str, Any]]) -> None:
             "samples≈{estimated_samples:,}, tokens≈{estimated_tokens:,}, "
             "pad≈{estimated_pad:,}, effective≈{estimated_effective:,}, "
             "smiles≈{estimated_smiles_tokens:,}, conformer≈{estimated_conformer_tokens:,}, "
+            "fsq≈{estimated_fsq_tokens:,}, "
             "smiles_tags≈{estimated_smiles_tags:,}, conformer_tags≈{estimated_conformer_tags:,}, "
             "unique_smiles_tags≈{unique_smiles_tags:,}".format(
                 estimated_valid_lines=stats.get("estimated_valid_lines", 0),
@@ -1447,6 +1817,7 @@ def print_train_report(summary: Optional[Dict[str, Any]]) -> None:
                 estimated_effective=stats.get("estimated_effective", 0),
                 estimated_smiles_tokens=stats.get("estimated_smiles_tokens", 0),
                 estimated_conformer_tokens=stats.get("estimated_conformer_tokens", 0),
+                estimated_fsq_tokens=stats.get("estimated_fsq_tokens", 0),
                 estimated_smiles_tags=stats.get("estimated_smiles_tags", 0),
                 estimated_conformer_tags=stats.get("estimated_conformer_tags", 0),
                 unique_smiles_tags=stats.get("unique_smiles_tags", 0),
@@ -1455,12 +1826,14 @@ def print_train_report(summary: Optional[Dict[str, Any]]) -> None:
         print(
             "    totals: samples={total_samples:,}, tokens={total_tokens:,}, "
             "units={total_units:,}, smiles_tags={total_smiles_tags:,}, "
-            "conformer_tags={total_conformer_tags:,}, unique_smiles_tags={unique_smiles_tags:,}".format(
+            "conformer_tags={total_conformer_tags:,}, fsq_tokens={total_fsq_tokens:,}, "
+            "unique_smiles_tags={unique_smiles_tags:,}".format(
                 total_samples=stats.get("total_samples", 0),
                 total_tokens=stats.get("total_tokens", 0),
                 total_units=stats.get("total_units", 0),
                 total_smiles_tags=stats.get("total_smiles_tags", 0),
                 total_conformer_tags=stats.get("total_conformer_tags", 0),
+                total_fsq_tokens=stats.get("total_fsq_tokens", 0),
                 unique_smiles_tags=stats.get("unique_smiles_tags", 0),
             )
         )
@@ -1504,6 +1877,7 @@ def exhaust_validation_dataset(
         tokenizer_path, tokenizer = tokenizer_map[alias]
         # For PyTorch DataLoader compatibility: prefetch_factor must be an int when workers > 0.
         prefetch_factor = None if num_workers == 0 else 2
+        build_dataloader = _get_build_dataloader()
         loader = build_dataloader(
             train_path=directory,
             tokenizer_path=tokenizer_path,
@@ -1623,7 +1997,10 @@ def print_overall_summary(
                 f"  {alias}: units≈{stats['estimated_valid_lines']:,}, "
                 f"samples≈{stats['estimated_samples']:,}, "
                 f"tokens≈{stats['estimated_tokens']:,}, pad≈{stats['estimated_pad']:,}, "
-                f"effective≈{stats['estimated_effective']:,}"
+                f"effective≈{stats['estimated_effective']:,}, "
+                f"smiles≈{stats.get('estimated_smiles_tokens', 0):,}, "
+                f"conformer≈{stats.get('estimated_conformer_tokens', 0):,}, "
+                f"fsq≈{stats.get('estimated_fsq_tokens', 0):,}"
             )
 
     if validation_summary:
@@ -1692,6 +2069,7 @@ def _write_summary_file(
                 f"effective≈{stats['estimated_effective']:,}, "
                 f"smiles≈{stats.get('estimated_smiles_tokens', 0):,}, "
                 f"conformer≈{stats.get('estimated_conformer_tokens', 0):,}, "
+                f"fsq≈{stats.get('estimated_fsq_tokens', 0):,}, "
                 f"smiles_tags≈{stats.get('estimated_smiles_tags', 0):,}, "
                 f"conformer_tags≈{stats.get('estimated_conformer_tags', 0):,}, "
                 f"unique_smiles_tags≈{stats.get('unique_smiles_tags', 0):,}"

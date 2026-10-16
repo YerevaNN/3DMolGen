@@ -1,0 +1,95 @@
+[job]
+description = "qwen3_17b_fsq_bigdata_sft_6e"
+dump_folder = "pretrain_runs"
+print_config = true
+custom_config_module = "molgen3D.training.pretraining.config.custom_job_config"
+
+[molgen_run]
+init_mode = "hf_pretrain" # scratch | hf_pretrain | resume
+tokenizer_tag = "tokenizers:qwen3_1.7b_fsq_4096"
+base_model_tag = "/mnt/weka/fgeikyan/checkpoints/qwen3_06b/260617-1508-4190-qwen3_17b_fsq_bigdata_from_base_1e/step-47023-hf"
+
+[model]
+name = "molgen_qwen3"
+flavor = "1.7B"
+hf_assets_path = "tokenizers:qwen3_1.7b_fsq_4096"
+
+[experimental]
+custom_import = "molgen3D.training.pretraining.torchtitan_model.qwen3_custom"
+
+[training]
+gc_freq = 1000
+seq_len = 4096
+local_batch_size = 6
+global_batch_size = 48
+steps = 28320
+max_norm = 1.0
+dtype = "bfloat16"
+dataset = "molgen_jsonl"
+dataset_path = "data:fsq_conformers_train"
+
+[validation]
+enable = false
+dataset_path = "data:fsq_conformers_valid"
+local_batch_size = 2
+seq_len = 4096
+freq = 500
+steps = 200
+numerical_validation = false
+num_val_molecules = 10
+numerical_validation_freq = 10000
+
+[molgen_data]
+train_path_key = "fsq_conformers_train"
+tokenizer_key = "qwen3_1.7b_fsq_4096"
+min_emb_len = 0
+shuffle_lines = true
+infinite = true
+seed = 2025
+num_workers = 4
+pin_memory = true
+drop_last = true
+persistent_workers = true
+prefetch_factor = 2
+lookahead_limit = 100
+shuffle_buffer_size = 128
+serialization_mode = "pairs"
+
+[optimizer]
+name = "AdamW"
+lr = 8e-4
+beta1 = 0.9
+beta2 = 0.95
+eps = 1e-8
+weight_decay = 0.1
+
+[wsds_scheduler]
+enable = true
+warmup_steps = 500
+checkpoints = [4720, 9440, 14160, 18880, 23600, 28320]
+lr_min = 0
+decay_frac = 0.1
+
+[checkpoint]
+enable = true
+interval = 4720
+keep_latest_k = 6
+folder = "checkpoint"
+create_seed_checkpoint = false
+initial_load_model_only = true
+initial_load_in_hf = true
+initial_load_path = "/mnt/weka/fgeikyan/checkpoints/qwen3_06b/260617-1508-4190-qwen3_17b_fsq_bigdata_from_base_1e/step-47023-hf"
+last_save_in_hf = true
+async_mode = "disabled"
+
+[metrics]
+log_freq = 20
+enable_wandb = true
+save_for_all_ranks = false
+save_tb_folder = "tb"
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+tensor_parallel_degree = 1
+fsdp_reshard_after_forward = "default"
