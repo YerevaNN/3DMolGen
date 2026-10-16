@@ -1,6 +1,8 @@
 # Current training handoff
 
-Snapshot date: 2026-10-16. Repository: `YerevaNN/3DMolGen`, branch `big_data_training_with_fsq`. This preserves the current all-SMILES-token FSQ implementation before the atom-plus-register migration. **The new CoordToken checkpoint is not yet supported by this snapshot.** See [the migration map](FSQ_TOKENIZER_MIGRATION.md).
+Combined checkout: [start here](../COLLEAGUE_HANDOFF.md). The updated tokenizer source is bundled under `coordtoken/`; the adapter integration remains to be done.
+
+Baseline snapshot date: 2026-10-16. Repository: `YerevaNN/3DMolGen`, branch `big_data_training_with_fsq`. This preserves the current all-SMILES-token FSQ implementation before the atom-plus-register migration. **The new CoordToken checkpoint is not yet supported by this snapshot.** See [the migration map](FSQ_TOKENIZER_MIGRATION.md).
 
 ## What is included
 

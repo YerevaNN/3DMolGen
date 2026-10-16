@@ -2,6 +2,8 @@
 
 Inspection date: 2026-10-16. This is a proposed implementation plan; the code snapshot still uses the legacy all-token FSQ model. Paths below are relative to the repository root. The new model emits **one 12-bit code per atom plus one transmitted molecular register code**, with no codes for bonds, rings, branches, dots, or padding.
 
+The exact referenced CoordToken source is included in this branch under `coordtoken/`, with the model and quantizer at `coordtoken/research/mixed_epoch2_20261014_v3/`. See [the combined handoff](../COLLEAGUE_HANDOFF.md).
+
 ## Representation contract
 
 Port the exact tested model and quantizer from the selected checkpoint's frozen CoordToken source. New checkpoints contain `model`, `config`, `vocab`, and `manifest`; they are not the old Lightning `state_dict`/`hyper_parameters` format. Require strict state loading, a supported configuration, the exact vocabulary, and an explicit checkpoint SHA. The current `strict=False` loader can accept an incompatible checkpoint without providing a valid model.

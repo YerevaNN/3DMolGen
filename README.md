@@ -1,3 +1,5 @@
+**Updated tokenizer handoff:** see [COLLEAGUE_HANDOFF.md](COLLEAGUE_HANDOFF.md) for the bundled CoordToken source, training instructions and integration map.
+
 # 3DMolGen
 
 3DMolGen is a Python package for 3D molecular conformer generation using language models. It provides a complete training and inference pipeline for autoregressive models that generate molecular conformations by predicting 3D coordinates alongside SMILES topology.

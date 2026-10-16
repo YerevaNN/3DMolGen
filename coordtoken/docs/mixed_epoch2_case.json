@@ -1,0 +1,14 @@
+{
+  "kind": "mixed_full",
+  "name": "mixed_epoch2_atom12_reg1",
+  "data": "/mnt/weka/fgeikyan/CoordToken/logs/full_release_20261008/packed",
+  "indices": "/mnt/weka/fgeikyan/CoordToken/logs/mixed_epoch2_20261014/indices",
+  "width": 1024,
+  "layers": 8,
+  "lr": 5e-05,
+  "global_batch": 512,
+  "dropout": 0.05,
+  "bits": 12,
+  "registers": 1,
+  "parent_run": "/mnt/weka/fgeikyan/CoordToken/logs/final_and_nabla_20261012/runs/mixed_atom12_reg1_b512_lr5e-5_drop005"
+}

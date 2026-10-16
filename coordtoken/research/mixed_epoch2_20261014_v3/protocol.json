@@ -1,0 +1,20 @@
+{
+  "reference_global_batch": 1024,
+  "rows_per_epoch": 189792028,
+  "additional_epochs": 1,
+  "world": 8,
+  "global_batch": 512,
+  "per_gpu_batch": 64,
+  "shuffle_seed": 124,
+  "bucket_global_batch": 1024,
+  "bucket_pool_batches": 64,
+  "peak_lr": 5e-05,
+  "restart_ramp_examples": 0,
+  "decay_start_fraction": 0.8,
+  "schedule": "Resume final epoch1 model, AdamW moments and rank RNG; immediately restore peakLR5e-5, hold through80% of epoch2, cosine-decay to exactly zero over final20%. WSD-S-style continuation; cosine-to-zero differs from the cited paper inverse-proportional decay to10% peak.",
+  "test_used_for_decision": false,
+  "evaluation": "Same fixed4952-row development cohort at25%,50%,75%,90%,100%; preserve both epoch1 and epoch2 checkpoints. No automatic CASF training or test evaluation.",
+  "decay_fraction_of_epoch2": 0.2,
+  "decay_fraction_of_total_two_epoch_budget": 0.1,
+  "schedule_reference": "https://arxiv.org/html/2410.05192v3#S5"
+}

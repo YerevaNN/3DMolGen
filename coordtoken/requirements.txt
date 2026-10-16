@@ -1,0 +1,8 @@
+torch
+einops
+numpy
+rdkit
+lightning
+tqdm
+aim
+matplotlib

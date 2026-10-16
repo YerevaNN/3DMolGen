@@ -1,0 +1,22 @@
+{
+  "files": {
+    "check_batches.py": "bcc57c04fefab0cc90cfda902da0b8404a07fc0bd7feaf6903995af769b2b6ac",
+    "data.py": "87b4800b1c7406527113ba7047c55938912fed4608d3b3fd852fb6bf05444ff9",
+    "health.py": "f834b70bd5ae0b4317b4d18ab7e59794629f30c608603ae5773dd3c6ec2f4fa5",
+    "integrity.py": "3240ddf55e74c6c21a2205be095eea0aff7e8f149ff3e81098089ae038fc7bb2",
+    "launch.py": "b69c200de5f0a0186956e9fd4011d22c1cbf97088f33a082ad6db87e18956d24",
+    "metrics.py": "821ae8e427a3657e298ee12aeebb1b6dcf2f0794729b47aaca09edaf58f7318a",
+    "model.py": "f9188bc872e588d561928c1e1e2e184c636cea51317d0c560be2ff78072980a1",
+    "nabla_data.py": "08bc8376d7fb5a2bd86af342eb13b5da3f9ca58f95442b3a71fa3d6caefafabd",
+    "prepare.py": "427d7c6c97ea8ac5d113ca6a219aa1a1418bd30e0593f91bacf09704cab5e121",
+    "prepare.sbatch": "53dc3652959fdd7e8ddb1dd749c9652989cbf92609f078ff32cf03e3a7a6e5b8",
+    "prepare_epoch.py": "430b06c2c0584304e38d982adacf3e4a0965e73cdef5717d468edd7fde01725a",
+    "protocol.json": "6a01ead5a302dfa798a065e72eb6f4c392d38237f5588623da1eedc3aaeb5eb3",
+    "quantizer.py": "b520f0468c752e8de91c387ece1c6d964833f6c659a6fb12aa1793e3bd10a979",
+    "report.py": "9e5bc85d81e433c9466e19a6fda1b4a06a70fc1b0f65591f0e7eb67cb3ef0a20",
+    "schedule.py": "e886cae0cb041ea21a0474d9937cfa47b507cdb3a3e3e5dd91de29f527f1d0f1",
+    "train.sbatch": "8e12aa07f510efc050d6be4d69ee117f0c88173fbced42081341606489d7ea9e",
+    "train_run.py": "495224777d04fc1c14f80776e3ae210a2bed33075147fbac6497ab899813d595"
+  },
+  "case_sha256": "9f36a32ee7a40b1e2e524ad5e921065b211e4a4a465279a1debe8b03f0d5c9fa"
+}
