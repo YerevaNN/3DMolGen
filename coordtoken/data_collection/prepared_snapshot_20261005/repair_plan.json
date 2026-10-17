@@ -1,0 +1,155 @@
+{
+  "files": [
+    {
+      "path": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_b/pubchem3d.csv",
+      "relative_path": "grp_b/pubchem3d.csv",
+      "sha256": "e3c2dd8d575e2d5009a85e2b4e7c070c99bc2eaf5d605a4baaa3dc8ce2900e10",
+      "rows": 94750258,
+      "removals": [
+        {
+          "name": "141568402_4",
+          "byte_offset": 9500889512,
+          "row_sha256": "dbec0c6eebec742ee035a66cb47c2ad8f89c441b4936661178a41c03fb1ce4f5",
+          "reason": "sanitized_graph_parse_failure"
+        },
+        {
+          "name": "141568402_1",
+          "byte_offset": 18521516663,
+          "row_sha256": "07828913efc111e9878b54a5908d921db40a993a8f00f24a5eca9c68f2c37728",
+          "reason": "sanitized_graph_parse_failure"
+        },
+        {
+          "name": "12157944_0",
+          "byte_offset": 26835891036,
+          "row_sha256": "a439bfe4ec1b61a0d939ccee83855017612c51dde15758054093c7d6d2149f15",
+          "reason": "sanitized_graph_parse_failure"
+        },
+        {
+          "name": "141568402_7",
+          "byte_offset": 28435175719,
+          "row_sha256": "ba307e4f076355269bc1119a43210fdc9971362fdbea2a510f38e260ec4d97f9",
+          "reason": "sanitized_graph_parse_failure"
+        },
+        {
+          "name": "141568402_9",
+          "byte_offset": 29892420328,
+          "row_sha256": "a5df75046e9a7bdce58679384b0793627107ab90d2b282d4d34f82a5e9b29782",
+          "reason": "sanitized_graph_parse_failure"
+        },
+        {
+          "name": "141568402_2",
+          "byte_offset": 51492879669,
+          "row_sha256": "ba71bebfa9f6334baf136ee415f524cd6fa4f1be79238b50a5e250aba957de24",
+          "reason": "sanitized_graph_parse_failure"
+        },
+        {
+          "name": "141568402_8",
+          "byte_offset": 57247309162,
+          "row_sha256": "72a9d9dc5115f33c6f8d281d0f883a9f53f49a7cd787420b6d84f1b1eb6ffb2a",
+          "reason": "sanitized_graph_parse_failure"
+        },
+        {
+          "name": "141568402_6",
+          "byte_offset": 58422040030,
+          "row_sha256": "a5f9280cf66ebf93a035a3fb1bbf8d510440d3b29c3381c0237a7a57f399294e",
+          "reason": "sanitized_graph_parse_failure"
+        },
+        {
+          "name": "141568402_5",
+          "byte_offset": 59797949339,
+          "row_sha256": "61fffcd913c94504e311e0a2ba7c5fbf84c15304a96ae678e87a23868e56f91c",
+          "reason": "sanitized_graph_parse_failure"
+        },
+        {
+          "name": "141568402_0",
+          "byte_offset": 60698945316,
+          "row_sha256": "66ac5b4e68f9b1aa5273d1e207efa42de1e514041b7adf9c9f72b6755e9757fa",
+          "reason": "sanitized_graph_parse_failure"
+        },
+        {
+          "name": "141568402_3",
+          "byte_offset": 60874805431,
+          "row_sha256": "f12bb7d46dd015e5f3d57b5f640f981719a1bd9d43f0b0ff64318239baf57966",
+          "reason": "sanitized_graph_parse_failure"
+        }
+      ],
+      "original_preserved_at": "/mnt/weka/fgeikyan/3D_big_data/grp_b/pubchem3d.csv"
+    },
+    {
+      "path": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_b/zinc.csv",
+      "relative_path": "grp_b/zinc.csv",
+      "sha256": "e47902c677e4d9ec106f4858000a60b970fe770843a86c882e4a9aa559cd4662",
+      "rows": 75152562,
+      "removals": [
+        {
+          "name": "ZINC000068568373",
+          "byte_offset": 9122729567,
+          "row_sha256": "1bada989d4cd96d92992d509f790fc579c2883d8f46a9ca2aeaa8b808a201902",
+          "reason": "sanitized_graph_parse_failure"
+        },
+        {
+          "name": "ZINC000573456341",
+          "byte_offset": 41869319949,
+          "row_sha256": "1337b5ec9034b28a56c172d889112379c25d358651e3ae9187112ba5a926e11e",
+          "reason": "standard_inchikey_unavailable"
+        }
+      ],
+      "original_preserved_at": "/mnt/weka/fgeikyan/3D_big_data/grp_b/zinc.csv"
+    },
+    {
+      "path": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/backup_un/chembl3d.csv",
+      "relative_path": "grp_a/train/backup_un/chembl3d.csv",
+      "sha256": "76280f17c8f568bc15338a2969a4112a9e72305fc193b42277582750fce85878",
+      "rows": 1442219,
+      "removals": [
+        {
+          "name": "chembl3d_752146",
+          "byte_offset": 452992286,
+          "row_sha256": "849b2d294bc07dbb7dc921053a94cf21717fec498db59609736ab571ca29c002",
+          "reason": "source_stereo_normalization_unresolved"
+        },
+        {
+          "name": "chembl3d_783982",
+          "byte_offset": 475858219,
+          "row_sha256": "f8fa5aa97b7d64d3318d7bf78fb09f06d8b674a8b18f4e68081ee9dcd4626650",
+          "reason": "source_stereo_normalization_unresolved"
+        },
+        {
+          "name": "chembl3d_811536",
+          "byte_offset": 496244651,
+          "row_sha256": "0179c2b9c043548ad0dd7c0d561599df34a26d39c4be2a21b0130b5d382c7647",
+          "reason": "source_stereo_normalization_unresolved"
+        },
+        {
+          "name": "chembl3d_850338",
+          "byte_offset": 525196223,
+          "row_sha256": "ede4fffda5fca359f0dbbd0ed10ce4112ca11b36eaa102900dbdbe934e9ef9ec",
+          "reason": "source_stereo_normalization_unresolved"
+        },
+        {
+          "name": "chembl3d_940438",
+          "byte_offset": 594202057,
+          "row_sha256": "f0c04d17befac1c592d451c1f621e948c6ebe5eaa9af82ccb56cc042ed6a29b8",
+          "reason": "source_stereo_normalization_unresolved"
+        }
+      ],
+      "original_preserved_at": "/mnt/weka/fgeikyan/CoordToken/data_collection/reviews/chembl_replacement_20261004/chembl3d.checked.csv"
+    },
+    {
+      "path": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/backup_un/chembl3d.csv",
+      "relative_path": "grp_a/val/backup_un/chembl3d.csv",
+      "sha256": "1f679aa4f3a8038d88f59c48590389a6facff743147908bcc1171b0ed65f166d",
+      "rows": 182420,
+      "removals": [
+        {
+          "name": "chembl3d_110806",
+          "byte_offset": 70066072,
+          "row_sha256": "c9b8a23cef5b7460e8b4be6d0974d0411570923a8b3283ef9cd18376666464fd",
+          "reason": "source_stereo_normalization_unresolved"
+        }
+      ],
+      "original_preserved_at": "/mnt/weka/fgeikyan/fsq/val/chembl3d.csv"
+    }
+  ],
+  "policy": "Quarantine 12 parse failures, one key failure, and six unresolved source-stereo cases. Exact bytes preserved. Only owned working files change; source originals remain intact."
+}

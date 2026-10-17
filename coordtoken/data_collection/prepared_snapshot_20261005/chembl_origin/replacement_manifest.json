@@ -1,0 +1,22 @@
+{
+  "status": "replacement_ready_target_permission_denied",
+  "target": "/mnt/weka/fgeikyan/3D_big_data/grp_a/train/backup_un/chembl3d.csv",
+  "preserved_original": "/mnt/weka/fgeikyan/CoordToken/data_collection/reviews/chembl_replacement_20261004/chembl3d.before.csv",
+  "original_sha256": "451b6edd1b73d6f6ba29f7e5c7a24182d96e4c921f3b313bca17502f3b3c7386",
+  "original_bytes": 1122773756,
+  "original_unique_ids": 1479020,
+  "replacement": "/mnt/weka/fgeikyan/CoordToken/data_collection/reviews/chembl_replacement_20261004/chembl3d.checked.csv",
+  "replacement_sha256": "76280f17c8f568bc15338a2969a4112a9e72305fc193b42277582750fce85878",
+  "replacement_bytes": 1094437551,
+  "original_rows": 1479020,
+  "replacement_rows": 1442219,
+  "old_ids_absent_from_replacement": 37099,
+  "replacement_ids_absent_from_old": 298,
+  "source": "/mnt/weka/fgeikyan/fsq/merged_train.csv",
+  "source_block_sha256": "d27905c37efd31f0f1df17ba370ae9497985a265a97f8db289c757f969dd9814",
+  "row_transformation": "Remove one merger-added chembl3d_ prefix; enriched_text and row order unchanged.",
+  "limitations": "Different historical training population, not an unfiltered source or strict subset of the old file. Membership differences saved. Full per-row original-source equivalence not established. Validation and test files unchanged; new splits must reapply holdout protection.",
+  "verified_at_utc": "2026-10-04T19:06:51.992135+00:00",
+  "replacement_readback_rows": 1442219,
+  "overwrite_blocker": "Target file and parent owned by UID/GID 1299000061; current UID 1027 lacks write access; noninteractive sudo unavailable. Original target unchanged."
+}

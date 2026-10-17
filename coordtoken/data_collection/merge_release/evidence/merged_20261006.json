@@ -1,0 +1,54 @@
+{
+  "status": "complete_verified_merge",
+  "files": [
+    {
+      "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/merged_20261006/merged_train.csv",
+      "rows": 191526245,
+      "bytes": 144470480309,
+      "sha256": "e8ee9785f4f00bb9b44c3b6515b7aa878dd23e43c4a9356d2a52db2e2f62cd2e"
+    },
+    {
+      "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/merged_20261006/merged_val.csv",
+      "rows": 1810008,
+      "bytes": 1419365658,
+      "sha256": "6d8c931fbc70902439fc09f2b90d7aa4a8c9f659a957ed3c90328e12fd042af2"
+    },
+    {
+      "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/merged_20261006/merged_test.csv",
+      "rows": 5560978,
+      "bytes": 4014520155,
+      "sha256": "1d9eb7474221bfe0ad1cb33d61946c31a4d57511743f3166af09d4605dc1b552"
+    }
+  ],
+  "seconds": 720.5698846224695,
+  "workers": 64,
+  "schema": [
+    "name",
+    "enriched_text",
+    "dataset",
+    "source_name",
+    "source_file_id",
+    "source_row_index",
+    "inchikey",
+    "test_subset"
+  ],
+  "sources_manifest": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/merged_20261006/sources.json",
+  "plan_sha256": "8211d3c9cdce7653567f3c46093daa08b447ef84c0d7348d838338f400f7c5a5",
+  "sources_sha256": "4d83552fbbd8b1023415a98dc2e3ee6227ae8b30e5983a5a5a58237c6c54b80c",
+  "chunk_receipts_sha256": "6cef7f3de4477ec0cc1b096ecc70bb500a8a9f970229a30a32dd653733413c8d",
+  "checks": {
+    "source_chunk_hashes": true,
+    "source_to_split_exact_record_alignment": true,
+    "retained_and_excluded_part_hashes": true,
+    "indexed_key_hashes": true,
+    "source_row_indices_before_filtering": true,
+    "merged_region_readback": true,
+    "row_counts_match_verified_splits": true
+  },
+  "prior_combined_manifest": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/group_c_20261006/run/combined_split_manifest.json",
+  "exact_sample_deduplication_performed": false,
+  "shuffle_performed": false,
+  "conformation_test_molecular_overlap_exception": true,
+  "job_id": "314163",
+  "implementation_commit": "2fb33ba"
+}

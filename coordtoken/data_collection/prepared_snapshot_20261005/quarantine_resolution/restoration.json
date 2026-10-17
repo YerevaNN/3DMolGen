@@ -1,0 +1,31 @@
+{
+  "status": "source_backed_restoration_verified",
+  "path": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_b/pubchem3d.csv",
+  "before_bytes": 64598536114,
+  "before_sha256": "dc60054b04895e3de2d13707d7a5008cf092e54fef1d2fbc6f66736b3c6de869",
+  "before_rows": 94750247,
+  "restored_rows": 10,
+  "restored_names": [
+    "141568402_4",
+    "141568402_1",
+    "141568402_7",
+    "141568402_9",
+    "141568402_2",
+    "141568402_8",
+    "141568402_6",
+    "141568402_5",
+    "141568402_0",
+    "141568402_3"
+  ],
+  "placement": "Appended in repair-manifest order; original retained rows remain byte-identical",
+  "source_evidence": "/mnt/weka/fgeikyan/CoordToken/data_collection/resplit_20261005/quarantine_resolution/pubchem_repairs.json",
+  "payload_sha256": "2fa3b728ba003998e7efb9136c68b749181c5dd218ce7c1d0076b71f049c9f0d",
+  "sha256": "4e79d0a1472f420590b37237eae58dc69d7339b7b6ca7dd3995d9a6186102269",
+  "rows": 94750257,
+  "bytes": 64598548119,
+  "mtime_ns": 1791187071266128362,
+  "owner_uid": 1027,
+  "remaining_quarantined_total": 9,
+  "elapsed_seconds": 139.43503540754318,
+  "verification": "Entire existing prefix read and checked against its pinned hash; appended records fsynced and independently read back byte-for-byte; combined full-file hash calculated from verified bytes"
+}

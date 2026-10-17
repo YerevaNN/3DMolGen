@@ -1,0 +1,10 @@
+#!/bin/bash
+#SBATCH --account=research
+#SBATCH --partition=research_cpu
+#SBATCH --cpus-per-task=64
+#SBATCH --mem=512G
+#SBATCH --time=03:00:00
+#SBATCH --job-name=coordtoken_exact_dedup
+set -euo pipefail
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+exec "${PYTHON:-python}" -u "$1/deduplicate.py" --release "$2" --audit "$3" --output "$4" --workers "${SLURM_CPUS_PER_TASK:-64}"

@@ -1,0 +1,119 @@
+test/BindingMoad: source_rows=468, unique_rows=467, within_file_duplicate_rows=1
+test/BindingNet-High: source_rows=3,729, unique_rows=3,729, within_file_duplicate_rows=0
+test/BindingNet-Low: source_rows=6,850, unique_rows=6,847, within_file_duplicate_rows=3
+test/BindingNet-Mid: source_rows=3,312, unique_rows=3,312, within_file_duplicate_rows=0
+test/CrossDocked2020: source_rows=100, unique_rows=100, within_file_duplicate_rows=0
+test/DAVIS-3D: source_rows=225, unique_rows=225, within_file_duplicate_rows=0
+test/HiQBind: source_rows=279, unique_rows=279, within_file_duplicate_rows=0
+test/KIBA-3D: source_rows=1,468, unique_rows=1,468, within_file_duplicate_rows=0
+test/Kinodata-3D: source_rows=225, unique_rows=225, within_file_duplicate_rows=0
+test/OMol25_bio_mols: source_rows=225, unique_rows=225, within_file_duplicate_rows=0
+test/OMol25_small_mols: source_rows=28,181, unique_rows=27,646, within_file_duplicate_rows=535
+test/Plinder: source_rows=950, unique_rows=950, within_file_duplicate_rows=0
+test/SAIR: source_rows=225, unique_rows=225, within_file_duplicate_rows=0
+test/SPINDR: source_rows=225, unique_rows=225, within_file_duplicate_rows=0
+test/chembl3d: source_rows=37,065, unique_rows=37,065, within_file_duplicate_rows=0
+test/geom: source_rows=711,546, unique_rows=711,228, within_file_duplicate_rows=318
+test/pubchem3d: source_rows=473,752, unique_rows=473,316, within_file_duplicate_rows=436
+test/zinc: source_rows=375,763, unique_rows=370,075, within_file_duplicate_rows=5,688
+val/BindingMoad: source_rows=130, unique_rows=130, within_file_duplicate_rows=0
+val/BindingNet-High: source_rows=127, unique_rows=127, within_file_duplicate_rows=0
+val/BindingNet-Low: source_rows=1,892, unique_rows=1,891, within_file_duplicate_rows=1
+val/BindingNet-Mid: source_rows=327, unique_rows=327, within_file_duplicate_rows=0
+val/CrossDocked2020: source_rows=268, unique_rows=268, within_file_duplicate_rows=0
+val/DAVIS-3D: source_rows=7, unique_rows=7, within_file_duplicate_rows=0
+val/HiQBind: source_rows=48, unique_rows=48, within_file_duplicate_rows=0
+val/KIBA-3D: source_rows=1,539, unique_rows=1,539, within_file_duplicate_rows=0
+val/Kinodata-3D: source_rows=96, unique_rows=96, within_file_duplicate_rows=0
+val/OMol25_bio_mols: source_rows=36, unique_rows=36, within_file_duplicate_rows=0
+val/OMol25_small_mols: source_rows=21,595, unique_rows=21,130, within_file_duplicate_rows=465
+val/Plinder: source_rows=367, unique_rows=367, within_file_duplicate_rows=0
+val/SAIR: source_rows=99, unique_rows=99, within_file_duplicate_rows=0
+val/SPINDR: source_rows=56, unique_rows=56, within_file_duplicate_rows=0
+val/chembl3d: source_rows=182,479, unique_rows=182,479, within_file_duplicate_rows=0
+val/geom: source_rows=705,124, unique_rows=704,729, within_file_duplicate_rows=395
+val/nablaDFT: source_rows=63,384, unique_rows=63,384, within_file_duplicate_rows=0
+val/pubchem3d: source_rows=473,751, unique_rows=473,349, within_file_duplicate_rows=402
+val/zinc: source_rows=375,763, unique_rows=369,929, within_file_duplicate_rows=5,834
+train/BindingMoad: source_rows=20,813, unique_rows=20,763, within_file_duplicate_rows=50
+train/BindingNet-High: source_rows=211,896, unique_rows=211,479, within_file_duplicate_rows=417
+train/BindingNet-Low: source_rows=253,118, unique_rows=252,771, within_file_duplicate_rows=347
+train/BindingNet-Mid: source_rows=145,176, unique_rows=144,838, within_file_duplicate_rows=338
+train/CrossDocked2020: source_rows=79,082, unique_rows=79,074, within_file_duplicate_rows=8
+train/DAVIS-3D: source_rows=129, unique_rows=129, within_file_duplicate_rows=0
+train/HiQBind: source_rows=24,888, unique_rows=24,863, within_file_duplicate_rows=25
+train/KIBA-3D: source_rows=263,514, unique_rows=263,514, within_file_duplicate_rows=0
+train/Kinodata-3D: source_rows=62,169, unique_rows=62,027, within_file_duplicate_rows=142
+train/OMol25_bio_mols: source_rows=1,379,222, unique_rows=1,349,237, within_file_duplicate_rows=29,985
+train/OMol25_small_mols: source_rows=4,241,946, unique_rows=4,186,640, within_file_duplicate_rows=55,306
+train/Plinder: source_rows=129,400, unique_rows=123,413, within_file_duplicate_rows=5,987
+train/SAIR: source_rows=1,523,600, unique_rows=1,523,600, within_file_duplicate_rows=0
+train/SPINDR: source_rows=27,266, unique_rows=25,892, within_file_duplicate_rows=1,374
+train/chembl3d: source_rows=1,442,625, unique_rows=1,442,625, within_file_duplicate_rows=0
+train/geom: source_rows=5,280,755, unique_rows=5,278,580, within_file_duplicate_rows=2,175
+train/nablaDFT: source_rows=8,687,616, unique_rows=8,687,616, within_file_duplicate_rows=0
+train/pubchem3d: source_rows=93,802,755, unique_rows=93,724,685, within_file_duplicate_rows=78,070
+train/zinc: source_rows=74,401,036, unique_rows=73,267,070, within_file_duplicate_rows=1,133,966
+Shared candidate digests across files: 435,271
+Exact repeated samples across files: 435,271
+test/BindingMoad: cross_file_duplicate_rows_to_drop=0
+test/BindingNet-High: cross_file_duplicate_rows_to_drop=0
+test/BindingNet-Low: cross_file_duplicate_rows_to_drop=0
+test/BindingNet-Mid: cross_file_duplicate_rows_to_drop=0
+test/CrossDocked2020: cross_file_duplicate_rows_to_drop=0
+test/DAVIS-3D: cross_file_duplicate_rows_to_drop=0
+test/HiQBind: cross_file_duplicate_rows_to_drop=0
+test/KIBA-3D: cross_file_duplicate_rows_to_drop=0
+test/Kinodata-3D: cross_file_duplicate_rows_to_drop=0
+test/OMol25_bio_mols: cross_file_duplicate_rows_to_drop=0
+test/OMol25_small_mols: cross_file_duplicate_rows_to_drop=4
+test/Plinder: cross_file_duplicate_rows_to_drop=1
+test/SAIR: cross_file_duplicate_rows_to_drop=0
+test/SPINDR: cross_file_duplicate_rows_to_drop=0
+test/chembl3d: cross_file_duplicate_rows_to_drop=0
+test/geom: cross_file_duplicate_rows_to_drop=0
+test/pubchem3d: cross_file_duplicate_rows_to_drop=0
+test/zinc: cross_file_duplicate_rows_to_drop=0
+val/BindingMoad: cross_file_duplicate_rows_to_drop=0
+val/BindingNet-High: cross_file_duplicate_rows_to_drop=0
+val/BindingNet-Low: cross_file_duplicate_rows_to_drop=0
+val/BindingNet-Mid: cross_file_duplicate_rows_to_drop=0
+val/CrossDocked2020: cross_file_duplicate_rows_to_drop=0
+val/DAVIS-3D: cross_file_duplicate_rows_to_drop=0
+val/HiQBind: cross_file_duplicate_rows_to_drop=0
+val/KIBA-3D: cross_file_duplicate_rows_to_drop=0
+val/Kinodata-3D: cross_file_duplicate_rows_to_drop=0
+val/OMol25_bio_mols: cross_file_duplicate_rows_to_drop=0
+val/OMol25_small_mols: cross_file_duplicate_rows_to_drop=4
+val/Plinder: cross_file_duplicate_rows_to_drop=0
+val/SAIR: cross_file_duplicate_rows_to_drop=0
+val/SPINDR: cross_file_duplicate_rows_to_drop=0
+val/chembl3d: cross_file_duplicate_rows_to_drop=0
+val/geom: cross_file_duplicate_rows_to_drop=0
+val/nablaDFT: cross_file_duplicate_rows_to_drop=0
+val/pubchem3d: cross_file_duplicate_rows_to_drop=0
+val/zinc: cross_file_duplicate_rows_to_drop=0
+train/BindingMoad: cross_file_duplicate_rows_to_drop=0
+train/BindingNet-High: cross_file_duplicate_rows_to_drop=0
+train/BindingNet-Low: cross_file_duplicate_rows_to_drop=3
+train/BindingNet-Mid: cross_file_duplicate_rows_to_drop=2
+train/CrossDocked2020: cross_file_duplicate_rows_to_drop=0
+train/DAVIS-3D: cross_file_duplicate_rows_to_drop=0
+train/HiQBind: cross_file_duplicate_rows_to_drop=0
+train/KIBA-3D: cross_file_duplicate_rows_to_drop=0
+train/Kinodata-3D: cross_file_duplicate_rows_to_drop=0
+train/OMol25_bio_mols: cross_file_duplicate_rows_to_drop=56
+train/OMol25_small_mols: cross_file_duplicate_rows_to_drop=435,249
+train/Plinder: cross_file_duplicate_rows_to_drop=3
+train/SAIR: cross_file_duplicate_rows_to_drop=0
+train/SPINDR: cross_file_duplicate_rows_to_drop=0
+train/chembl3d: cross_file_duplicate_rows_to_drop=0
+train/geom: cross_file_duplicate_rows_to_drop=0
+train/nablaDFT: cross_file_duplicate_rows_to_drop=0
+train/pubchem3d: cross_file_duplicate_rows_to_drop=0
+train/zinc: cross_file_duplicate_rows_to_drop=0
+Saved exact duplicate stats to /auto/home/filya/fsq/3d_big_data_new_exact_duplicate_stats.csv
+Saved exact pairwise intersections to /auto/home/filya/fsq/3d_big_data_new_exact_sample_intersections.csv
+Saved stats DB to /nfs/h100/raid/chem/3D_big_data_new_dedup_state/sample_duplicate_stats.sqlite
+Saved per-file drop lists to /nfs/h100/raid/chem/3D_big_data_new_dedup_state/drop_lists
+Done.

@@ -1,0 +1,13 @@
+{
+  "status": "passed",
+  "source": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/merged_deduplicated_20261006/merged_train.csv",
+  "scope": "First 16 retained TRAIN rows; no official test records used. CPU fp32 interface fidelity, not model-quality estimation.",
+  "rows": 16,
+  "input_texts_sha256": "7fa6672592b0f99854494d6c08e1c4103bd96f25cfee9e8ec08cc15585c1bfe7",
+  "checkpoint_sha256": "29d487cf3783978c801c5a237e3c3c86cc23ab058aa7edea7eff0aa707c4bc4f",
+  "max_absolute_coordinate_difference_angstrom": 0,
+  "dense_code_and_register_layout_verified": true,
+  "output_graphs_sanitized": true,
+  "full_corpus_encoding_completed": false,
+  "gpu_bf16_interface_validation_completed": false
+}

@@ -46,6 +46,7 @@ EMBEDDING_REGISTRY = {
     "uniform_binned": encode_cartesian_with_config,
     "quantile_binned": encode_cartesian_with_config,
     "fsq": None,
+    "coordtoken": None,
 }
 
 REVISITED_SPLIT_FILE_MAP = {"train": "train", "valid": "val", "test": "test"}
@@ -154,6 +155,11 @@ def get_embedding_func_and_config(
             bin_config.H,
             bin_config.n_bins,
         )
+    if embedding_type == "coordtoken":
+        from .coordtoken import CoordTokenCodec,SELECTED_CHECKPOINT,SELECTED_SHA256,encode_mol
+        codec=CoordTokenCodec(fsq_ckpt_path or SELECTED_CHECKPOINT,expected_sha256=SELECTED_SHA256,device=fsq_device)
+        def encoder(mol,precision=4):return encode_mol(mol,codec,precision)
+        return encoder,None
     if embedding_type == "fsq":
         from molgen3D.data_processing.smiles_encoder_decoder_fsq import (
             configure_fsq_encoder,

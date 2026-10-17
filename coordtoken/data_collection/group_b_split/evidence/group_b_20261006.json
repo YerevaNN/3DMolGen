@@ -1,0 +1,274 @@
+{
+  "status": "group_b_iterative_split_complete",
+  "date": "2026-10-06",
+  "implementation_commit": "a521486",
+  "index_job": "313668",
+  "split_job": "313670",
+  "index_seconds": 3978.7159753274173,
+  "split_seconds": 7698.424325819593,
+  "indexed_rows": 183260646,
+  "new_identity_failures": 0,
+  "group_b_input_rows": 174502767,
+  "counts": {
+    "excluded_val_quota": 72282,
+    "train": 172497151,
+    "test": 888481,
+    "excluded_test_quota": 172204,
+    "val": 872649
+  },
+  "datasets": [
+    {
+      "dataset": "KIBA-3D",
+      "selection": {
+        "test": {
+          "target_rows": 1405,
+          "available_matching_holdout_rows": 6439,
+          "matching_holdout_rows_selected": 1576,
+          "new_holdout_rows": 0,
+          "selected_rows": 1576,
+          "target_shortfall": 0
+        },
+        "val": {
+          "target_rows": 1405,
+          "available_matching_holdout_rows": 14440,
+          "matching_holdout_rows_selected": 1533,
+          "new_holdout_rows": 0,
+          "selected_rows": 1533,
+          "target_shortfall": 0
+        }
+      },
+      "valid_rows_by_action": {
+        "excluded_test_quota": 4863,
+        "excluded_val_quota": 12907,
+        "test": 1576,
+        "train": 260129,
+        "val": 1533
+      },
+      "input_rows": 281008,
+      "counts": {
+        "excluded_val_quota": 12907,
+        "train": 260129,
+        "test": 1576,
+        "excluded_test_quota": 4863,
+        "val": 1533
+      },
+      "outputs": [
+        {
+          "dataset": "KIBA-3D",
+          "role": "test",
+          "rows": 1576,
+          "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/group_b_20261006/split_run/candidate/test/KIBA-3D.csv",
+          "sha256": "ea1618a6fc8e94177ab98f5de2bca152eaf29ad2f7e8cd65f6ed06ec7bcb0248"
+        },
+        {
+          "dataset": "KIBA-3D",
+          "role": "val",
+          "rows": 1533,
+          "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/group_b_20261006/split_run/candidate/val/KIBA-3D.csv",
+          "sha256": "b964a31102cd2be7494a847c0151da455465d5d45beccaef74ae908b23306079"
+        },
+        {
+          "dataset": "KIBA-3D",
+          "role": "train",
+          "rows": 260129,
+          "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/group_b_20261006/split_run/candidate/train/KIBA-3D.csv",
+          "sha256": "74b2786a736fa4c0f270aeb4c0f89dca40d1d66a4d3b808af5243c373782240d"
+        }
+      ]
+    },
+    {
+      "dataset": "OMol25_small_mols",
+      "selection": {
+        "test": {
+          "target_rows": 21595,
+          "available_matching_holdout_rows": 204725,
+          "matching_holdout_rows_selected": 37384,
+          "new_holdout_rows": 0,
+          "selected_rows": 37384,
+          "target_shortfall": 0
+        },
+        "val": {
+          "target_rows": 21595,
+          "available_matching_holdout_rows": 80972,
+          "matching_holdout_rows_selected": 21597,
+          "new_holdout_rows": 0,
+          "selected_rows": 21597,
+          "target_shortfall": 0
+        }
+      },
+      "valid_rows_by_action": {
+        "excluded_test_quota": 167341,
+        "excluded_val_quota": 59375,
+        "test": 37384,
+        "train": 4033245,
+        "val": 21597
+      },
+      "input_rows": 4318942,
+      "counts": {
+        "train": 4033245,
+        "excluded_val_quota": 59375,
+        "excluded_test_quota": 167341,
+        "test": 37384,
+        "val": 21597
+      },
+      "outputs": [
+        {
+          "dataset": "OMol25_small_mols",
+          "role": "test",
+          "rows": 37384,
+          "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/group_b_20261006/split_run/candidate/test/OMol25_small_mols.csv",
+          "sha256": "85bd69bf8d4a9942f71a3885797c0ef22f727693e8b3fd564779438eb362d474"
+        },
+        {
+          "dataset": "OMol25_small_mols",
+          "role": "val",
+          "rows": 21597,
+          "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/group_b_20261006/split_run/candidate/val/OMol25_small_mols.csv",
+          "sha256": "39c02493572f435fd286f3baccbb46b2584e3a42a5c97ad7bdf8d0cf2d9a879c"
+        },
+        {
+          "dataset": "OMol25_small_mols",
+          "role": "train",
+          "rows": 4033245,
+          "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/group_b_20261006/split_run/candidate/train/OMol25_small_mols.csv",
+          "sha256": "864df847cbbe9f8dbb2fcd7d0a19e977960256b1b78a8783250378433ad3c91c"
+        }
+      ]
+    },
+    {
+      "dataset": "pubchem3d",
+      "selection": {
+        "test": {
+          "target_rows": 473751,
+          "available_matching_holdout_rows": 223138,
+          "matching_holdout_rows_selected": 223138,
+          "new_holdout_rows": 250620,
+          "selected_rows": 473758,
+          "target_shortfall": 0
+        },
+        "val": {
+          "target_rows": 473751,
+          "available_matching_holdout_rows": 147575,
+          "matching_holdout_rows_selected": 147575,
+          "new_holdout_rows": 326181,
+          "selected_rows": 473756,
+          "target_shortfall": 0
+        }
+      },
+      "valid_rows_by_action": {
+        "test": 473758,
+        "train": 93802743,
+        "val": 473756
+      },
+      "input_rows": 94750257,
+      "counts": {
+        "train": 93802743,
+        "test": 473758,
+        "val": 473756
+      },
+      "outputs": [
+        {
+          "dataset": "pubchem3d",
+          "role": "test",
+          "rows": 473758,
+          "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/group_b_20261006/split_run/candidate/test/pubchem3d.csv",
+          "sha256": "77b7ac120669dec64b619782d2ee97add38142b0a0013875a944d10d5181a30f"
+        },
+        {
+          "dataset": "pubchem3d",
+          "role": "val",
+          "rows": 473756,
+          "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/group_b_20261006/split_run/candidate/val/pubchem3d.csv",
+          "sha256": "01b2f1fb54af3a2c24470073af49fd5b5748ed73d98216f0849e10baeed18ce4"
+        },
+        {
+          "dataset": "pubchem3d",
+          "role": "train",
+          "rows": 93802743,
+          "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/group_b_20261006/split_run/candidate/train/pubchem3d.csv",
+          "sha256": "4e1fc362896f8a1a08df1d220a5c3b12c04a1ab4a383378f95b404369b504bf6"
+        }
+      ]
+    },
+    {
+      "dataset": "zinc",
+      "selection": {
+        "test": {
+          "target_rows": 375763,
+          "available_matching_holdout_rows": 20966,
+          "matching_holdout_rows_selected": 20966,
+          "new_holdout_rows": 354797,
+          "selected_rows": 375763,
+          "target_shortfall": 0
+        },
+        "val": {
+          "target_rows": 375763,
+          "available_matching_holdout_rows": 9056,
+          "matching_holdout_rows_selected": 9056,
+          "new_holdout_rows": 366707,
+          "selected_rows": 375763,
+          "target_shortfall": 0
+        }
+      },
+      "valid_rows_by_action": {
+        "test": 375763,
+        "train": 74401034,
+        "val": 375763
+      },
+      "input_rows": 75152560,
+      "counts": {
+        "train": 74401034,
+        "val": 375763,
+        "test": 375763
+      },
+      "outputs": [
+        {
+          "dataset": "zinc",
+          "role": "val",
+          "rows": 375763,
+          "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/group_b_20261006/split_run/candidate/val/zinc.csv",
+          "sha256": "a5a8bfd05bb806045a3c1440d16ebb66ccb1f7940b9e793f299c3643efaeda70"
+        },
+        {
+          "dataset": "zinc",
+          "role": "test",
+          "rows": 375763,
+          "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/group_b_20261006/split_run/candidate/test/zinc.csv",
+          "sha256": "5f13772666254fab32cd18745539d4d14ac29416483e610d6f000afbfffb5f2d"
+        },
+        {
+          "dataset": "zinc",
+          "role": "train",
+          "rows": 74401034,
+          "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/group_b_20261006/split_run/candidate/train/zinc.csv",
+          "sha256": "038ada25d2091faefea62207e09f69d420d1f2f19321849694ea9808c9f602be"
+        }
+      ]
+    }
+  ],
+  "final_overlap_checks": [
+    {
+      "dataset": "KIBA-3D",
+      "overlapping_keys": 0,
+      "overlapping_rows": 0
+    },
+    {
+      "dataset": "OMol25_small_mols",
+      "overlapping_keys": 0,
+      "overlapping_rows": 0
+    },
+    {
+      "dataset": "pubchem3d",
+      "overlapping_keys": 0,
+      "overlapping_rows": 0
+    },
+    {
+      "dataset": "zinc",
+      "overlapping_keys": 0,
+      "overlapping_rows": 0
+    }
+  ],
+  "final_global_split": false,
+  "pending": "Construct Group C validation and apply its keys globally; final corpus verification and exact-sample deduplication remain separate.",
+  "omol_test_size_note": "Whole-key assignment gives 37,384 test rows versus target 21,595; the largest selected molecular group contains 24,255 rows. No conformers were divided to force the target."
+}

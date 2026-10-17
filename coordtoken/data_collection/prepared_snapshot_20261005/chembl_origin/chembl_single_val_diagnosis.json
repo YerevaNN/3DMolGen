@@ -1,0 +1,104 @@
+{
+  "name": "chembl3d_110806",
+  "source_smiles": "O=C([O-])c1c/c2/c(cc1C(=O)Nc1ccccc1C(F)(F)F)=[O+]\\c1ccccc1-c1ccccc1/[O+]=2",
+  "stored_smiles": "O=C([O-])c1c/c2/c(cc1C(=O)Nc1ccccc1C(F)(F)F)=[O+]\\c1ccccc1-c1ccccc1/[O+]=2",
+  "reencoded_smiles": "O=C([O-])c1c/c2/c(cc1C(=O)Nc1ccccc1C(F)(F)F)=[O+]\\c1ccccc1-c1ccccc1/[O+]=2",
+  "source_key": {
+    "key": "SPDSVTWELJAFBC-UHFFFAOYSA-O",
+    "return_code": 1,
+    "warning": "Proton(s) added/removed; Omitted undefined stereo"
+  },
+  "stored_key": {
+    "key": "SPDSVTWELJAFBC-UHFFFAOYSA-O",
+    "return_code": 1,
+    "warning": "Proton(s) added/removed; Omitted undefined stereo"
+  },
+  "comparison": {
+    "status": "graph_mismatch",
+    "source_records": 1,
+    "tolerance_angstrom": 0.001,
+    "atom_mapping_cap_per_source": 10000,
+    "graph_match": false,
+    "conformer_match": false,
+    "full_inchikey_match": true,
+    "mapping_cap_reached": false,
+    "best_heavy_atom_rmsd_angstrom": null,
+    "source_failures": [],
+    "source_stereo_flags": [],
+    "graph_mismatch_feature_categories": [
+      "topology_or_specified_stereo_or_atom_features"
+    ],
+    "legacy_decoder_identity_before_stereo_assignment": {
+      "key": "SPDSVTWELJAFBC-UHFFFAOYSA-O",
+      "return_code": 1,
+      "warning": "Proton(s) added/removed; Omitted undefined stereo"
+    },
+    "legacy_decoder_identity_after_graph_stereo_assignment": {
+      "key": "SPDSVTWELJAFBC-UHFFFAOYSA-O",
+      "return_code": 1,
+      "warning": "Proton(s) added/removed; Omitted undefined stereo"
+    },
+    "decoded_identity": {
+      "key": "SPDSVTWELJAFBC-UHFFFAOYSA-O",
+      "return_code": 1,
+      "warning": "Proton(s) added/removed; Omitted undefined stereo"
+    },
+    "decoded_stereo_flags": [],
+    "decoding_policy": "Reconstruct SMILES tokens, sanitized MolFromSmiles(removeHs=False), then attach coordinates; stereo from serialized graph only.",
+    "legacy_decoder_key_differs_from_serialized_graph": false,
+    "legacy_simple_bracket_atom_ambiguity": "Decorated simple atoms cannot distinguish original bare atoms from some explicit bracket/radical forms; source comparison is required.",
+    "source_identities": [
+      {
+        "key": "SPDSVTWELJAFBC-UHFFFAOYSA-O",
+        "return_code": 1,
+        "warning": "Proton(s) added/removed; Omitted undefined stereo"
+      }
+    ],
+    "exact_atom_mappings_evaluated": 0
+  },
+  "source_stereo_flags": [],
+  "stored_text": "[O]<4.9076,-3.3031,1.1902>=[C]<3.7861,-2.9853,1.379>([O-]<2.8946,-2.9541,2.3419>)[c]<2.5423,-2.395,0.9184>1[c]<2.422,-0.9469,0.9248>[c]<1.3127,-0.3673,0.4663>2/[c]<0.2093,-1.1982,0.0828>([c]<0.3796,-2.6064,-0.1453>[c]<1.543,-3.1807,0.1983>1[C]<1.8561,-4.6196,-0.1386>(=[O]<2.5315,-5.2624,0.6345>)[N]<1.31,-5.0654,-1.2901>[c]<1.4681,-6.3621,-1.8127>1[c]<2.6702,-7.0475,-1.6902>[c]<2.8133,-8.3005,-2.2648>[c]<1.769,-8.8941,-2.951>[c]<0.5646,-8.2212,-3.0656>[c]<0.4064,-6.9661,-2.5026>1[C]<-0.9217,-6.2738,-2.6242>([F]<-1.8023,-6.9794,-3.3428>)([F]<-1.4947,-6.0405,-1.4253>)[F]<-0.8131,-5.0627,-3.224>)=[O+]<-0.974,-0.7493,-0.1431>\\[c]<-1.6651,0.3241,0.4901>1[c]<-2.5808,-0.0332,1.453>[c]<-3.398,0.9595,1.9775>[c]<-3.3016,2.2622,1.5094>[c]<-2.3878,2.5816,0.5206>[c]<-1.5259,1.6184,0.0075>1-[c]<-0.5072,1.9643,-0.9926>1[c]<-0.8287,2.6839,-2.1371>[c]<0.1477,2.9913,-3.066>[c]<1.4654,2.6164,-2.8443>[c]<1.816,1.9291,-1.6908>[c]<0.825,1.6051,-0.7848>1/[O+]<1.1672,0.9827,0.4212>=2",
+  "source_reencoded_text": "[O]<4.9076,-3.3031,1.1902>=[C]<3.7861,-2.9853,1.379>([O-]<2.8946,-2.9541,2.3419>)[c]<2.5423,-2.395,0.9184>1[c]<2.422,-0.9469,0.9248>/[c]<1.3127,-0.3673,0.4663>2/[c]<0.2093,-1.1982,0.0828>([c]<0.3796,-2.6064,-0.1453>[c]<1.543,-3.1807,0.1983>1[C]<1.8561,-4.6196,-0.1386>(=[O]<2.5315,-5.2624,0.6345>)[N]<1.31,-5.0654,-1.2901>[c]<1.4681,-6.3621,-1.8127>1[c]<2.6702,-7.0475,-1.6902>[c]<2.8133,-8.3005,-2.2648>[c]<1.769,-8.8941,-2.951>[c]<0.5646,-8.2212,-3.0656>[c]<0.4064,-6.9661,-2.5026>1[C]<-0.9217,-6.2738,-2.6242>([F]<-1.8023,-6.9794,-3.3428>)([F]<-1.4947,-6.0405,-1.4253>)[F]<-0.8131,-5.0627,-3.224>)=[O+]<-0.974,-0.7493,-0.1431>\\[c]<-1.6651,0.3241,0.4901>1[c]<-2.5808,-0.0332,1.453>[c]<-3.398,0.9595,1.9775>[c]<-3.3016,2.2622,1.5094>[c]<-2.3878,2.5816,0.5206>[c]<-1.5259,1.6184,0.0075>1-[c]<-0.5072,1.9643,-0.9926>1[c]<-0.8287,2.6839,-2.1371>[c]<0.1477,2.9913,-3.066>[c]<1.4654,2.6164,-2.8443>[c]<1.816,1.9291,-1.6908>[c]<0.825,1.6051,-0.7848>1/[O+]<1.1672,0.9827,0.4212>=2",
+  "comparison_to_source_reencoded_graph": {
+    "status": "exact_graph_and_conformer_match",
+    "source_records": 1,
+    "tolerance_angstrom": 0.001,
+    "atom_mapping_cap_per_source": 10000,
+    "graph_match": true,
+    "conformer_match": true,
+    "full_inchikey_match": true,
+    "mapping_cap_reached": false,
+    "best_heavy_atom_rmsd_angstrom": 3.4494492510156176e-15,
+    "source_failures": [],
+    "source_stereo_flags": [],
+    "graph_mismatch_feature_categories": [],
+    "legacy_decoder_identity_before_stereo_assignment": {
+      "key": "SPDSVTWELJAFBC-UHFFFAOYSA-O",
+      "return_code": 1,
+      "warning": "Proton(s) added/removed; Omitted undefined stereo"
+    },
+    "legacy_decoder_identity_after_graph_stereo_assignment": {
+      "key": "SPDSVTWELJAFBC-UHFFFAOYSA-O",
+      "return_code": 1,
+      "warning": "Proton(s) added/removed; Omitted undefined stereo"
+    },
+    "decoded_identity": {
+      "key": "SPDSVTWELJAFBC-UHFFFAOYSA-O",
+      "return_code": 1,
+      "warning": "Proton(s) added/removed; Omitted undefined stereo"
+    },
+    "decoded_stereo_flags": [],
+    "decoding_policy": "Reconstruct SMILES tokens, sanitized MolFromSmiles(removeHs=False), then attach coordinates; stereo from serialized graph only.",
+    "legacy_decoder_key_differs_from_serialized_graph": false,
+    "legacy_simple_bracket_atom_ambiguity": "Decorated simple atoms cannot distinguish original bare atoms from some explicit bracket/radical forms; source comparison is required.",
+    "source_identities": [
+      {
+        "key": "SPDSVTWELJAFBC-UHFFFAOYSA-O",
+        "return_code": 1,
+        "warning": "Proton(s) added/removed; Omitted undefined stereo"
+      }
+    ],
+    "exact_atom_mappings_evaluated": 6
+  },
+  "resolution": "Source/stored/reencoded canonical isomeric SMILES agree. Stored geometry matches source reencoding under exact graph mapping and proper rotation. Raw source-object comparison is stricter than the serialized representation; keep this distinction explicit."
+}

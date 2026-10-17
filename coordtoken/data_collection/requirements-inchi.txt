@@ -1,0 +1,2 @@
+# Version used for the completed molecular identity audits.
+rdkit==2025.9.6

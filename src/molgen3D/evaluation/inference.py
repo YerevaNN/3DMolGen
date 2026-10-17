@@ -282,8 +282,11 @@ def process_batch(model, tokenizer, batch: list[list], gen_config, eos_token_id,
                     if binned:
                         mol_obj = decode_cartesian_binned(generated_conformer, bins)
                     elif fsq:
-                        recon_enriched = fsq_decoder.decode_text(generated_conformer)
-                        mol_obj = decode_cartesian_v2(recon_enriched)
+                        if getattr(fsq_decoder,"format",None)=="atom12_reg1_prefix_v1":
+                            mol_obj=fsq_decoder.decode_mol(generated_conformer)
+                        else:
+                            recon_enriched = fsq_decoder.decode_text(generated_conformer)
+                            mol_obj = decode_cartesian_v2(recon_enriched)
                     else:
                         mol_obj = decode_cartesian_v2(generated_conformer)
                     generations[geom_smiles].append(mol_obj)
@@ -359,6 +362,10 @@ def run_inference(inference_config: dict):
         device=target_device
     )
     logger.info(f"model loaded: {model.dtype=}, {model.device=}")
+    from molgen3D.data_processing.coordtoken_contract import load_contract
+    if load_contract(inference_config["tokenizer_path"]) and not inference_config.get("coordtoken_format"):
+        raise ValueError("Versioned CoordToken tokenizer requires explicit coordtoken_format")
+
     
     # Use [/CONFORMER] as the primary stop token, falling back to <|endoftext|>
     eos_token_id = tokenizer.convert_tokens_to_ids("[/CONFORMER]")
@@ -423,8 +430,19 @@ def run_inference(inference_config: dict):
         logger.info("Auto-detecting fsq=True based on model path")
         fsq = True
         
+    coordtoken_format = inference_config.get("coordtoken_format")
     fsq_decoder = None
-    if fsq:
+    if coordtoken_format:
+        from molgen3D.data_processing.coordtoken import CoordTokenCodec,FORMAT,SELECTED_CHECKPOINT,SELECTED_SHA256
+        from molgen3D.data_processing.coordtoken_contract import load_contract,validate_model_contract
+        if coordtoken_format != FORMAT or binned:raise ValueError("Incompatible coordinate format")
+        contract=load_contract(inference_config["tokenizer_path"])
+        expected=inference_config.get("coordtoken_sha256") or SELECTED_SHA256
+        if not contract or contract['checkpoint_sha256']!=expected:raise ValueError("LM tokenizer and coordinate checkpoint differ")
+        validate_model_contract(model.config,contract)
+        fsq_decoder=CoordTokenCodec(inference_config.get("coordtoken_checkpoint") or SELECTED_CHECKPOINT,expected_sha256=expected,device=target_device)
+        fsq=True
+    elif fsq:
         # Load the VQ-VAE model for decoding coordinates
         try:
             vq_ckpt = _resolve_existing_path(
@@ -445,8 +463,7 @@ def run_inference(inference_config: dict):
             )
         except Exception as e:
             logger.error(f"Failed to load VQ-VAE model: {e}")
-            logger.warning("Proceeding without VQ-VAE. Coordinate reconstruction will fail or be approximate.")
-            fsq_decoder = None
+            raise RuntimeError("FSQ checkpoint loading failed; refusing incompatible inference") from e
 
     # Show progress for successfully decoded & saved molecules (not total attempted)
     saved_count = 0
@@ -535,6 +552,9 @@ def launch_inference_from_cli(
     icl_n: int = 5,
     parallel_jobs: int = 1,
     fsq: bool = False,
+    coordtoken_format: str | None = None,
+    coordtoken_checkpoint: str | None = None,
+    coordtoken_sha256: str | None = None,
     batch_size: int = 2048,
     epoch: str = "4e",
     model_path: str | None = None,
@@ -545,6 +565,8 @@ def launch_inference_from_cli(
     sampling_config: str = "top_p_sampling1",
 ) -> None:
     """Launch inference jobs via CLI arguments."""
+    if coordtoken_format and (not model_path or not tokenizer_path or not results_path):
+        raise ValueError("New CoordToken inference requires explicit model_path, tokenizer_path and results_path")
     if sampling_config not in sampling_configs:
         available = ", ".join(sorted(sampling_configs))
         raise ValueError(f"Unknown sampling_config={sampling_config!r}. Available: {available}")
@@ -596,6 +618,9 @@ def launch_inference_from_cli(
         "unique_only": unique_only,
         "binned": binned,
         "fsq": fsq,
+        "coordtoken_format": coordtoken_format,
+        "coordtoken_checkpoint": coordtoken_checkpoint,
+        "coordtoken_sha256": coordtoken_sha256,
     }
     
     # Auto-switch model if FSQ is requested and we are using the default base config
@@ -737,6 +762,9 @@ if __name__ == "__main__":
     parser.add_argument("--test_set", type=str, choices=["clean", "distinct", "corrected"], default=None)
     parser.add_argument("--binned", action="store_true", default=False)
     parser.add_argument("--fsq", action="store_true", default=False)
+    parser.add_argument("--coordtoken-format", choices=["atom12_reg1_prefix_v1"])
+    parser.add_argument("--coordtoken-checkpoint")
+    parser.add_argument("--coordtoken-sha256")
     parser.add_argument("--xl", action="store_true")
     parser.add_argument("--qm9", action="store_true")
     parser.add_argument("--limit", type=int, default=None)
@@ -766,6 +794,9 @@ if __name__ == "__main__":
         icl_n=args.icl_n,
         parallel_jobs=args.parallel_jobs,
         fsq=args.fsq,
+        coordtoken_format=args.coordtoken_format,
+        coordtoken_checkpoint=args.coordtoken_checkpoint,
+        coordtoken_sha256=args.coordtoken_sha256,
         batch_size=args.batch_size,
         epoch=args.epoch,
         model_path=args.model_path,

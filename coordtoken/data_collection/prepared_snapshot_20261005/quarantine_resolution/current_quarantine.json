@@ -1,0 +1,77 @@
+{
+  "status": "nine_rows_unresolved_after_bounded_repair_attempt",
+  "rows": [
+    {
+      "name": "12157944_0",
+      "source": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_b/pubchem3d.csv",
+      "reason": "sanitized_graph_parse_failure",
+      "byte_offset": 26835891036,
+      "row_sha256": "a439bfe4ec1b61a0d939ccee83855017612c51dde15758054093c7d6d2149f15"
+    },
+    {
+      "name": "ZINC000068568373",
+      "source": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_b/zinc.csv",
+      "reason": "sanitized_graph_parse_failure",
+      "byte_offset": 9122729567,
+      "row_sha256": "1bada989d4cd96d92992d509f790fc579c2883d8f46a9ca2aeaa8b808a201902"
+    },
+    {
+      "name": "ZINC000573456341",
+      "source": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_b/zinc.csv",
+      "reason": "standard_inchikey_unavailable",
+      "byte_offset": 41869319949,
+      "row_sha256": "1337b5ec9034b28a56c172d889112379c25d358651e3ae9187112ba5a926e11e"
+    },
+    {
+      "name": "chembl3d_752146",
+      "source": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/backup_un/chembl3d.csv",
+      "reason": "source_stereo_normalization_unresolved",
+      "byte_offset": 452992286,
+      "row_sha256": "849b2d294bc07dbb7dc921053a94cf21717fec498db59609736ab571ca29c002"
+    },
+    {
+      "name": "chembl3d_783982",
+      "source": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/backup_un/chembl3d.csv",
+      "reason": "source_stereo_normalization_unresolved",
+      "byte_offset": 475858219,
+      "row_sha256": "f8fa5aa97b7d64d3318d7bf78fb09f06d8b674a8b18f4e68081ee9dcd4626650"
+    },
+    {
+      "name": "chembl3d_811536",
+      "source": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/backup_un/chembl3d.csv",
+      "reason": "source_stereo_normalization_unresolved",
+      "byte_offset": 496244651,
+      "row_sha256": "0179c2b9c043548ad0dd7c0d561599df34a26d39c4be2a21b0130b5d382c7647"
+    },
+    {
+      "name": "chembl3d_850338",
+      "source": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/backup_un/chembl3d.csv",
+      "reason": "source_stereo_normalization_unresolved",
+      "byte_offset": 525196223,
+      "row_sha256": "ede4fffda5fca359f0dbbd0ed10ce4112ca11b36eaa102900dbdbe934e9ef9ec"
+    },
+    {
+      "name": "chembl3d_940438",
+      "source": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/backup_un/chembl3d.csv",
+      "reason": "source_stereo_normalization_unresolved",
+      "byte_offset": 594202057,
+      "row_sha256": "f0c04d17befac1c592d451c1f621e948c6ebe5eaa9af82ccb56cc042ed6a29b8"
+    },
+    {
+      "name": "chembl3d_110806",
+      "source": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/backup_un/chembl3d.csv",
+      "reason": "source_stereo_normalization_unresolved",
+      "byte_offset": 70066072,
+      "row_sha256": "c9b8a23cef5b7460e8b4be6d0974d0411570923a8b3283ef9cd18376666464fd"
+    }
+  ],
+  "diagnostics": [
+    "pubchem_zinc_diagnosis.json",
+    "zinc_key_variants.json",
+    "zinc_error_scope.json",
+    "chembl_diagnosis.json",
+    "pubchem_repairs.json",
+    "zinc_source_attempt.json"
+  ],
+  "note": "Ten CID 141568402 rows have verified source-backed repairs; restoration status is recorded separately in restoration.json. No unsupported charge, bond or stereo edits applied to these nine."
+}

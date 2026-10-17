@@ -48,6 +48,7 @@ dependencies = [
 
     # --- Utilities ---
     "numpy>=2.0.0",
+    "einops>=0.8.0",  # CoordToken FSQ quantizer
     "pandas>=2.0.0",
     "tqdm>=4.60.0",
     "loguru>=0.7.0",

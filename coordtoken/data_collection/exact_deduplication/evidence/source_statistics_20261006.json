@@ -1,0 +1,963 @@
+{
+  "status": "complete_verified_source_statistics",
+  "removed_rows": 1748876,
+  "by_split_relationship": {
+    "train": {
+      "same_prepared_source_file": 1286145,
+      "different_dataset": 448072
+    },
+    "val": {
+      "same_prepared_source_file": 7098,
+      "different_dataset": 4
+    },
+    "test": {
+      "same_prepared_source_file": 7554,
+      "different_dataset": 3
+    }
+  },
+  "by_removed_dataset": [
+    {
+      "split": "train",
+      "dataset": "zinc",
+      "test_subset": "",
+      "removed_rows": 1133909
+    },
+    {
+      "split": "train",
+      "dataset": "OMol25_small_mols",
+      "test_subset": "",
+      "removed_rows": 482003
+    },
+    {
+      "split": "train",
+      "dataset": "pubchem3d",
+      "test_subset": "",
+      "removed_rows": 78253
+    },
+    {
+      "split": "train",
+      "dataset": "OMol25_bio_mols",
+      "test_subset": "",
+      "removed_rows": 29396
+    },
+    {
+      "split": "train",
+      "dataset": "Plinder",
+      "test_subset": "",
+      "removed_rows": 5915
+    },
+    {
+      "split": "val",
+      "dataset": "zinc",
+      "test_subset": "",
+      "removed_rows": 5839
+    },
+    {
+      "split": "test",
+      "dataset": "zinc",
+      "test_subset": "",
+      "removed_rows": 5740
+    },
+    {
+      "split": "train",
+      "dataset": "geom",
+      "test_subset": "",
+      "removed_rows": 2096
+    },
+    {
+      "split": "train",
+      "dataset": "SPINDR",
+      "test_subset": "",
+      "removed_rows": 1331
+    },
+    {
+      "split": "test",
+      "dataset": "OMol25_small_mols",
+      "test_subset": "",
+      "removed_rows": 1264
+    },
+    {
+      "split": "val",
+      "dataset": "OMol25_small_mols",
+      "test_subset": "",
+      "removed_rows": 470
+    },
+    {
+      "split": "val",
+      "dataset": "pubchem3d",
+      "test_subset": "",
+      "removed_rows": 425
+    },
+    {
+      "split": "train",
+      "dataset": "BindingNet-High",
+      "test_subset": "",
+      "removed_rows": 416
+    },
+    {
+      "split": "val",
+      "dataset": "geom",
+      "test_subset": "",
+      "removed_rows": 367
+    },
+    {
+      "split": "train",
+      "dataset": "BindingNet-Low",
+      "test_subset": "",
+      "removed_rows": 347
+    },
+    {
+      "split": "train",
+      "dataset": "BindingNet-Mid",
+      "test_subset": "",
+      "removed_rows": 338
+    },
+    {
+      "split": "test",
+      "dataset": "geom",
+      "test_subset": "",
+      "removed_rows": 318
+    },
+    {
+      "split": "test",
+      "dataset": "pubchem3d",
+      "test_subset": "",
+      "removed_rows": 230
+    },
+    {
+      "split": "train",
+      "dataset": "Kinodata-3D",
+      "test_subset": "",
+      "removed_rows": 133
+    },
+    {
+      "split": "train",
+      "dataset": "BindingMoad",
+      "test_subset": "",
+      "removed_rows": 49
+    },
+    {
+      "split": "train",
+      "dataset": "HiQBind",
+      "test_subset": "",
+      "removed_rows": 23
+    },
+    {
+      "split": "train",
+      "dataset": "CrossDocked2020",
+      "test_subset": "",
+      "removed_rows": 8
+    },
+    {
+      "split": "test",
+      "dataset": "BindingNet-Low",
+      "test_subset": "",
+      "removed_rows": 3
+    },
+    {
+      "split": "val",
+      "dataset": "BindingNet-Low",
+      "test_subset": "",
+      "removed_rows": 1
+    },
+    {
+      "split": "test",
+      "dataset": "BindingMoad",
+      "test_subset": "",
+      "removed_rows": 1
+    },
+    {
+      "split": "test",
+      "dataset": "Plinder",
+      "test_subset": "",
+      "removed_rows": 1
+    }
+  ],
+  "removed_to_retained_dataset_pairs": [
+    {
+      "split": "train",
+      "removed_dataset": "zinc",
+      "removed_test_subset": "",
+      "retained_dataset": "zinc",
+      "retained_test_subset": "",
+      "removed_rows": 1133909,
+      "example": {
+        "removed": {
+          "removed_name": "s155d0d8ad19e21fe:115752",
+          "kept_name": "s155d0d8ad19e21fe:73871",
+          "dataset": "zinc",
+          "source_name": "ZINC000182291855",
+          "source_file_id": "s155d0d8ad19e21fe",
+          "source_row_index": "115752",
+          "inchikey": "JENBOTSWTORGBE-UHFFFAOYSA-N",
+          "test_subset": "",
+          "split": "train"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_b/zinc.csv",
+        "retained_source_row_index": 73871
+      }
+    },
+    {
+      "split": "train",
+      "removed_dataset": "OMol25_small_mols",
+      "removed_test_subset": "",
+      "retained_dataset": "OMol25_bio_mols",
+      "retained_test_subset": "",
+      "removed_rows": 447940,
+      "example": {
+        "removed": {
+          "removed_name": "sb43ff20a59a7b7c2:3119",
+          "kept_name": "s73e292fb595ca7ed:488008",
+          "dataset": "OMol25_small_mols",
+          "source_name": "ani2x_ani2x_014_124605_0_1",
+          "source_file_id": "sb43ff20a59a7b7c2",
+          "source_row_index": "3119",
+          "inchikey": "WSFSSNUMVMOOMR-UHFFFAOYSA-N",
+          "test_subset": "",
+          "split": "train"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/OMol25_bio_mols.csv",
+        "retained_source_row_index": 488008
+      }
+    },
+    {
+      "split": "train",
+      "removed_dataset": "pubchem3d",
+      "removed_test_subset": "",
+      "retained_dataset": "pubchem3d",
+      "retained_test_subset": "",
+      "removed_rows": 78253,
+      "example": {
+        "removed": {
+          "removed_name": "sc7692694e3def2f0:468841",
+          "kept_name": "sc7692694e3def2f0:408352",
+          "dataset": "pubchem3d",
+          "source_name": "110162717_5",
+          "source_file_id": "sc7692694e3def2f0",
+          "source_row_index": "468841",
+          "inchikey": "LHWYFDLASVLKCB-MRXNPFEDSA-N",
+          "test_subset": "",
+          "split": "train"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_b/pubchem3d.csv",
+        "retained_source_row_index": 408352
+      }
+    },
+    {
+      "split": "train",
+      "removed_dataset": "OMol25_small_mols",
+      "removed_test_subset": "",
+      "retained_dataset": "OMol25_small_mols",
+      "retained_test_subset": "",
+      "removed_rows": 34006,
+      "example": {
+        "removed": {
+          "removed_name": "sb43ff20a59a7b7c2:136720",
+          "kept_name": "sb43ff20a59a7b7c2:136718",
+          "dataset": "OMol25_small_mols",
+          "source_name": "dna_1a6b_A1_S-_frame0_0_1",
+          "source_file_id": "sb43ff20a59a7b7c2",
+          "source_row_index": "136720",
+          "inchikey": "GFQFFCFJVLJXRY-QMMMGPOBSA-N",
+          "test_subset": "",
+          "split": "train"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_b/OMol25_small_mols.csv",
+        "retained_source_row_index": 136718
+      }
+    },
+    {
+      "split": "train",
+      "removed_dataset": "OMol25_bio_mols",
+      "removed_test_subset": "",
+      "retained_dataset": "OMol25_bio_mols",
+      "retained_test_subset": "",
+      "removed_rows": 29334,
+      "example": {
+        "removed": {
+          "removed_name": "s73e292fb595ca7ed:3165",
+          "kept_name": "s73e292fb595ca7ed:1480",
+          "dataset": "OMol25_bio_mols",
+          "source_name": "OMol25_bio_mols",
+          "source_file_id": "s73e292fb595ca7ed",
+          "source_row_index": "3165",
+          "inchikey": "KXKVLQRXCPHEJC-UHFFFAOYSA-N",
+          "test_subset": "",
+          "split": "train"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/OMol25_bio_mols.csv",
+        "retained_source_row_index": 1480
+      }
+    },
+    {
+      "split": "train",
+      "removed_dataset": "Plinder",
+      "removed_test_subset": "",
+      "retained_dataset": "Plinder",
+      "retained_test_subset": "",
+      "removed_rows": 5912,
+      "example": {
+        "removed": {
+          "removed_name": "s80886963a532c3cd:1718",
+          "kept_name": "s80886963a532c3cd:605",
+          "dataset": "Plinder",
+          "source_name": "Plinder",
+          "source_file_id": "s80886963a532c3cd",
+          "source_row_index": "1718",
+          "inchikey": "DRHXTSWSUAJOJZ-UHFFFAOYSA-N",
+          "test_subset": "",
+          "split": "train"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/Plinder.csv",
+        "retained_source_row_index": 605
+      }
+    },
+    {
+      "split": "val",
+      "removed_dataset": "zinc",
+      "removed_test_subset": "",
+      "retained_dataset": "zinc",
+      "retained_test_subset": "",
+      "removed_rows": 5839,
+      "example": {
+        "removed": {
+          "removed_name": "s155d0d8ad19e21fe:1001245",
+          "kept_name": "s155d0d8ad19e21fe:380877",
+          "dataset": "zinc",
+          "source_name": "ZINC000926228441",
+          "source_file_id": "s155d0d8ad19e21fe",
+          "source_row_index": "1001245",
+          "inchikey": "HTVPLYDUHFEVQR-RYUDHWBXSA-N",
+          "test_subset": "",
+          "split": "val"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_b/zinc.csv",
+        "retained_source_row_index": 380877
+      }
+    },
+    {
+      "split": "test",
+      "removed_dataset": "zinc",
+      "removed_test_subset": "",
+      "retained_dataset": "zinc",
+      "retained_test_subset": "",
+      "removed_rows": 5740,
+      "example": {
+        "removed": {
+          "removed_name": "s155d0d8ad19e21fe:1371426",
+          "kept_name": "s155d0d8ad19e21fe:1079093",
+          "dataset": "zinc",
+          "source_name": "ZINC000188239012",
+          "source_file_id": "s155d0d8ad19e21fe",
+          "source_row_index": "1371426",
+          "inchikey": "AIQPERUQOHDWMZ-AWEZNQCLSA-O",
+          "test_subset": "",
+          "split": "test"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_b/zinc.csv",
+        "retained_source_row_index": 1079093
+      }
+    },
+    {
+      "split": "train",
+      "removed_dataset": "geom",
+      "removed_test_subset": "",
+      "retained_dataset": "geom",
+      "retained_test_subset": "",
+      "removed_rows": 2096,
+      "example": {
+        "removed": {
+          "removed_name": "s02b72e4cfcb7fb02:220359",
+          "kept_name": "s02b72e4cfcb7fb02:84453",
+          "dataset": "geom",
+          "source_name": "geom_train_2_504043",
+          "source_file_id": "s02b72e4cfcb7fb02",
+          "source_row_index": "220359",
+          "inchikey": "JISPYCVOTAXLGG-UHFFFAOYSA-N",
+          "test_subset": "",
+          "split": "train"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/geom.csv",
+        "retained_source_row_index": 84453
+      }
+    },
+    {
+      "split": "train",
+      "removed_dataset": "SPINDR",
+      "removed_test_subset": "",
+      "retained_dataset": "SPINDR",
+      "retained_test_subset": "",
+      "removed_rows": 1331,
+      "example": {
+        "removed": {
+          "removed_name": "s39a779879e46473b:428",
+          "kept_name": "s39a779879e46473b:50",
+          "dataset": "SPINDR",
+          "source_name": "SPINDR",
+          "source_file_id": "s39a779879e46473b",
+          "source_row_index": "428",
+          "inchikey": "VVEBLTKFUFYNOR-UHFFFAOYSA-O",
+          "test_subset": "",
+          "split": "train"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/SPINDR.csv",
+        "retained_source_row_index": 50
+      }
+    },
+    {
+      "split": "test",
+      "removed_dataset": "OMol25_small_mols",
+      "removed_test_subset": "",
+      "retained_dataset": "OMol25_small_mols",
+      "retained_test_subset": "",
+      "removed_rows": 1262,
+      "example": {
+        "removed": {
+          "removed_name": "sb43ff20a59a7b7c2:3274539",
+          "kept_name": "sb43ff20a59a7b7c2:3274538",
+          "dataset": "OMol25_small_mols",
+          "source_name": "protein_core_5ovu_coreB122_-2_1_ligand",
+          "source_file_id": "sb43ff20a59a7b7c2",
+          "source_row_index": "3274539",
+          "inchikey": "OFOBLEOULBTSOW-UHFFFAOYSA-N",
+          "test_subset": "",
+          "split": "test"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_b/OMol25_small_mols.csv",
+        "retained_source_row_index": 3274538
+      }
+    },
+    {
+      "split": "val",
+      "removed_dataset": "OMol25_small_mols",
+      "removed_test_subset": "",
+      "retained_dataset": "OMol25_small_mols",
+      "retained_test_subset": "",
+      "removed_rows": 466,
+      "example": {
+        "removed": {
+          "removed_name": "sb43ff20a59a7b7c2:3138585",
+          "kept_name": "sb43ff20a59a7b7c2:3138582",
+          "dataset": "OMol25_small_mols",
+          "source_name": "protein_core_3kig_coreA197_0_1_ligand",
+          "source_file_id": "sb43ff20a59a7b7c2",
+          "source_row_index": "3138585",
+          "inchikey": "WGEWFHNQCHZZMF-UHFFFAOYSA-N",
+          "test_subset": "",
+          "split": "val"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_b/OMol25_small_mols.csv",
+        "retained_source_row_index": 3138582
+      }
+    },
+    {
+      "split": "val",
+      "removed_dataset": "pubchem3d",
+      "removed_test_subset": "",
+      "retained_dataset": "pubchem3d",
+      "retained_test_subset": "",
+      "removed_rows": 425,
+      "example": {
+        "removed": {
+          "removed_name": "sc7692694e3def2f0:3763279",
+          "kept_name": "sc7692694e3def2f0:918323",
+          "dataset": "pubchem3d",
+          "source_name": "71706108_1",
+          "source_file_id": "sc7692694e3def2f0",
+          "source_row_index": "3763279",
+          "inchikey": "IZNQWTUGILHQCI-OAHLLOKOSA-N",
+          "test_subset": "",
+          "split": "val"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_b/pubchem3d.csv",
+        "retained_source_row_index": 918323
+      }
+    },
+    {
+      "split": "train",
+      "removed_dataset": "BindingNet-High",
+      "removed_test_subset": "",
+      "retained_dataset": "BindingNet-High",
+      "retained_test_subset": "",
+      "removed_rows": 416,
+      "example": {
+        "removed": {
+          "removed_name": "s2bbc43f9b322a32b:7096",
+          "kept_name": "s2bbc43f9b322a32b:1600",
+          "dataset": "BindingNet-High",
+          "source_name": "BindingNet-High",
+          "source_file_id": "s2bbc43f9b322a32b",
+          "source_row_index": "7096",
+          "inchikey": "LTZZOZXCYRCKFV-UHFFFAOYSA-O",
+          "test_subset": "",
+          "split": "train"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/BindingNet-High.csv",
+        "retained_source_row_index": 1600
+      }
+    },
+    {
+      "split": "val",
+      "removed_dataset": "geom",
+      "removed_test_subset": "",
+      "retained_dataset": "geom",
+      "retained_test_subset": "",
+      "removed_rows": 367,
+      "example": {
+        "removed": {
+          "removed_name": "sa171f9e443ddca76:23682",
+          "kept_name": "sa171f9e443ddca76:712",
+          "dataset": "geom",
+          "source_name": "geom_valid_0_612085",
+          "source_file_id": "sa171f9e443ddca76",
+          "source_row_index": "23682",
+          "inchikey": "YINCUMWULRUESF-UHFFFAOYSA-N",
+          "test_subset": "",
+          "split": "val"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/geom.csv",
+        "retained_source_row_index": 712
+      }
+    },
+    {
+      "split": "train",
+      "removed_dataset": "BindingNet-Low",
+      "removed_test_subset": "",
+      "retained_dataset": "BindingNet-Low",
+      "retained_test_subset": "",
+      "removed_rows": 339,
+      "example": {
+        "removed": {
+          "removed_name": "scd9a66185cba1c5b:8818",
+          "kept_name": "scd9a66185cba1c5b:2024",
+          "dataset": "BindingNet-Low",
+          "source_name": "BindingNet-Low",
+          "source_file_id": "scd9a66185cba1c5b",
+          "source_row_index": "8818",
+          "inchikey": "HUDVRTTVWXVPMO-UHFFFAOYSA-O",
+          "test_subset": "",
+          "split": "train"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/BindingNet-Low.csv",
+        "retained_source_row_index": 2024
+      }
+    },
+    {
+      "split": "train",
+      "removed_dataset": "BindingNet-Mid",
+      "removed_test_subset": "",
+      "retained_dataset": "BindingNet-Mid",
+      "retained_test_subset": "",
+      "removed_rows": 336,
+      "example": {
+        "removed": {
+          "removed_name": "sa7520445dd057cba:8781",
+          "kept_name": "sa7520445dd057cba:4655",
+          "dataset": "BindingNet-Mid",
+          "source_name": "BindingNet-Mid",
+          "source_file_id": "sa7520445dd057cba",
+          "source_row_index": "8781",
+          "inchikey": "IZXXKUVQQOCKPB-UHFFFAOYSA-N",
+          "test_subset": "",
+          "split": "train"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/BindingNet-Mid.csv",
+        "retained_source_row_index": 4655
+      }
+    },
+    {
+      "split": "test",
+      "removed_dataset": "geom",
+      "removed_test_subset": "",
+      "retained_dataset": "geom",
+      "retained_test_subset": "",
+      "removed_rows": 318,
+      "example": {
+        "removed": {
+          "removed_name": "s4676f621e4dbd898:45223",
+          "kept_name": "s4676f621e4dbd898:34966",
+          "dataset": "geom",
+          "source_name": "geom_test_0_142087",
+          "source_file_id": "s4676f621e4dbd898",
+          "source_row_index": "45223",
+          "inchikey": "MXDDUMHXOMXCTO-OAHLLOKOSA-N",
+          "test_subset": "",
+          "split": "test"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/test/geom.csv",
+        "retained_source_row_index": 34966
+      }
+    },
+    {
+      "split": "test",
+      "removed_dataset": "pubchem3d",
+      "removed_test_subset": "",
+      "retained_dataset": "pubchem3d",
+      "retained_test_subset": "",
+      "removed_rows": 230,
+      "example": {
+        "removed": {
+          "removed_name": "sc7692694e3def2f0:6270326",
+          "kept_name": "sc7692694e3def2f0:1091567",
+          "dataset": "pubchem3d",
+          "source_name": "2391367_3",
+          "source_file_id": "sc7692694e3def2f0",
+          "source_row_index": "6270326",
+          "inchikey": "IFPUXPWAMUPUPO-HNNXBMFYSA-N",
+          "test_subset": "",
+          "split": "test"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_b/pubchem3d.csv",
+        "retained_source_row_index": 1091567
+      }
+    },
+    {
+      "split": "train",
+      "removed_dataset": "Kinodata-3D",
+      "removed_test_subset": "",
+      "retained_dataset": "Kinodata-3D",
+      "retained_test_subset": "",
+      "removed_rows": 133,
+      "example": {
+        "removed": {
+          "removed_name": "s87d484cd7e40a582:2728",
+          "kept_name": "s87d484cd7e40a582:2171",
+          "dataset": "Kinodata-3D",
+          "source_name": "Kinodata-3D",
+          "source_file_id": "s87d484cd7e40a582",
+          "source_row_index": "2728",
+          "inchikey": "DKZYXHCYPUVGAF-UHFFFAOYSA-O",
+          "test_subset": "",
+          "split": "train"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/Kinodata-3D.csv",
+        "retained_source_row_index": 2171
+      }
+    },
+    {
+      "split": "train",
+      "removed_dataset": "OMol25_bio_mols",
+      "removed_test_subset": "",
+      "retained_dataset": "HiQBind",
+      "retained_test_subset": "",
+      "removed_rows": 62,
+      "example": {
+        "removed": {
+          "removed_name": "s73e292fb595ca7ed:24308",
+          "kept_name": "s629f4fd515678fb3:11485",
+          "dataset": "OMol25_bio_mols",
+          "source_name": "OMol25_bio_mols",
+          "source_file_id": "s73e292fb595ca7ed",
+          "source_row_index": "24308",
+          "inchikey": "KSUTVZCNRWWYFG-UHFFFAOYSA-N",
+          "test_subset": "",
+          "split": "train"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/HiQBind.csv",
+        "retained_source_row_index": 11485
+      }
+    },
+    {
+      "split": "train",
+      "removed_dataset": "OMol25_small_mols",
+      "removed_test_subset": "",
+      "retained_dataset": "HiQBind",
+      "retained_test_subset": "",
+      "removed_rows": 57,
+      "example": {
+        "removed": {
+          "removed_name": "sb43ff20a59a7b7c2:3026490",
+          "kept_name": "s629f4fd515678fb3:19656",
+          "dataset": "OMol25_small_mols",
+          "source_name": "protein_core_185l_coreA121_0_1_ligand",
+          "source_file_id": "sb43ff20a59a7b7c2",
+          "source_row_index": "3026490",
+          "inchikey": "SIKJAQJRHWYJAI-UHFFFAOYSA-N",
+          "test_subset": "",
+          "split": "train"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/HiQBind.csv",
+        "retained_source_row_index": 19656
+      }
+    },
+    {
+      "split": "train",
+      "removed_dataset": "BindingMoad",
+      "removed_test_subset": "",
+      "retained_dataset": "BindingMoad",
+      "retained_test_subset": "",
+      "removed_rows": 49,
+      "example": {
+        "removed": {
+          "removed_name": "sb8c29e6b561fcf96:1435",
+          "kept_name": "sb8c29e6b561fcf96:696",
+          "dataset": "BindingMoad",
+          "source_name": "BindingMoad",
+          "source_file_id": "sb8c29e6b561fcf96",
+          "source_row_index": "1435",
+          "inchikey": "CHJJGSNFBQVOTG-UHFFFAOYSA-O",
+          "test_subset": "",
+          "split": "train"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/BindingMoad.csv",
+        "retained_source_row_index": 696
+      }
+    },
+    {
+      "split": "train",
+      "removed_dataset": "HiQBind",
+      "removed_test_subset": "",
+      "retained_dataset": "HiQBind",
+      "retained_test_subset": "",
+      "removed_rows": 23,
+      "example": {
+        "removed": {
+          "removed_name": "s629f4fd515678fb3:2427",
+          "kept_name": "s629f4fd515678fb3:975",
+          "dataset": "HiQBind",
+          "source_name": "HiQBind",
+          "source_file_id": "s629f4fd515678fb3",
+          "source_row_index": "2427",
+          "inchikey": "VZMMUQFHUUOVEM-UHFFFAOYSA-M",
+          "test_subset": "",
+          "split": "train"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/HiQBind.csv",
+        "retained_source_row_index": 975
+      }
+    },
+    {
+      "split": "train",
+      "removed_dataset": "BindingNet-Low",
+      "removed_test_subset": "",
+      "retained_dataset": "BindingNet-High",
+      "retained_test_subset": "",
+      "removed_rows": 8,
+      "example": {
+        "removed": {
+          "removed_name": "scd9a66185cba1c5b:14083",
+          "kept_name": "s2bbc43f9b322a32b:161833",
+          "dataset": "BindingNet-Low",
+          "source_name": "BindingNet-Low",
+          "source_file_id": "scd9a66185cba1c5b",
+          "source_row_index": "14083",
+          "inchikey": "HYJXSBSCVSGKHB-UHFFFAOYSA-N",
+          "test_subset": "",
+          "split": "train"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/BindingNet-High.csv",
+        "retained_source_row_index": 161833
+      }
+    },
+    {
+      "split": "train",
+      "removed_dataset": "CrossDocked2020",
+      "removed_test_subset": "",
+      "retained_dataset": "CrossDocked2020",
+      "retained_test_subset": "",
+      "removed_rows": 8,
+      "example": {
+        "removed": {
+          "removed_name": "s4a35225f47ae5d62:33467",
+          "kept_name": "s4a35225f47ae5d62:6738",
+          "dataset": "CrossDocked2020",
+          "source_name": "CrossDocked2020",
+          "source_file_id": "s4a35225f47ae5d62",
+          "source_row_index": "33467",
+          "inchikey": "LDCNZDDIZZCZOV-UHFFFAOYSA-N",
+          "test_subset": "",
+          "split": "train"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/CrossDocked2020.csv",
+        "retained_source_row_index": 6738
+      }
+    },
+    {
+      "split": "val",
+      "removed_dataset": "OMol25_small_mols",
+      "removed_test_subset": "",
+      "retained_dataset": "OMol25_bio_mols",
+      "retained_test_subset": "",
+      "removed_rows": 4,
+      "example": {
+        "removed": {
+          "removed_name": "sb43ff20a59a7b7c2:4265387",
+          "kept_name": "sd374d1b4485d72f9:15",
+          "dataset": "OMol25_small_mols",
+          "source_name": "omol_solvated_protein_outputs_240923_spf_1820064_0_1_step2_ligand",
+          "source_file_id": "sb43ff20a59a7b7c2",
+          "source_row_index": "4265387",
+          "inchikey": "YNQLUTRBYVCPMQ-UHFFFAOYSA-N",
+          "test_subset": "",
+          "split": "val"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/OMol25_bio_mols.csv",
+        "retained_source_row_index": 15
+      }
+    },
+    {
+      "split": "train",
+      "removed_dataset": "Plinder",
+      "removed_test_subset": "",
+      "retained_dataset": "BindingMoad",
+      "retained_test_subset": "",
+      "removed_rows": 3,
+      "example": {
+        "removed": {
+          "removed_name": "s80886963a532c3cd:41779",
+          "kept_name": "sb8c29e6b561fcf96:7991",
+          "dataset": "Plinder",
+          "source_name": "Plinder",
+          "source_file_id": "s80886963a532c3cd",
+          "source_row_index": "41779",
+          "inchikey": "UPKZCDMMPFGKML-UHFFFAOYSA-N",
+          "test_subset": "",
+          "split": "train"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/BindingMoad.csv",
+        "retained_source_row_index": 7991
+      }
+    },
+    {
+      "split": "test",
+      "removed_dataset": "BindingNet-Low",
+      "removed_test_subset": "",
+      "retained_dataset": "BindingNet-Low",
+      "retained_test_subset": "",
+      "removed_rows": 3,
+      "example": {
+        "removed": {
+          "removed_name": "s2345270cd2f32a9c:773",
+          "kept_name": "s2345270cd2f32a9c:186",
+          "dataset": "BindingNet-Low",
+          "source_name": "BindingNet-Low",
+          "source_file_id": "s2345270cd2f32a9c",
+          "source_row_index": "773",
+          "inchikey": "FVTCRASFADXXNN-UHFFFAOYSA-L",
+          "test_subset": "",
+          "split": "test"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/test/BindingNet-Low.csv",
+        "retained_source_row_index": 186
+      }
+    },
+    {
+      "split": "train",
+      "removed_dataset": "BindingNet-Mid",
+      "removed_test_subset": "",
+      "retained_dataset": "BindingNet-Low",
+      "retained_test_subset": "",
+      "removed_rows": 2,
+      "example": {
+        "removed": {
+          "removed_name": "sa7520445dd057cba:23870",
+          "kept_name": "scd9a66185cba1c5b:237431",
+          "dataset": "BindingNet-Mid",
+          "source_name": "BindingNet-Mid",
+          "source_file_id": "sa7520445dd057cba",
+          "source_row_index": "23870",
+          "inchikey": "JNWSZKUCTRQPEM-UHFFFAOYSA-N",
+          "test_subset": "",
+          "split": "train"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/BindingNet-Low.csv",
+        "retained_source_row_index": 237431
+      }
+    },
+    {
+      "split": "test",
+      "removed_dataset": "OMol25_small_mols",
+      "removed_test_subset": "",
+      "retained_dataset": "OMol25_bio_mols",
+      "retained_test_subset": "",
+      "removed_rows": 2,
+      "example": {
+        "removed": {
+          "removed_name": "sb43ff20a59a7b7c2:4303699",
+          "kept_name": "sc506e8f85226102f:48",
+          "dataset": "OMol25_small_mols",
+          "source_name": "dna_6jfu_C4_S-_frame1_-1_1",
+          "source_file_id": "sb43ff20a59a7b7c2",
+          "source_row_index": "4303699",
+          "inchikey": "LYCAIKOWRPUZTN-UHFFFAOYSA-N",
+          "test_subset": "",
+          "split": "test"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/test/OMol25_bio_mols.csv",
+        "retained_source_row_index": 48
+      }
+    },
+    {
+      "split": "val",
+      "removed_dataset": "BindingNet-Low",
+      "removed_test_subset": "",
+      "retained_dataset": "BindingNet-Low",
+      "retained_test_subset": "",
+      "removed_rows": 1,
+      "example": {
+        "removed": {
+          "removed_name": "s3905f77d2e74a8d9:660",
+          "kept_name": "s3905f77d2e74a8d9:659",
+          "dataset": "BindingNet-Low",
+          "source_name": "BindingNet-Low",
+          "source_file_id": "s3905f77d2e74a8d9",
+          "source_row_index": "660",
+          "inchikey": "HYBZWVLPALMACV-UHFFFAOYSA-N",
+          "test_subset": "",
+          "split": "val"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/BindingNet-Low.csv",
+        "retained_source_row_index": 659
+      }
+    },
+    {
+      "split": "test",
+      "removed_dataset": "BindingMoad",
+      "removed_test_subset": "",
+      "retained_dataset": "BindingMoad",
+      "retained_test_subset": "",
+      "removed_rows": 1,
+      "example": {
+        "removed": {
+          "removed_name": "s53276b9ce2387aa8:464",
+          "kept_name": "s53276b9ce2387aa8:167",
+          "dataset": "BindingMoad",
+          "source_name": "BindingMoad",
+          "source_file_id": "s53276b9ce2387aa8",
+          "source_row_index": "464",
+          "inchikey": "UHOVQNZJYSORNB-UHFFFAOYSA-N",
+          "test_subset": "",
+          "split": "test"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/test/BindingMoad.csv",
+        "retained_source_row_index": 167
+      }
+    },
+    {
+      "split": "test",
+      "removed_dataset": "Plinder",
+      "removed_test_subset": "",
+      "retained_dataset": "BindingMoad",
+      "retained_test_subset": "",
+      "removed_rows": 1,
+      "example": {
+        "removed": {
+          "removed_name": "scd4bb26f1809bdc6:294",
+          "kept_name": "s53276b9ce2387aa8:167",
+          "dataset": "Plinder",
+          "source_name": "Plinder",
+          "source_file_id": "scd4bb26f1809bdc6",
+          "source_row_index": "294",
+          "inchikey": "UHOVQNZJYSORNB-UHFFFAOYSA-N",
+          "test_subset": "",
+          "split": "test"
+        },
+        "retained_source_file": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/test/BindingMoad.csv",
+        "retained_source_row_index": 167
+      }
+    }
+  ],
+  "interpretation": "Each removed row is classified relative to its retained first occurrence. Different-dataset row counts can include repeated rows within the removed dataset; they are not counts of distinct shared texts.",
+  "ownership_policy": "Exact enriched_text equality within each merged split; earliest input byte offset retained; GEOM-Revisited preserved separately.",
+  "alias_sha256": "f5524f2b65a00de6a0795844c8c3ea875bbc353c1992cfad839418e959aac1cc"
+}

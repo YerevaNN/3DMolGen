@@ -1,0 +1,17 @@
+reference_root=/nfs/h100/raid/chem/3D_big_data_new
+group_c_root=/nfs/h100/raid/chem/3D_big_data/grp_c
+output_root=/nfs/h100/raid/chem/3D_big_data_new
+dataset=nablaDFT
+seed=42
+target_rows=63381
+Loading reference val/test SMILES (Group A+B only)...
+Original NablaDFT train rows: 8,757,879
+Target NablaDFT val rows: 63,381
+Scanned valid NablaDFT train rows: 8,757,879
+Nabla val candidate rows from reference val overlap: 30,840
+Nabla train rows excluded by reference test overlap: 6,879
+Filtered NablaDFT train rows kept after val selection: 8,687,616
+Selected NablaDFT val: 63,384 rows total (30,840 from val candidates, 32,544 filled from filtered train)
+Final NablaDFT sizes written: train=8,687,616, val=63,384
+Saved stats CSV to /nfs/h100/raid/chem/3D_big_data_new/group_c_split_stats.csv
+Done.

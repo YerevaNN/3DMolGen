@@ -855,6 +855,11 @@ def export_qwen3_dcp_step_to_hf(
 
     # Save result
     print(f"[INFO] Saving HF checkpoint to {out_dir}")
+    if job_cfg is not None:
+        tokenizer_source = _resolve_tokenizer_path_from_job_cfg(job_cfg)
+        if tokenizer_source is not None:
+            from molgen3D.data_processing.coordtoken_contract import attach_model_contract
+            attach_model_contract(hf_model.config, tokenizer_source, out_dir)
     hf_model.save_pretrained(out_dir, safe_serialization=True)
     print(f"[SUCCESS] Converted {step_dir.name} ({len(titan_state)} tensors, {titan_embed.shape[0]} vocab) -> {out_dir.name}")
     print(f"[INFO] Verified: embeddings tied, finite weights, forward fidelity")

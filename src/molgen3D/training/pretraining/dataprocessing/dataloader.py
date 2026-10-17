@@ -567,6 +567,10 @@ class JsonlTaggedPackedDataset(IterableDataset):
             self.rank = rank
 
         self._tokenizer_path = tokenizer_path
+        from molgen3D.data_processing.coordtoken_contract import load_contract
+        self._coordtoken_contract = load_contract(tokenizer_path) if tokenizer_path else None
+        if self._coordtoken_contract and serialization_mode != "pairs":
+            raise ValueError("CoordToken requires complete, untruncated conformer pairs")
         self._tokenizer = tokenizer
         self.sep_id: Optional[int] = None
         self.pad_id: Optional[int] = None
@@ -897,11 +901,18 @@ class JsonlTaggedPackedDataset(IterableDataset):
         try:
             obj = _json_loads(raw)
         except Exception:
+            if self._coordtoken_contract:raise ValueError("Malformed CoordToken JSON record")
             return None
 
+        if self._coordtoken_contract:
+            from molgen3D.data_processing.coordtoken_contract import validate_record
+            validate_record(obj,self._coordtoken_contract)
+        elif obj.get("coordtoken_format"):
+            raise ValueError("Versioned CoordToken records require the matching LM tokenizer")
         canon = (obj.get("canonical_smiles") or "").strip()
         emb = (obj.get("embedded_smiles") or "").strip()
         if not is_valid_unit(canon, emb, min_emb_len=self.min_emb_len):
+            if self._coordtoken_contract:raise ValueError("CoordToken record rejected by length/field filter")
             return None
         unit = build_unit(canon, emb)
         if self._stats.enabled:
@@ -910,6 +921,7 @@ class JsonlTaggedPackedDataset(IterableDataset):
         if not tokens:
             return None
         if len(tokens) > self.max_unit_tokens:
+            if self._coordtoken_contract:raise ValueError("CoordToken molecule exceeds context; truncation is forbidden")
             if not self.truncate_overflow_units:
                 self._maybe_log_monster(len(tokens))
                 return None

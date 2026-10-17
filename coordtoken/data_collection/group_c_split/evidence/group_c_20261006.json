@@ -1,0 +1,106 @@
+{
+  "status": "group_c_and_global_molecular_split_complete",
+  "selection": {
+    "target_rows": 63325,
+    "existing_validation_candidate_rows": 29684,
+    "existing_validation_selected_rows": 29684,
+    "eligible_fill_rows_absent_from_other_training": 7890760,
+    "new_validation_rows": 33656,
+    "selected_validation_rows": 63340,
+    "target_shortfall": 0
+  },
+  "counts": {
+    "train": 8689383,
+    "val": 63340,
+    "excluded_test_overlap": 5156
+  },
+  "files": [
+    {
+      "dataset": "nablaDFT",
+      "role": "train",
+      "rows": 8689383,
+      "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/group_c_20261006/run/candidate/train/nablaDFT.csv",
+      "sha256": "1c17cb5d98e9e9128f9cb791d6e7d04184c62f0cb5872062caab6c8fb32d63e0"
+    },
+    {
+      "dataset": "nablaDFT",
+      "role": "val",
+      "rows": 63340,
+      "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/group_c_20261006/run/candidate/val/nablaDFT.csv",
+      "sha256": "ae4aad940f70bca60a40aae3bad739ad9db2f632be5d3d830fe9fff9867e543f"
+    },
+    {
+      "dataset": "nablaDFT_conformations",
+      "role": "test",
+      "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/group_c_20261006/run/candidate/test/nablaDFT_conformations.csv",
+      "rows": 1623912,
+      "sha256": "bad8c75c9edc2247816ac6c90b996266e5e82f3a2b3142d24f7a3996a53bc8ad"
+    },
+    {
+      "dataset": "nablaDFT_scaffolds",
+      "role": "test",
+      "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/group_c_20261006/run/candidate/test/nablaDFT_scaffolds.csv",
+      "rows": 1130328,
+      "sha256": "86c0a97cf24b11181633fd6a82902c83e80dd91f61e176a605cd3ea0486433f1"
+    },
+    {
+      "dataset": "nablaDFT_structures",
+      "role": "test",
+      "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/group_c_20261006/run/candidate/test/nablaDFT_structures.csv",
+      "rows": 1152833,
+      "sha256": "5a805aafe104b852a2757e1675de6a7b7b8232a8047c8f84a4170729e05d3ff2"
+    }
+  ],
+  "other_training_rows_removed": 0,
+  "checks": {
+    "nabla_train_vs_actual_holdouts_keys": 0,
+    "nabla_validation_vs_actual_tests_keys": 0,
+    "new_nabla_validation_vs_group_a_train_rows": 0,
+    "group_b_training": [
+      {
+        "dataset": "KIBA-3D",
+        "matching_training_keys": 0,
+        "matching_training_rows": 0
+      },
+      {
+        "dataset": "OMol25_small_mols",
+        "matching_training_keys": 0,
+        "matching_training_rows": 0
+      },
+      {
+        "dataset": "pubchem3d",
+        "matching_training_keys": 0,
+        "matching_training_rows": 0
+      },
+      {
+        "dataset": "zinc",
+        "matching_training_keys": 0,
+        "matching_training_rows": 0
+      }
+    ],
+    "unchanged_ab_files_hash_verified": 54,
+    "actual_validation_reparsed": true
+  },
+  "seconds": 294.4315489958972,
+  "prior_independent_audit": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/group_b_20261006/independent_overlap_verification/report.json",
+  "combined_manifest": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/group_c_20261006/run/combined_split_manifest.json",
+  "exact_sample_deduplication_performed": false,
+  "policy": {
+    "identity": "full Standard InChIKey",
+    "test_precedence": true,
+    "validation_fraction_of_full_nabla_snapshot": 0.005,
+    "candidate_order": "test exclusions, existing-validation matches, fill from remaining nabla training keys absent from every Group A/B training set",
+    "whole_key_groups": true,
+    "seed": 42,
+    "other_training_removals_allowed": false,
+    "conformation_test_molecular_overlap_exception": true,
+    "scaffold_wide_exclusion": false,
+    "unselected_existing_validation_candidates": "exclude; never return to training"
+  },
+  "date": "2026-10-06",
+  "job_id": "314145",
+  "implementation_commit": "6a869ec",
+  "scheduler_state": "COMPLETED",
+  "scheduler_elapsed": "00:04:56",
+  "scheduler_exit_code": "0:0"
+}

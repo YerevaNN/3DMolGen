@@ -1,0 +1,43 @@
+{
+  "files": [
+    {
+      "path": "/mnt/weka/fgeikyan/fsq/val/nablaDFT.csv",
+      "size": 38549376,
+      "mtime_ns": 1774216721834982315,
+      "label": "val/nablaDFT",
+      "bit": 1,
+      "rows": 63333,
+      "sha256": "62b327cda5f73248ca7374daf414383160fb2821773f631371b7a3d377ee849d"
+    },
+    {
+      "path": "/mnt/weka/fgeikyan/fsq/test/nablaDFT_conformations.csv",
+      "size": 973098216,
+      "mtime_ns": 1768311400403824797,
+      "label": "test/nablaDFT_conformations",
+      "bit": 2,
+      "rows": 1623912,
+      "sha256": "bad8c75c9edc2247816ac6c90b996266e5e82f3a2b3142d24f7a3996a53bc8ad"
+    },
+    {
+      "path": "/mnt/weka/fgeikyan/fsq/test/nablaDFT_scaffolds.csv",
+      "size": 694803833,
+      "mtime_ns": 1768311385112127526,
+      "label": "test/nablaDFT_scaffolds",
+      "bit": 4,
+      "rows": 1130328,
+      "sha256": "86c0a97cf24b11181633fd6a82902c83e80dd91f61e176a605cd3ea0486433f1"
+    },
+    {
+      "path": "/mnt/weka/fgeikyan/fsq/test/nablaDFT_structures.csv",
+      "size": 702603117,
+      "mtime_ns": 1768311391408002886,
+      "label": "test/nablaDFT_structures",
+      "bit": 8,
+      "rows": 1152833,
+      "sha256": "5a805aafe104b852a2757e1675de6a7b7b8232a8047c8f84a4170729e05d3ff2"
+    }
+  ],
+  "unique_texts": 1845963,
+  "unique_valid_keys": 1845600,
+  "failed_unique_texts": 0
+}

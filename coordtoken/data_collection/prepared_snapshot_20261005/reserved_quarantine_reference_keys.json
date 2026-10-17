@@ -1,0 +1,13 @@
+{
+  "policy": "Identity-only protection, not an evaluation record",
+  "rows": [
+    {
+      "name": "chembl3d_110806",
+      "role": "validation",
+      "full_standard_inchikey": "SPDSVTWELJAFBC-UHFFFAOYSA-O",
+      "reason": "Preserve validation identity protection even though its ambiguous geometry/stereo record is quarantined",
+      "source": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/backup_un/chembl3d.csv",
+      "row_sha256": "c9b8a23cef5b7460e8b4be6d0974d0411570923a8b3283ef9cd18376666464fd"
+    }
+  ]
+}

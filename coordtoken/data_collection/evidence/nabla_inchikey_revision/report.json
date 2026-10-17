@@ -1,0 +1,43 @@
+{
+  "status": "complete",
+  "input": "/mnt/weka/fgeikyan/fsq/merged_train.csv",
+  "output": "/mnt/weka/fgeikyan/CoordToken/data_collection/runs/nabla_holdouts_v1/merged_train.csv",
+  "input_rows": 190214248,
+  "removed_rows": 288754,
+  "remaining_rows": 189925494,
+  "preserved_sources": [],
+  "conversion_failure_rows_retained": 0,
+  "quarantined_rows": 13,
+  "overlap_removed_rows": 288741,
+  "reference_labels": [
+    "test/nablaDFT_scaffolds",
+    "test/nablaDFT_structures",
+    "val/nablaDFT"
+  ],
+  "reference_mask": 13,
+  "removed_by_source": {
+    "BindingMoad": 87,
+    "BindingNet-High": 182,
+    "BindingNet-Low": 317,
+    "BindingNet-Mid": 195,
+    "CrossDocked2020": 256,
+    "HiQBind": 99,
+    "KIBA-3D": 693,
+    "Kinodata-3D": 65,
+    "OMol25_bio_mols": 7909,
+    "OMol25_small_mols": 233,
+    "Plinder": 249,
+    "SAIR": 555,
+    "SPINDR": 66,
+    "chembl3d": 9253,
+    "geom": 87882,
+    "nablaDFT": 503,
+    "pubchem3d": 163872,
+    "zinc": 16338
+  },
+  "unique_removal_texts_verified": 42018,
+  "sha256": "cc11a42b2c2bafafe501caef73c811b39eadf3c3edce6167f3c7d98d37381298",
+  "output_bytes": 127872581543,
+  "elapsed_seconds": 681.5990516762249,
+  "validation": "Regenerated removal keys; reconciled every source/text count with completed audit; verified chunk hashes during ordered assembly."
+}

@@ -1,0 +1,65 @@
+{
+  "status": "passed",
+  "rows": [
+    {
+      "name": "141568402_4",
+      "flags": [],
+      "full_standard_inchikey": "SMNPSFWHSKEVDL-BVNLRVGSSA-N",
+      "atoms": 44
+    },
+    {
+      "name": "141568402_1",
+      "flags": [],
+      "full_standard_inchikey": "SMNPSFWHSKEVDL-BVNLRVGSSA-N",
+      "atoms": 44
+    },
+    {
+      "name": "141568402_7",
+      "flags": [],
+      "full_standard_inchikey": "SMNPSFWHSKEVDL-BVNLRVGSSA-N",
+      "atoms": 44
+    },
+    {
+      "name": "141568402_9",
+      "flags": [],
+      "full_standard_inchikey": "SMNPSFWHSKEVDL-BVNLRVGSSA-N",
+      "atoms": 44
+    },
+    {
+      "name": "141568402_2",
+      "flags": [],
+      "full_standard_inchikey": "SMNPSFWHSKEVDL-BVNLRVGSSA-N",
+      "atoms": 44
+    },
+    {
+      "name": "141568402_8",
+      "flags": [],
+      "full_standard_inchikey": "SMNPSFWHSKEVDL-BVNLRVGSSA-N",
+      "atoms": 44
+    },
+    {
+      "name": "141568402_6",
+      "flags": [],
+      "full_standard_inchikey": "SMNPSFWHSKEVDL-BVNLRVGSSA-N",
+      "atoms": 44
+    },
+    {
+      "name": "141568402_5",
+      "flags": [],
+      "full_standard_inchikey": "SMNPSFWHSKEVDL-BVNLRVGSSA-N",
+      "atoms": 44
+    },
+    {
+      "name": "141568402_0",
+      "flags": [],
+      "full_standard_inchikey": "SMNPSFWHSKEVDL-BVNLRVGSSA-N",
+      "atoms": 44
+    },
+    {
+      "name": "141568402_3",
+      "flags": [],
+      "full_standard_inchikey": "SMNPSFWHSKEVDL-BVNLRVGSSA-N",
+      "atoms": 44
+    }
+  ]
+}

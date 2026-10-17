@@ -1,0 +1,40 @@
+{
+  "status": "complete",
+  "splits": [
+    {
+      "split": "val",
+      "source": "/mnt/weka/fgeikyan/CoordToken/data_collection/rebuild_20260930/downloads/loqi_references/val_h.pt",
+      "source_sha256": "df0b8f0690647a14d09cfb7143a2f1cdb8957dea4edcbf3145459fba39418807",
+      "csv": "/mnt/weka/fgeikyan/fsq/val/chembl3d.csv",
+      "csv_sha256": "1f679aa4f3a8038d88f59c48590389a6facff743147908bcc1171b0ed65f166d",
+      "counts": {
+        "rows": 182420,
+        "source_reencoding_matched_within_precision": 182355,
+        "source_graph_and_conformer_matched": 64
+      },
+      "failures": [
+        {
+          "name": "chembl3d_110806",
+          "status": "graph_mismatch",
+          "features": [
+            "topology_or_specified_stereo_or_atom_features"
+          ]
+        }
+      ]
+    },
+    {
+      "split": "test",
+      "source": "/mnt/weka/fgeikyan/CoordToken/data_collection/rebuild_20260930/downloads/loqi_references/test_small_h.pt",
+      "source_sha256": "94c71326625ef32aa2588ead9da53e25523584a4d262ccd277a27c481f5c83a6",
+      "csv": "/mnt/weka/fgeikyan/fsq/test/chembl3d.csv",
+      "csv_sha256": "423ee2d7ee1aa2013a11c0f54a174c0127e61d3cf31aa82b3600a103ed6edf41",
+      "counts": {
+        "rows": 37065,
+        "source_reencoding_matched_within_precision": 37054,
+        "source_graph_and_conformer_matched": 11
+      },
+      "failures": []
+    }
+  ],
+  "scope": "Every retained later ChEMBL val/test row compared against its exact indexed publisher molecule. No model evaluation or geometry generation. Fast matches reproduce serialized graph tokens and coordinates; fallback demands exact graph/stereo mapping and aligned RMSD <=0.001 A."
+}

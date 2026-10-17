@@ -1,62 +1,74 @@
-# New CoordToken integration: file map
+# Implemented atom/register interface
 
-Inspection date: 2026-10-16. This is a proposed implementation plan; the code snapshot still uses the legacy all-token FSQ model. Paths below are relative to the repository root. The new model emits **one 12-bit code per atom plus one transmitted molecular register code**, with no codes for bonds, rings, branches, dots, or padding.
+Format version: `atom12_reg1_prefix_v1`. Selected checkpoint: the immutable epoch-2 artifact linked in [the handoff](../COLLEAGUE_HANDOFF.md).
 
-The exact referenced CoordToken source is included in this branch under `coordtoken/`, with the model and quantizer at `coordtoken/research/mixed_epoch2_20261014_v3/`. See [the combined handoff](../COLLEAGUE_HANDOFF.md).
+## Contract
 
-## Representation contract
+For N atoms, serialize N+1 codes: a leading molecular code, then the graph string with one code immediately after each atom. For example:
 
-Port the exact tested model and quantizer from the selected checkpoint's frozen CoordToken source. New checkpoints contain `model`, `config`, `vocab`, and `manifest`; they are not the old Lightning `state_dict`/`hyper_parameters` format. Require strict state loading, a supported configuration, the exact vocabulary, and an explicit checkpoint SHA. The current `strict=False` loader can accept an incompatible checkpoint without providing a valid model.
+```text
+[SMILES]O=CO[/SMILES][CONFORMER]<317>[C]<42>(=[O]<901>)[O]<0>[/CONFORMER]
+```
 
-Keep old checkpoints/data accessible through an explicit legacy format. Add a distinct new format/version rather than changing the meaning of existing streams. A proposed atom-pair serialization is `[C]<11>([O]<33>)<REG><7>`: two atom codes and one register code, with punctuation preserved and uncoded. The marker spelling is a design proposal, not a feature already implemented. Use the same contract for preprocessing, LM tokenization, generation, and decoding.
+The leading code and atom codes are each ordinary added Qwen tokens `<0>` ... `<4095>`. They share IDs/vocabulary; no register marker is added. The leading code is a trained next-token target. Structural tokens remain graph context and receive no geometry code. A graph's exact atom order remains the order in the encoded string.
 
-On decode, scatter atom codes into graph-token positions; the register occupies the appended register slot after the padded graph width. Non-atom/padded geometry vectors must be **zero vectors**, not the quantized vector for code ID 0. ID 0 is valid molecular geometry. The decoder still receives graph identities for structural context. Preserve coordinate centering, atom order, attention masks, positional embeddings, FP32 quantization/output, and the supported bf16 inference path. An absent or duplicate register is an invalid new-format record, not a reason to drop the register or infer it.
+Inside the neural model, the register is appended after the padded graph width, not prepended. The adapter translates between this dense layout and the leading text code. Missing/extra/out-of-range codes fail. Code ID zero is valid; absent punctuation geometry becomes a zero vector, not quantized ID zero. Checkpoints load strictly with config, vocabulary and SHA-256 checks.
 
-## Core implementation and data path
+The model and quantizer are copied from the selected run's frozen source (only the model import changes). Centering, masks, atom order, graph identities and register placement match training. CPU fp32 is supported; GPU inference supports fp32 or bf16. Quantization remains fp32 internally. Numerical precision/batch kernels may affect codes close to quantization boundaries; keep the recorded preprocessing precision fixed across a dataset.
 
-| File | Required change |
-|---|---|
-| `src/molgen3D/data_processing/smiles_encoder_decoder_fsq.py` | Add a versioned new-model adapter/loader; atom masks; sparse atom-code serialization/parsing; separate register handling; strict ID/count validation; correct dense reconstruction for decode. Extend `FSQRepresentation` to expose graph tokens, atom positions, atom codes/latents and register code/latent explicitly. Retain legacy dispatch. Explicit paths must fail if unavailable rather than silently fall back to an old checkpoint. |
-| **New** `src/molgen3D/data_processing/coordtoken_model.py` | Port the selected checkpoint's exact `Config`/`Tokenizer` with encoder/decoder registers and masked geometry bottleneck; use package-relative imports. Do not approximate the new model using the old `MolFSQModel`. |
-| **New** `src/molgen3D/data_processing/coordtoken_quantizer.py` | Port the frozen quantizer or establish numerical equivalence against it. The existing `fsq.py` is a smaller implementation; 4096 IDs alone do not prove equivalent quantization. Preserve legacy `fsq.py` for old models. |
-| `src/molgen3D/data_processing/preprocess_big_data_fsq.py` | Select the new adapter explicitly; emit format/checkpoint metadata; batch atom masks/register outputs correctly; distinguish graph-token length from serialized LM length. Add or call a streaming path for the final coordinate CSV, since the current grouped-molecule pipeline is not automatically a reader for that final CSV. |
-| **New** `src/molgen3D/data_processing/preprocess_coordtoken_csv.py` | Recommended dedicated streaming CSV-to-versioned-JSONL encoder for the cleaned corpus; preserve row identity and split, bound GPU batches, fail/report unsupported records, and record counts/checksum provenance. Never re-split or silently drop rows here. |
-| `src/molgen3D/data_processing/utils.py` | Expose format/checkpoint/version options through `get_encoder()` and its encoder configuration; avoid legacy defaults in a new-format run. |
-| `src/molgen3D/data_processing/smiles_encoder_decoder.py` | Make graph extraction register-aware (prefer structured parsing), and correct/test the existing `decode_cartesian_v2` sanitize/stereo/explicit-H behavior. Keep the stored representation's known bracket ambiguity documented; changing the decoder cannot restore lost source information. |
-| `scripts/run_fsq_bigdata_preprocessing.sbatch`, `scripts/submit_fsq_bigdata_preprocessing.sh` | Pass explicit new checkpoint/format/input/output settings; write to a separate encoded dataset directory. Add a CSV launcher if using the new streaming entry point. |
-| `scripts/shuffle_jsonl_dataset.py`, `scripts/run_fsq_shuffle_dataset.sbatch` | Check preservation of every encoded record and new metadata; update destinations and input manifests for the new corpus. The shuffle algorithm itself need not change if it treats records opaquely. |
+`decode_cartesian_v2` now sanitizes/assigns input SMILES stereochemistry while retaining explicit H atom positions. The old `coords_rmsd` helper no longer aligns/mutates its input molecule in place; its aligned comparison semantics are otherwise unchanged. Published tokenizer reconstruction metrics use a separate unaligned evaluator. None of these fixes recovers source chemistry lost through historical decorative atom brackets.
 
-Existing legacy FSQ codes cannot be converted by deleting punctuation codes: atom and register codes must be recomputed from the retained coordinate-bearing records with the new checkpoint. Re-encode all used train/validation/test/ICL/SFT inputs under the same versioned contract. Reuse the already defined molecular splits.
+## Coordinate CSV to Qwen records
 
-## Autoregressive training and inference
+Use Python 3.10 and the repository environment (see `docs/CURRENT_TRAINING_HANDOFF.md`). The selected codec was checked with PyTorch 2.6.0, RDKit 2025.09.3 and Transformers 4.57.6; packed-loader checks additionally used the installed TorchTitan environment. `einops` is a runtime dependency. The new assets are already committed at:
 
-| File | Required change or verification |
-|---|---|
-| **New** `src/molgen3D/training/tokenizers/get_Qwen3_coordtoken.py` | Reproducibly build a versioned LM tokenizer from the existing assets: keep `<0>` through `<4095>` as atomic tokens and add a dedicated register marker. Test marker/code round trips and IDs in context. The existing `get_Qwen3.py` builds general delimiters, not this new FSQ contract. |
-| **New generated directory** `src/molgen3D/training/tokenizers/Qwen3_tokenizer_coordtoken_atom12_reg1/` | Commit tokenizer assets (`tokenizer.json`, `tokenizer_config.json`, `added_tokens.json`, `special_tokens_map.json`, and the necessary base vocabulary/merges/template) with format and checkpoint provenance. Preserve the existing legacy assets. |
-| `src/molgen3D/config/paths.yaml` | Add separate tokenizer, encoded-data, and checkpoint aliases for atom-plus-register runs. Preserve the legacy aliases so old experiments remain runnable. |
-| `src/molgen3D/config/pretrain/qwen3_06b_fsq_bigdata_from_base.toml`, `qwen3_17b_fsq_bigdata_from_base.toml`, `qwen3_06b_fsq_bigdata_sft.toml`, `qwen3_17b_fsq_bigdata_sft.toml` | Prefer new versioned copies. Set new data/tokenizer aliases and output names; recompute packed-token/step budgets and scheduler milestones. Same molecule count does not imply the same LM token count. Do not treat an old geometry-trained LM checkpoint as an unchanged resume. |
-| `src/molgen3D/training/pretraining/torchtitan_runner.py` | Add validation of format/tokenizer/checkpoint compatibility and new marker IDs; verify embedding/output-vocabulary capacity for the register marker. Generic Qwen attention/FSQ-free LM training does not need a new architecture. |
-| `src/molgen3D/training/pretraining/dataprocessing/{dataloader.py,sequence_packing.py,count_tokens.py}` | Verify that serialization, labels and masks retain atom/register codes, including the final register before the conformer terminator. Recompute token counts with the new tokenizer. Change packing logic only where these checks expose assumptions about the old format. |
-| `scripts/launch_torchtitan_qwen3.sh`, `scripts/submit_qwen3_17b_fsq_bigdata.sh`, `scripts/submit_qwen3_06b_fsq_bigdata_sft.sh`, `scripts/submit_qwen3_17b_fsq_bigdata_sft.sh` | Select new TOMLs/output directories; log format and checkpoint fingerprints. Retain explicit node/GPU/global-batch accounting. |
-| `src/molgen3D/evaluation/inference.py` | Load the new adapter with the matching checkpoint; fail if loading fails (currently it logs and continues with `None`). Validate the generated format/register before graph comparison and decode; keep legacy mode explicit. |
-| `scripts/run_qwen3_06b_fsq_bigdata_inference.sbatch`, `scripts/submit_qwen3_06b_fsq_bigdata_inference.sh` | Select matching new LM, LM tokenizer, coordinate tokenizer, and versioned results paths; remove accidental legacy checkpoint fallback for these runs. |
-| `pyproject.toml`, `setup.sh`, `docs/pretraining_runbook.md` | Pin/document a working inference/training dependency set and the new preprocessing/training/evaluation commands. In particular ensure the copied quantizer's `einops` dependency and new model's PyTorch attention APIs are available. |
+```bash
+export PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}"
+TOK="$PWD/src/molgen3D/training/tokenizers/Qwen3_tokenizer_coordtoken_atom12_reg1"
+```
 
-## Additional paths if those experiments will use the new tokenizer
+`build_coordtoken_qwen_tokenizer.py` reproducibly builds these assets from the existing Qwen FSQ tokenizer. Geometry token IDs are unchanged, but their backend `special` flags are cleared: generation with `skip_special_tokens=True` must retain geometry codes. Existing legacy assets are untouched.
 
-These must either remain explicitly pinned legacy experiments or migrate together; do not silently relabel historical results.
+For a new output directory, convert each existing split independently:
 
-| Files | Change |
-|---|---|
-| `src/molgen3D/evaluation/{conformer_interpolation.py,generated_conformer_interpolation.py,baseline_tokenizer_refinement.py,setup3_tokenizer_refinement.py}` | Update code/latent layout and per-atom versus register policies. Existing interpolation/bit-editing APIs assume token-aligned arrays. Decide whether the molecular register is interpolated/perturbed and report that choice. |
-| `scripts/run_conformer_interpolation_stage1.sbatch`, `run_conformer_interpolation_stage1_eval.sbatch`, `run_generated_interpolation_setup3.sbatch`, `run_baseline_{prepare,refine,iterate}.sbatch`, `run_setup3_refine{,_iterate,_eval,_posebusters}.sbatch` | Route versioned model/format settings into those evaluation paths; retain old outputs and old checkpoints. |
-| `src/molgen3D/experiments/bindgpt_fsq/{config.py,fsq_frozen.py,sequences.py,vocabulary.py,tokenizer_prep.py}` | Change the frozen fingerprint, code-count and code/graph layout contracts, union vocabulary/register token, and tokenizer audits. Both interleaved and graph-prefix/code-suffix serializers currently use graph-token counts rather than atom counts. |
-| `src/molgen3D/experiments/bindgpt_fsq/{dataset.py,decode.py,generate.py,cli.py,train.py,model.py}` | Update/audit cached data validation, generation lengths/constraints, decoding and checkpoint metadata to agree with the new contract. Generic language-model layers can stay the same. |
-| `bindgpt_geom_fsq/configs/`, `bindgpt_redesigned_geom_fsq/configs/`, their scripts and reports | Use a separately named experiment/config/cache version; rerun tokenizer audits and token-budget accounting instead of overwriting frozen legacy experiments. |
+```bash
+python -m molgen3D.data_processing.preprocess_coordtoken_csv   --input /path/to/merged_train.csv --output /path/to/new_encoded_train   --split train --tokenizer "$TOK" --device cuda --precision bf16   --batch-size 64 --num-shards 1 --shard-index 0 --seq-len 4096
+```
 
-## Verification before training
+For many independent GPU workers, submit `scripts/run_coordtoken_csv.sbatch INPUT OUTPUT SPLIT TOKENIZER_DIR NUM_SHARDS` as an array `0..NUM_SHARDS-1`, without a concurrency cap. This is inference preprocessing, one GPU per shard, not a change to model-training batch/GPU count. Choose the shard count for the allocation/time limit and use the same settings for every shard. Set the Python environment/PYTHONPATH before submission. No array has been submitted by this code publication.
 
-Update `tests/data_processing/test_fsq_preprocessing.py` with explicit legacy and atom-plus-register cases; add strict-load and standalone-versus-ported-model reconstruction tests, register placement after padded widths, mixed lengths, ID0, missing/extra/out-of-range codes, branches/rings/disconnected graphs, and atom order. Add tests for the LM tokenizer and inference loader's failure path. Extend `tests/evaluation/test_conformer_interpolation.py`, `test_setup3_tokenizer_refinement.py`, and `tests/experiments/test_bindgpt_fsq_{pipeline,tokenizers}.py` if those paths migrate. Include explicit-H and stereo graph-to-RDKit regression cases.
+Shards cover disjoint row-start byte ranges, preserve source columns and byte offsets, and write version/checkpoint metadata per record. Quoted single-line CSV is supported; embedded newlines are rejected. Input CSVs must be immutable. Unsupported/nonfinite/over-context records stop the shard; they are not dropped or truncated. Partial/failed outputs are not usable training data. Use a fresh directory after a failed attempt. Source stat checks are not full-input hashing; final-release SHA evidence is separate.
 
-Run a small encode/decode/reconstruction comparison against the frozen CoordToken model using training/development molecules, then a short LM training/save/resume/generate/decode smoke test. Verify the register is trained as a target token and survives generation. Once that passes, encode the chosen full corpus, verify row counts and split membership, recount packed tokens, and launch training. Official test scores must not select implementation or training hyperparameters.
+After all shards finish, verify counts and bytes:
+
+```bash
+python -m molgen3D.data_processing.assemble_coordtoken /path/to/new_encoded_train   --expected-rows 189792028
+```
+
+Use the actual source count for other corpora/splits. This creates `coordtoken_manifest.json` only after complete shard coverage, matching provenance, row counts and output hashes pass. Train/val/test are never re-split here. The packed loader shuffles row indices using its configured seed and epoch handling, keeping each molecular unit intact. Do not externally rewrite/shuffle JSONLs after assembly without rebuilding the manifest.
+
+## Qwen training and export
+
+Generate a separate run config; do not reuse old geometry-trained checkpoints as an unchanged resume. `--steps` and batch are explicit because the atom-only stream has a different token budget. The example is configuration syntax, not a tuned new Qwen recommendation:
+
+```bash
+python scripts/configure_coordtoken_qwen.py --size 06b   --data /path/to/new_encoded_train --tokenizer "$TOK"   --base-model /path/to/prepared/Qwen3-0.6B-Base   --output /path/to/new_coordtoken_qwen.toml --steps 10000   --global-batch 32 --local-batch 2 --gpus 8 --seq-len 4096 --lr 0.0008
+
+TRAIN_TOML=/path/to/new_coordtoken_qwen.toml sbatch --nodes=1 --gres=gpu:8   scripts/launch_torchtitan_qwen3.sh
+```
+
+`--size 17b` selects the corresponding 1.7B template and requires its matching prepared base model. Global batch must be divisible by local batch times GPU count. Eight GPUs are one-node data parallelism here; do not use the launcher's historical three-node default with an eight-GPU config. The script preserves optimizer/scheduler implementation, requires a verified train manifest, checks tokenizer/checkpoint identity, and refuses truncation. Count actual packed-token consumption before choosing a full-duration run. Hash verification reads all encoded shard bytes at startup.
+
+The existing DCP-to-HF exporter, `molgen3D.training.pretraining.helpers.convert_qwen3_dcp_to_hf`, now copies the versioned tokenizer assets and records the coordinate format/checkpoint/tokenizer hashes in the exported Qwen config. It derives these from the training config. New-format inference refuses an unmarked/legacy Qwen checkpoint or mismatched tokenizer. Never add metadata to an old trained model to bypass this guard.
+
+```bash
+python -m molgen3D.evaluation.inference --device local --test_set distinct   --coordtoken-format atom12_reg1_prefix_v1   --model_path /path/to/exported_new_qwen   --tokenizer_path /path/to/exported_new_qwen   --test_data_path /path/to/existing_prompt_pickle   --results_path /path/to/new_results --run_name coordtoken_atom12_reg1
+```
+
+The frozen coordinate checkpoint defaults to the selected shared artifact; `--coordtoken-checkpoint` can point to a copy with the same hash. Use validation prompts for implementation checks; official test results must not drive tuning. Generated strings are parsed under the strict format and decoded directly by the new model. Current ICL prompt pickles must be regenerated with the same new format if used; old ICL geometry examples are not interchangeable.
+
+## Checks and limits
+
+[Validation receipt](coordtoken_integration_validation.json) records the completed checks. They include exact CPU parity with frozen source; dense/serialized decode parity and padding; explicit H/stereo; all 4,096 LM code tokens; strict data/checkpoint failures; CSV shard accounting; actual packed targets; Qwen tiny-model train/save/resume; and constrained generation. The latter verifies the interface, not learned generation quality. A separate sample verifies the first 16 retained training rows without official test access.
+
+Full-corpus encoding, production GPU/bf16 parity, multi-GPU Qwen training, and downstream scientific benchmarks have not been completed by these checks. Legacy interpolation/refinement/BindGPT paths remain legacy until separately migrated and tested. This prevents old results or caches from silently acquiring new meanings.

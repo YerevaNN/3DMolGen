@@ -1,0 +1,788 @@
+{
+  "rows_scanned": 197171759,
+  "duplicate_text_groups": 2037,
+  "rows_in_duplicate_groups": 4074,
+  "redundant_rows_global": 2037,
+  "hash_collision_groups": 0,
+  "within_split_redundant_rows": {
+    "test": 2037
+  },
+  "within_category_redundant_rows": {
+    "13": 0,
+    "59": 0
+  },
+  "split_pair_shared_texts": {},
+  "category_pair_shared_texts": {
+    "13|59": 2037
+  },
+  "examples": [
+    {
+      "sha256": "00080aec6e8e6f3ae058dfff3a59dd007faf3b00cbb43bf3f337c1be5a818b26",
+      "rows": 2,
+      "categories": {
+        "13": 1,
+        "59": 1
+      },
+      "enriched_text": "[C]<-3.1685,-1.3716,-1.9597>[O]<-3.4818,-0.0416,-1.6052>[c]<-2.9866,0.5197,-0.4753>1[c]<-3.385,1.8434,-0.263>[c]<-2.9717,2.5568,0.84>[c]<-2.1479,1.9612,1.7818>[c]<-1.7446,0.6561,1.5934>[c]<-2.1442,-0.067,0.4751>1[O]<-1.7311,-1.3945,0.358>[c]<-0.4171,-1.6498,0.3562>1[n]<-0.08,-2.9206,0.5266>[c]<1.2001,-3.2611,0.5012>[n]<2.2372,-2.4743,0.3222>[c]<1.9285,-1.1912,0.1387>2[c]<0.6025,-0.7149,0.1425>1[o]<0.5455,0.6263,-0.0871>[c]<1.837,1.0333,-0.2344>1[c]<2.2641,2.3269,-0.4804>[c]<3.627,2.5281,-0.5958>[c]<4.5364,1.4777,-0.4718>[c]<4.112,0.1882,-0.2272>[c]<2.7454,-0.0359,-0.1066>12",
+      "occurrences": [
+        {
+          "category": 13,
+          "byte_offset": 271000451,
+          "name": "s4676f621e4dbd898:279776"
+        },
+        {
+          "category": 59,
+          "byte_offset": 8010065,
+          "name": "geom_rev_475_10"
+        }
+      ]
+    },
+    {
+      "sha256": "00186a180d4c89fc57f698230a73d880410111a0f283af2846029536ca230358",
+      "rows": 2,
+      "categories": {
+        "13": 1,
+        "59": 1
+      },
+      "enriched_text": "[N]<0.392,1.8274,1.1523>[c]<-0.5697,0.9556,0.7733>1[n]<-1.8508,1.2781,0.6478>[n]<-2.4307,0.1788,0.1698>(-[c]<-3.7947,0.1175,-0.1005>2[c]<-4.3428,-1.0651,-0.586>[c]<-5.6973,-1.12,-0.8529>[c]<-6.4989,-0.009,-0.639>[c]<-5.9438,1.1652,-0.1556>[c]<-4.5905,1.2366,0.1164>2)[n]<-1.6298,-0.8283,-0.0222>[c]<-0.4234,-0.4008,0.3472>1[C]<0.7698,-1.2324,0.2847>(=[O]<0.8529,-2.3197,-0.2242>)[O]<1.8098,-0.6082,0.8952>[C]<3.0798,-1.2451,0.835>[c]<4.098,-0.3848,0.1338>1[c]<3.7139,0.6002,-0.7648>[c]<4.6682,1.3666,-1.4113>[c]<6.0136,1.1518,-1.1706>[c]<6.4027,0.1675,-0.2771>[c]<5.4505,-0.5945,0.3743>1",
+      "occurrences": [
+        {
+          "category": 13,
+          "byte_offset": 563601319,
+          "name": "s4676f621e4dbd898:644910"
+        },
+        {
+          "category": 59,
+          "byte_offset": 14752802,
+          "name": "geom_rev_893_25"
+        }
+      ]
+    },
+    {
+      "sha256": "001d0de82c1c8cbc4da08dfecf83ede32ef7792a883a6848f49b76bfbc4705fc",
+      "rows": 2,
+      "categories": {
+        "13": 1,
+        "59": 1
+      },
+      "enriched_text": "[C]<4.9975,5.3365,0.4222>[C@H]<4.9476,4.1305,-0.5129>([C]<6.088,4.2131,-1.526>)[C]<3.6084,4.0453,-1.2572>[C]<2.417,3.7098,-0.3567>[n]<2.5645,2.4145,0.2568>1[c]<2.8907,2.1423,1.5498>[c]<2.8295,0.7939,1.7124>[n+]<2.4654,0.2645,0.5124>([C]<2.1901,-1.0955,0.2346>2=[C]<3.2258,-2.0246,0.572>([O-]<4.2905,-1.6762,1.0831>)[c]<2.9459,-3.4458,0.2492>3[c]<3.91,-4.4036,0.5394>[c]<3.6911,-5.7368,0.24>[c]<2.5024,-6.1267,-0.3588>[c]<1.5373,-5.1818,-0.6541>[c]<1.7452,-3.8366,-0.3529>3[C]<0.6844,-2.8662,-0.6777>(=[O]<-0.3597,-3.192,-1.1983>)/[C]<0.9489,-1.4279,-0.3028>2=[N]<-0.0716,-0.6478,-0.5273>/[S]<-0.4838,0.8151,-0.0029>(=[O]<-0.044,1.1006,1.3476>)(=[O]<-0.1729,1.8479,-0.9767>)[c]<-2.2656,0.6385,0.0123>2[c]<-2.8825,-0.4555,-0.563>[c]<-4.2653,-0.54,-0.5486>[c]<-4.9953,0.4782,0.042>([Br]<-6.8912,0.368,0.0617>)[c]<-4.3807,1.5768,0.6216>[c]<-2.9988,1.6507,0.6021>2)[c]<2.3321,1.258,-0.3565>1",
+      "occurrences": [
+        {
+          "category": 13,
+          "byte_offset": 363410825,
+          "name": "s4676f621e4dbd898:395065"
+        },
+        {
+          "category": 59,
+          "byte_offset": 10644200,
+          "name": "geom_rev_633_19"
+        }
+      ]
+    },
+    {
+      "sha256": "017d56d95a0e7e1e8991eb595ca354ce056ac5b9f58ce81a9f57b34092c19c27",
+      "rows": 2,
+      "categories": {
+        "13": 1,
+        "59": 1
+      },
+      "enriched_text": "[C]<2.696,4.1121,0.2306>[S]<4.242,3.23,-0.1167>[c]<3.6629,1.6138,0.0186>1[n]<2.4475,1.2848,0.2911>[n]<2.2422,-0.0223,0.3469>[c]<3.2866,-0.7327,0.1112>([N]<3.359,-2.0933,0.1035>[C]<2.3255,-3.008,0.2284>(=[O]<2.5819,-4.1685,0.4311>)[c]<0.9511,-2.4636,0.0625>2[c]<0.5852,-1.8295,-1.122>[c]<-0.7038,-1.3566,-1.2756>[c]<-1.6149,-1.5222,-0.2498>([S]<-3.246,-0.8042,-0.4246>(=[O]<-3.5848,-0.7546,-1.8173>)(=[O]<-4.1414,-1.4593,0.4858>)[N]<-2.9026,0.7506,0.1112>3[C]<-3.3564,1.0715,1.4498>[C]<-4.8152,1.5377,1.4228>[O]<-4.9862,2.6196,0.5329>[C]<-4.6044,2.2678,-0.7787>[C]<-3.1381,1.8298,-0.8267>3)[c]<-1.2727,-2.1737,0.9178>[c]<0.0151,-2.6579,1.0716>2)[s]<4.739,0.2364,-0.2168>1",
+      "occurrences": [
+        {
+          "category": 13,
+          "byte_offset": 408930271,
+          "name": "s4676f621e4dbd898:451889"
+        },
+        {
+          "category": 59,
+          "byte_offset": 4790992,
+          "name": "geom_rev_282_24"
+        }
+      ]
+    },
+    {
+      "sha256": "018589bc37e9e13043c6e957ca896263499cdada6db790f00ae49749b0e5b6ce",
+      "rows": 2,
+      "categories": {
+        "13": 1,
+        "59": 1
+      },
+      "enriched_text": "[C]<-2.2798,-4.159,-1.6629>[C@]<-1.6678,-3.1295,-0.7155>1([C]<-0.1507,-3.0609,-0.8949>)[C]<-2.0603,-3.3948,0.7602>[c]<-2.7987,-2.1462,1.1382>2[c]<-3.3596,-1.7489,2.3343>[c]<-3.9654,-0.504,2.393>[c]<-4.0198,0.3213,1.2804>[c]<-3.469,-0.0755,0.0672>([O]<-3.4964,0.6587,-1.0956>[C]<-3.5508,2.0615,-0.9778>[C]<-2.4948,2.662,-0.0449>(=[O]<-2.7947,3.5497,0.7309>)[N]<-1.2419,2.1625,-0.1173>3[C]<-0.7213,1.2196,-1.0825>[C]<0.4804,1.8592,-1.7923>[N]<1.4994,2.2412,-0.8401>([c]<2.5039,1.3842,-0.4753>4[c]<2.5659,0.0583,-0.9462>[c]<3.6073,-0.7705,-0.6071>[c]<4.6338,-0.3063,0.211>([N+]<5.7085,-1.1682,0.5671>(=[O]<5.6982,-2.3041,0.1264>)[O-]<6.5793,-0.7249,1.294>)[c]<4.6043,1.0073,0.677>[c]<3.5609,1.832,0.3418>4)[C]<0.9642,3.225,0.079>[C]<-0.2407,2.6295,0.8211>3)[c]<-2.8433,-1.3203,0.0224>2[O]<-2.2086,-1.8337,-1.0611>1",
+      "occurrences": [
+        {
+          "category": 13,
+          "byte_offset": 237485859,
+          "name": "s4676f621e4dbd898:237954"
+        },
+        {
+          "category": 59,
+          "byte_offset": 7966098,
+          "name": "geom_rev_471_24"
+        }
+      ]
+    },
+    {
+      "sha256": "01b50e4c4ccec92622a256ca1fc768affaf7e83337a0d8ab65c2e71a4a281ff8",
+      "rows": 2,
+      "categories": {
+        "13": 1,
+        "59": 1
+      },
+      "enriched_text": "[C]<6.6001,0.9114,0.8004>[C]<5.2404,0.5517,0.2155>[C]<4.842,-0.8814,0.559>[C]<3.5203,-1.2869,-0.0979>[N]<2.4042,-0.4563,0.3105>([C]<1.8681,-0.6773,1.6308>)[C]<1.9276,0.4545,-0.5697>(=[O]<2.4499,0.6421,-1.6597>)[c]<0.7271,1.2343,-0.2183>1[c]<0.2791,2.3629,-0.8584>[c]<-0.9718,2.6778,-0.2926>[c]<-1.2161,1.7198,0.6539>([C]<-2.4282,1.3948,1.4144>[S]<-3.4427,0.3004,0.2959>(=[O]<-4.391,-0.4187,1.1075>)(=[O]<-3.9716,1.1406,-0.7408>)[c]<-2.2046,-0.7883,-0.43>2[c]<-1.7931,-0.4523,-1.7071>[c]<-0.7548,-1.1439,-2.3039>[c]<-0.1447,-2.1772,-1.6113>[c]<-0.5782,-2.5173,-0.3425>[c]<-1.611,-1.8217,0.2825>2[C]<-2.0223,-2.1705,1.6777>)[o]<-0.1848,0.8483,0.7097>1",
+      "occurrences": [
+        {
+          "category": 13,
+          "byte_offset": 463814763,
+          "name": "s4676f621e4dbd898:520315"
+        },
+        {
+          "category": 59,
+          "byte_offset": 9226741,
+          "name": "geom_rev_549_12"
+        }
+      ]
+    },
+    {
+      "sha256": "0232b5cd25fa6c64e578440c62e4d2b7e3c8115e439034b18b1a873678519f24",
+      "rows": 2,
+      "categories": {
+        "13": 1,
+        "59": 1
+      },
+      "enriched_text": "[C]<-4.3022,-2.9081,0.1388>[C]<-4.3185,-1.4001,0.3582>[C]<-2.9175,-0.8523,0.6112>[C]<-2.9284,0.6661,0.814>[c]<-1.555,1.1721,1.0642>1[n]<-1.153,1.5655,2.2565>[nH]<0.1348,1.9215,2.131>[c]<0.5823,1.7637,0.8733>2[c]<-0.4859,1.2779,0.136>1/[C]<-0.3544,0.9883,-1.2688>(=[N]<-1.3795,0.6231,-1.9303>/[O]<-1.1712,0.371,-3.2953>)[C]<1.0224,1.181,-1.8564>[C@H]<2.1787,1.092,-0.8544>([c]<2.444,-0.3029,-0.334>1[c]<1.4797,-1.3001,-0.2933>[c]<1.7743,-2.5459,0.235>[c]<3.0371,-2.8166,0.7295>[c]<4.0098,-1.8321,0.6883>[c]<3.7128,-0.5895,0.1613>1)[C]<1.9353,2.0408,0.3397>2",
+      "occurrences": [
+        {
+          "category": 13,
+          "byte_offset": 583618586,
+          "name": "s4676f621e4dbd898:669887"
+        },
+        {
+          "category": 59,
+          "byte_offset": 7170527,
+          "name": "geom_rev_424_14"
+        }
+      ]
+    },
+    {
+      "sha256": "0251f715f57e19837c92da6ed55007fd9a5fa4d0f333ca47d38013718f4f18c5",
+      "rows": 2,
+      "categories": {
+        "13": 1,
+        "59": 1
+      },
+      "enriched_text": "[C]<-3.8955,-3.1678,-0.295>[C]<-3.1504,-2.645,-1.5142>[O]<-1.8092,-2.3187,-1.1573>[C]<-1.3634,-1.0759,-1.3999>(=[O]<-2.0546,-0.2286,-1.9467>)[c]<0.0102,-0.8763,-0.9517>1[c]<0.6964,-1.9227,-0.3009>[n]<1.8938,-1.8374,0.1891>[c]<2.6155,-0.7212,-0.078>2[c]<3.9677,-0.7,0.3405>([C]<4.487,-1.8236,1.1868>[C]<4.0121,-1.6695,2.6325>)[c]<4.7706,0.3472,-0.0405>[c]<4.2834,1.3591,-0.8701>[c]<2.9632,1.3793,-1.2406>[c]<2.0784,0.3789,-0.7985>2[c]<0.6682,0.368,-1.0875>1[N]<-0.0162,1.4511,-1.4781>[C]<0.2912,2.8365,-1.2386>[C]<-0.8546,3.5423,-0.5093>[C]<-1.0203,3.0388,0.9273>[N]<-1.7084,1.7598,0.9747>1[C]<-3.1524,1.9209,0.9561>[C]<-3.8109,0.5465,0.8884>[O]<-3.4436,-0.2552,1.9893>[C]<-2.0436,-0.3955,2.0577>[C]<-1.3355,0.9575,2.1272>1",
+      "occurrences": [
+        {
+          "category": 13,
+          "byte_offset": 151731204,
+          "name": "s4676f621e4dbd898:131046"
+        },
+        {
+          "category": 59,
+          "byte_offset": 1499974,
+          "name": "geom_rev_88_25"
+        }
+      ]
+    },
+    {
+      "sha256": "027655f7d277f17dfd4db3451bc6119e8bd38f4fad58874580ea444d822292cb",
+      "rows": 2,
+      "categories": {
+        "13": 1,
+        "59": 1
+      },
+      "enriched_text": "[C]<-0.4329,-1.8981,-1.0505>[C@H]<-1.0186,-2.359,0.281>([C]<-0.8298,-3.8635,0.4551>)[C]<-2.5112,-2.0072,0.3694>[N]<-2.7315,-0.5938,0.5747>[C]<-3.283,0.2158,-0.3522>(=[O]<-3.696,-0.1732,-1.4231>)[C]<-3.3359,1.6866,0.0598>[C]<-2.1001,2.4186,-0.4811>[c]<-0.8501,1.8373,0.0591>1[n]<0.2239,1.5359,-0.5938>[c]<1.0467,1.0065,0.3667>(-[c]<2.3755,0.5091,0.0794>2[c]<3.1742,-0.0024,1.1004>[c]<4.4408,-0.4706,0.8095>[c]<4.9158,-0.4328,-0.4928>[c]<4.121,0.0724,-1.5094>[c]<2.8525,0.5434,-1.2288>2)[n]<0.4872,0.9936,1.5487>[o]<-0.75,1.5369,1.3653>1",
+      "occurrences": [
+        {
+          "category": 13,
+          "byte_offset": 503474550,
+          "name": "s4676f621e4dbd898:569816"
+        },
+        {
+          "category": 59,
+          "byte_offset": 5001784,
+          "name": "geom_rev_296_19"
+        }
+      ]
+    },
+    {
+      "sha256": "0301dc67f42aadd74d2b75253439c0aeb6accde789880207b505fc2b501bc8b2",
+      "rows": 2,
+      "categories": {
+        "13": 1,
+        "59": 1
+      },
+      "enriched_text": "[C]<-4.8121,-1.6369,0.0151>[C]<-4.1032,-1.9981,-1.283>[O]<-2.6884,-1.8967,-1.1532>[C]<-2.1402,-0.6856,-1.3427>(=[O]<-2.8276,0.2874,-1.6248>)[c]<-0.6907,-0.6834,-1.1734>1[c]<-0.0551,-1.8822,-0.7896>[n]<1.2037,-1.9974,-0.5066>[c]<1.999,-0.9112,-0.6621>2[c]<3.3745,-1.0882,-0.374>([C]<3.8437,-2.3992,0.1826>[C]<3.5645,-2.4792,1.6844>)[c]<4.2473,-0.0527,-0.5973>[c]<3.7943,1.1538,-1.1317>[c]<2.4615,1.3482,-1.3869>[c]<1.512,0.3434,-1.1228>2[c]<0.0904,0.4918,-1.3079>1[N]<-0.5452,1.6279,-1.6409>[C]<-0.1809,3.0151,-1.4848>[C]<0.2479,3.3938,-0.0621>[C]<-0.8091,3.0231,0.9802>[N]<-0.7634,1.6147,1.3433>1[C]<-2.0339,1.1633,1.8893>[C]<-1.9516,-0.3184,2.2551>[O]<-0.9185,-0.5662,3.1775>[C]<0.3145,-0.1536,2.6382>[C]<0.2992,1.3343,2.2955>1",
+      "occurrences": [
+        {
+          "category": 13,
+          "byte_offset": 552258448,
+          "name": "s4676f621e4dbd898:630689"
+        },
+        {
+          "category": 59,
+          "byte_offset": 1502938,
+          "name": "geom_rev_88_29"
+        }
+      ]
+    }
+  ],
+  "split_pair_examples": {},
+  "within_split_examples": {
+    "test": {
+      "sha256": "00080aec6e8e6f3ae058dfff3a59dd007faf3b00cbb43bf3f337c1be5a818b26",
+      "rows": 2,
+      "categories": {
+        "13": 1,
+        "59": 1
+      },
+      "enriched_text": "[C]<-3.1685,-1.3716,-1.9597>[O]<-3.4818,-0.0416,-1.6052>[c]<-2.9866,0.5197,-0.4753>1[c]<-3.385,1.8434,-0.263>[c]<-2.9717,2.5568,0.84>[c]<-2.1479,1.9612,1.7818>[c]<-1.7446,0.6561,1.5934>[c]<-2.1442,-0.067,0.4751>1[O]<-1.7311,-1.3945,0.358>[c]<-0.4171,-1.6498,0.3562>1[n]<-0.08,-2.9206,0.5266>[c]<1.2001,-3.2611,0.5012>[n]<2.2372,-2.4743,0.3222>[c]<1.9285,-1.1912,0.1387>2[c]<0.6025,-0.7149,0.1425>1[o]<0.5455,0.6263,-0.0871>[c]<1.837,1.0333,-0.2344>1[c]<2.2641,2.3269,-0.4804>[c]<3.627,2.5281,-0.5958>[c]<4.5364,1.4777,-0.4718>[c]<4.112,0.1882,-0.2272>[c]<2.7454,-0.0359,-0.1066>12",
+      "occurrences": [
+        {
+          "category": 13,
+          "byte_offset": 271000451,
+          "name": "s4676f621e4dbd898:279776"
+        },
+        {
+          "category": 59,
+          "byte_offset": 8010065,
+          "name": "geom_rev_475_10"
+        }
+      ]
+    }
+  },
+  "status": "complete_verified_exact_duplicate_audit",
+  "seconds": 78.46766715869308,
+  "categories": [
+    {
+      "id": 0,
+      "dataset": "BindingMoad",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 467
+    },
+    {
+      "id": 1,
+      "dataset": "BindingNet-High",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 3729
+    },
+    {
+      "id": 2,
+      "dataset": "BindingNet-Low",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 6847
+    },
+    {
+      "id": 3,
+      "dataset": "BindingNet-Mid",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 3312
+    },
+    {
+      "id": 4,
+      "dataset": "CrossDocked2020",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 100
+    },
+    {
+      "id": 5,
+      "dataset": "DAVIS-3D",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 225
+    },
+    {
+      "id": 6,
+      "dataset": "HiQBind",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 279
+    },
+    {
+      "id": 7,
+      "dataset": "Kinodata-3D",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 225
+    },
+    {
+      "id": 8,
+      "dataset": "OMol25_bio_mols",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 225
+    },
+    {
+      "id": 9,
+      "dataset": "Plinder",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 949
+    },
+    {
+      "id": 10,
+      "dataset": "SAIR",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 225
+    },
+    {
+      "id": 11,
+      "dataset": "SPINDR",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 225
+    },
+    {
+      "id": 12,
+      "dataset": "chembl3d",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 37065
+    },
+    {
+      "id": 13,
+      "dataset": "geom",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 711228
+    },
+    {
+      "id": 14,
+      "dataset": "BindingMoad",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 20480
+    },
+    {
+      "id": 15,
+      "dataset": "BindingNet-High",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 210402
+    },
+    {
+      "id": 16,
+      "dataset": "BindingNet-Low",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 251400
+    },
+    {
+      "id": 17,
+      "dataset": "BindingNet-Mid",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 144014
+    },
+    {
+      "id": 18,
+      "dataset": "CrossDocked2020",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 78233
+    },
+    {
+      "id": 19,
+      "dataset": "DAVIS-3D",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 129
+    },
+    {
+      "id": 20,
+      "dataset": "HiQBind",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 24495
+    },
+    {
+      "id": 21,
+      "dataset": "Kinodata-3D",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 61112
+    },
+    {
+      "id": 22,
+      "dataset": "OMol25_bio_mols",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 1314710
+    },
+    {
+      "id": 23,
+      "dataset": "Plinder",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 122072
+    },
+    {
+      "id": 24,
+      "dataset": "SAIR",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 1521900
+    },
+    {
+      "id": 25,
+      "dataset": "SPINDR",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 25340
+    },
+    {
+      "id": 26,
+      "dataset": "chembl3d",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 1428111
+    },
+    {
+      "id": 27,
+      "dataset": "geom",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 5097261
+    },
+    {
+      "id": 28,
+      "dataset": "BindingMoad",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 129
+    },
+    {
+      "id": 29,
+      "dataset": "BindingNet-High",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 127
+    },
+    {
+      "id": 30,
+      "dataset": "BindingNet-Low",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 1888
+    },
+    {
+      "id": 31,
+      "dataset": "BindingNet-Mid",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 326
+    },
+    {
+      "id": 32,
+      "dataset": "CrossDocked2020",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 262
+    },
+    {
+      "id": 33,
+      "dataset": "DAVIS-3D",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 7
+    },
+    {
+      "id": 34,
+      "dataset": "HiQBind",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 48
+    },
+    {
+      "id": 35,
+      "dataset": "Kinodata-3D",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 95
+    },
+    {
+      "id": 36,
+      "dataset": "OMol25_bio_mols",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 35
+    },
+    {
+      "id": 37,
+      "dataset": "Plinder",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 362
+    },
+    {
+      "id": 38,
+      "dataset": "SAIR",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 99
+    },
+    {
+      "id": 39,
+      "dataset": "SPINDR",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 56
+    },
+    {
+      "id": 40,
+      "dataset": "chembl3d",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 180929
+    },
+    {
+      "id": 41,
+      "dataset": "geom",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 689288
+    },
+    {
+      "id": 42,
+      "dataset": "KIBA-3D",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 1576
+    },
+    {
+      "id": 43,
+      "dataset": "KIBA-3D",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 1533
+    },
+    {
+      "id": 44,
+      "dataset": "KIBA-3D",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 260129
+    },
+    {
+      "id": 45,
+      "dataset": "OMol25_small_mols",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 36120
+    },
+    {
+      "id": 46,
+      "dataset": "OMol25_small_mols",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 21127
+    },
+    {
+      "id": 47,
+      "dataset": "OMol25_small_mols",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 3551242
+    },
+    {
+      "id": 48,
+      "dataset": "pubchem3d",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 473528
+    },
+    {
+      "id": 49,
+      "dataset": "pubchem3d",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 473331
+    },
+    {
+      "id": 50,
+      "dataset": "pubchem3d",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 93724490
+    },
+    {
+      "id": 51,
+      "dataset": "zinc",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 369924
+    },
+    {
+      "id": 52,
+      "dataset": "zinc",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 370023
+    },
+    {
+      "id": 53,
+      "dataset": "zinc",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 73267125
+    },
+    {
+      "id": 54,
+      "dataset": "nablaDFT",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 8689383
+    },
+    {
+      "id": 55,
+      "dataset": "nablaDFT",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 63340
+    },
+    {
+      "id": 56,
+      "dataset": "nablaDFT",
+      "test_subset": "conformations",
+      "split": "test",
+      "file_index": 2,
+      "rows": 1623912
+    },
+    {
+      "id": 57,
+      "dataset": "nablaDFT",
+      "test_subset": "scaffolds",
+      "split": "test",
+      "file_index": 2,
+      "rows": 1130328
+    },
+    {
+      "id": 58,
+      "dataset": "nablaDFT",
+      "test_subset": "structures",
+      "split": "test",
+      "file_index": 2,
+      "rows": 1152833
+    },
+    {
+      "id": 59,
+      "dataset": "GEOM-Revisited",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 3,
+      "rows": 23404
+    }
+  ],
+  "inputs": [
+    {
+      "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/merged_deduplicated_20261006/merged_train.csv",
+      "rows": 189792028,
+      "bytes": 143334916343,
+      "sha256": "24d13d817438ce5123cd3753e33cbf39d2555768456ab3de5a7516f6b3eeec96",
+      "role": "train",
+      "mtime_ns": 1791319038535944595,
+      "text_col": 1,
+      "merged": true
+    },
+    {
+      "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/merged_deduplicated_20261006/merged_val.csv",
+      "rows": 1802906,
+      "bytes": 1414376467,
+      "sha256": "535a599591f2d1b9737dd77807fdbb93e7e231503575c05c35b0b9f6c242c9f7",
+      "role": "val",
+      "mtime_ns": 1791319040967875212,
+      "text_col": 1,
+      "merged": true
+    },
+    {
+      "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/merged_deduplicated_20261006/merged_test.csv",
+      "rows": 5553421,
+      "bytes": 4009545439,
+      "sha256": "089c2afd4af973b77e7a894d2eda04544afff5c9e5530e47d6d00aaa999e0211",
+      "role": "test",
+      "mtime_ns": 1791319046881706491,
+      "text_col": 1,
+      "merged": true
+    },
+    {
+      "path": "/mnt/weka/fgeikyan/fsq/test/geom_revisited.csv",
+      "bytes": 16606582,
+      "mtime_ns": 1774216643293525932,
+      "sha256": "3ad8e05da89f1144bc9ef18620990ca596a4a61742ac3281bef4024c33f245f1",
+      "rows": 23404,
+      "dataset": "geom_revisited",
+      "label": "geom_revisited/test",
+      "role": "test",
+      "group_a": false,
+      "merged": false,
+      "text_col": 1,
+      "category": 59
+    }
+  ],
+  "inputs_modified": false,
+  "equality": "exact enriched_text field equality; no canonicalization, rounding, or name comparison",
+  "all_hash_candidates_compared_as_full_strings": true,
+  "plan_sha256": "a5c79e838f728ef641cc9def8b3f3889c8f072b3c1bbba153ea718033c07c122"
+}

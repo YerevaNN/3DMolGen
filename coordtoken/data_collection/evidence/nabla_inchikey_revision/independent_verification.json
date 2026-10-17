@@ -1,0 +1,16 @@
+{
+  "status": "verified",
+  "output": {
+    "path": "/mnt/weka/fgeikyan/CoordToken/data_collection/runs/nabla_holdouts_v1/merged_train.csv",
+    "rows": 189925494,
+    "bytes": 127872581543,
+    "sha256": "cc11a42b2c2bafafe501caef73c811b39eadf3c3edce6167f3c7d98d37381298"
+  },
+  "quarantine": {
+    "path": "/mnt/weka/fgeikyan/CoordToken/data_collection/runs/nabla_holdouts_v1/quarantined.csv",
+    "rows": 13,
+    "bytes": 13709,
+    "sha256": "0245b5de2c55b96660175c63433e82f20db1e7684e467f07e96a9547e21fdb3b"
+  },
+  "elapsed_seconds": 263.41806752001867
+}

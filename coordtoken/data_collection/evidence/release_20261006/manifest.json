@@ -1,0 +1,65 @@
+{
+  "status": "complete_verified_merge",
+  "exact_sample_deduplication_performed": true,
+  "deduplication_policy": "Exact enriched_text equality within each merged split; earliest input byte offset retained; GEOM-Revisited preserved separately.",
+  "files": [
+    {
+      "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/merged_deduplicated_20261006/merged_train.csv",
+      "rows": 189792028,
+      "bytes": 143334916343,
+      "sha256": "24d13d817438ce5123cd3753e33cbf39d2555768456ab3de5a7516f6b3eeec96"
+    },
+    {
+      "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/merged_deduplicated_20261006/merged_val.csv",
+      "rows": 1802906,
+      "bytes": 1414376467,
+      "sha256": "535a599591f2d1b9737dd77807fdbb93e7e231503575c05c35b0b9f6c242c9f7"
+    },
+    {
+      "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/merged_deduplicated_20261006/merged_test.csv",
+      "rows": 5553421,
+      "bytes": 4009545439,
+      "sha256": "089c2afd4af973b77e7a894d2eda04544afff5c9e5530e47d6d00aaa999e0211"
+    }
+  ],
+  "duplicate_aliases": {
+    "path": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/merged_deduplicated_20261006/duplicate_aliases.csv",
+    "rows": 1748876,
+    "bytes": 268474589,
+    "sha256": "f5524f2b65a00de6a0795844c8c3ea875bbc353c1992cfad839418e959aac1cc"
+  },
+  "removed_rows": {
+    "train": 1734217,
+    "val": 7102,
+    "test": 7557
+  },
+  "seconds": 549.7561581656337,
+  "workers": 64,
+  "schema": [
+    "name",
+    "enriched_text",
+    "dataset",
+    "source_name",
+    "source_file_id",
+    "source_row_index",
+    "inchikey",
+    "test_subset"
+  ],
+  "sources_manifest": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/merged_deduplicated_20261006/sources.json",
+  "sources_sha256": "4d83552fbbd8b1023415a98dc2e3ee6227ae8b30e5983a5a5a58237c6c54b80c",
+  "chunk_receipts_sha256": "5cc356ac87bd8ec346822c8dc5c13bd1a52c74010a68f496d1f3a9e2cdbc2aa3",
+  "plan_sha256": "3c0065b3518730a95d924c4d4fa518730a5834849eb918d7c0f52cdc371b3d4d",
+  "prior_combined_manifest": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/merged_deduplicated_20261006/category_manifest.json",
+  "parent_release": "/mnt/weka/fgeikyan/3dmolgen_bigdata/data_handoff/merged_20261006",
+  "checks": {
+    "removed_records_equal_retained_full_text": true,
+    "removed_and_retained_inchikeys_equal": true,
+    "source_region_hashes": true,
+    "row_counts": true,
+    "output_region_readback": true,
+    "all_removed_provenance_retained": true
+  },
+  "shuffle_performed": false,
+  "conformation_test_molecular_overlap_exception": true,
+  "post_deduplication_exact_audit": "pending"
+}

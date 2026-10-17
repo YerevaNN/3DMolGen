@@ -1,6 +1,6 @@
 # Updated atom-code CoordToken
 
-The frozen implementation emits one 12-bit geometry code per atom and one transmitted molecular register code. SMILES punctuation remains graph context and has no geometry code. The selected model uses width 1024, eight encoder and eight decoder layers, and dropout 0.05. This branch publishes the source used for the completed runs; 3DMolGen integration is described in [FSQ_TOKENIZER_MIGRATION.md](FSQ_TOKENIZER_MIGRATION.md) and is not implemented here.
+The frozen implementation emits one 12-bit geometry code per atom and one transmitted molecular register code. SMILES punctuation remains graph context and has no geometry code. The selected model uses width 1024, eight encoder and eight decoder layers, and dropout 0.05. This directory preserves the source used for the completed runs. The implemented 3DMolGen adapter and Qwen pipeline are documented in the [integration guide](../../docs/FSQ_TOKENIZER_MIGRATION.md).
 
 ## Start here
 
@@ -11,6 +11,10 @@ The frozen implementation emits one 12-bit geometry code per atom and one transm
 - `train.py` remains the legacy all-token trainer. The new trainer is `train_run.py` in the frozen directories above.
 
 The frozen scripts retain their actual cluster paths and checksum guards. They depend on external packed data, indices, run configuration and checkpoints; this is not a self-contained download-and-launch package. Do not run historical launchers against existing output directories. Configure a separate experiment when moving machines; retain the frozen source for reference. Original launchers use `/mnt/weka/fgeikyan/tokenizer/conda_envs/train/bin/python`; the tested environment includes PyTorch 2.6 with CUDA 12.4, NumPy and einops. Distributed training requires the cluster GPU environment. Source hashes are recorded in `tokenizer_source_snapshot_20261016.json`; the epoch-two case is copied to `mixed_epoch2_case.json`.
+
+## Selected shareable checkpoint
+
+Use `/mnt/weka/fgeikyan/CoordToken/artifacts/releases/coordtoken-atom12-reg1-mixed-epoch2-20261017/model.pt`, SHA-256 `29d487cf3783978c801c5a237e3c3c86cc23ab058aa7edea7eff0aa707c4bc4f`. It is a read-only copy of epoch 2, selected using validation. Epoch 3 is worse on validation and does not replace it. Text serialization is one molecular code first, then atom-only codes; no `<REG>` marker.
 
 ## Checkpoints on the shared filesystem
 

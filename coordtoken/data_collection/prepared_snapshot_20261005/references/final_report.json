@@ -1,0 +1,592 @@
+{
+  "status": "complete_input_hash_and_row_verified_audit",
+  "files": [
+    {
+      "dataset": "grp_a/test/BindingMoad",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/test/BindingMoad.csv",
+      "source_sha256": "47561e2efc0c950352933049ba848ee8abdb6ac2d4d91803edc82b76f54e0404",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 468,
+        "format_pass_rows": 468,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 393,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/test/BindingNet-High",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/test/BindingNet-High.csv",
+      "source_sha256": "37e60367030e43aaa6ec30e1bed3e35a6a5ff36e18b0fea47bf5366726622800",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 3729,
+        "format_pass_rows": 3729,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 2609,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/test/BindingNet-Low",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/test/BindingNet-Low.csv",
+      "source_sha256": "af1e3bd5944e4401860c4d41126f57c187adf2f203505c1484048477c4a06775",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 6850,
+        "format_pass_rows": 6850,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 4874,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/test/BindingNet-Mid",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/test/BindingNet-Mid.csv",
+      "source_sha256": "f3f313ebfc3b6f7db021d90f921c74ac8947f63db51ccf2754ac58f7bbbbd904",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 3312,
+        "format_pass_rows": 3312,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 2239,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/test/CrossDocked2020",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/test/CrossDocked2020.csv",
+      "source_sha256": "509d3f7f911f8ee5b412a7570e1ddd4718d7c21e7d100b70db4c3a3be29fd4f1",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 100,
+        "format_pass_rows": 100,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 57,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/test/DAVIS-3D",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/test/DAVIS-3D.csv",
+      "source_sha256": "c38814489d71771fdfa1e5fa38da8a6074db6609a32552d238dd25cd68e5d66e",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 225,
+        "format_pass_rows": 225,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 77,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/test/HiQBind",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/test/HiQBind.csv",
+      "source_sha256": "23a4ac546dcf9e19d01019a3cc93348e067c618b726f0136b82e2c405b121eab",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 279,
+        "format_pass_rows": 279,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 220,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/test/Kinodata-3D",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/test/Kinodata-3D.csv",
+      "source_sha256": "1e4543a24249ebfd4cd689c4f2f737157ace86a89cafb353d365f634b7a0891e",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 225,
+        "format_pass_rows": 225,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 138,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/test/OMol25_bio_mols",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/test/OMol25_bio_mols.csv",
+      "source_sha256": "380d681f1d317244260c9f3b5ffc9d081886c29444a4010c2010e20052bfc895",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 225,
+        "format_pass_rows": 225,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 142,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/test/Plinder",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/test/Plinder.csv",
+      "source_sha256": "57027dcce66a77ee09b141b7c9e0793ee39e6dadccb5c4bf9318a9e706c7cfb4",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 950,
+        "format_pass_rows": 950,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 850,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/test/SAIR",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/test/SAIR.csv",
+      "source_sha256": "8c7cb80beccf587efeeffa5d2c0c2aa6d68f91da86f9534ba3b33bea9cbb5d6d",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 225,
+        "format_pass_rows": 225,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 125,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/test/SPINDR",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/test/SPINDR.csv",
+      "source_sha256": "49decad9262e2e727e5410ce0e7abd6b5dc22985ca3adf42dee739bdc6b85af7",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 225,
+        "format_pass_rows": 225,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 190,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/test/backup_un/chembl3d",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/test/backup_un/chembl3d.csv",
+      "source_sha256": "423ee2d7ee1aa2013a11c0f54a174c0127e61d3cf31aa82b3600a103ed6edf41",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 37065,
+        "format_pass_rows": 37065,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 4410,
+        "rows_with_inchi_warning": 10898,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/test/geom",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/test/geom.csv",
+      "source_sha256": "25d3a35f43743b31dd7cc5259acad703b51c5936a23644eaf5b97958a03792ce",
+      "rdkit": "2025.09.6",
+      "chunks": 6,
+      "counts": {
+        "rows": 711546,
+        "format_pass_rows": 711546,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 102351,
+        "rows_with_inchi_warning": 69857,
+        "review_flag_rows": 48,
+        "any_flagged_rows": 48,
+        "bond_above_2.5A_review": 48
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/val/BindingMoad",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/BindingMoad.csv",
+      "source_sha256": "b9157c373642d15d99e2440c60aae7e7d41be52180c8b9e571dfa231ccee7e56",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 130,
+        "format_pass_rows": 130,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 98,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/val/BindingNet-High",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/BindingNet-High.csv",
+      "source_sha256": "a064e445ecaedd81ef04bab0c16f1c74e55f2e3811ef56f28d95d2dcfe7778f1",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 127,
+        "format_pass_rows": 127,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 88,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/val/BindingNet-Low",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/BindingNet-Low.csv",
+      "source_sha256": "16b4a7469974e44f8a08b2bf56940cce191ff2dddf0e073cf85db8f9dbdd0caf",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 1899,
+        "format_pass_rows": 1899,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 1486,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/val/BindingNet-Mid",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/BindingNet-Mid.csv",
+      "source_sha256": "eee6d5034886987378c33eb670fc0043a62eeaceeb17a1686df4120c4e7257b8",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 327,
+        "format_pass_rows": 327,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 213,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/val/CrossDocked2020",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/CrossDocked2020.csv",
+      "source_sha256": "58840d03ed09c40d9cea032215c5a548d217a0dc6313c961096aae77e3affcc9",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 268,
+        "format_pass_rows": 268,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 185,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/val/DAVIS-3D",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/DAVIS-3D.csv",
+      "source_sha256": "8c4721a78f03fd536a926d052d798f6e322dc3c238b6a2e5156cd7d95349a93c",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 7,
+        "format_pass_rows": 7,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 6,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/val/HiQBind",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/HiQBind.csv",
+      "source_sha256": "7fafc7a55ca1460ae4a47a54e8c4f2aaae6ef7270a5234d58ea1b32bdc1c3d69",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 48,
+        "format_pass_rows": 48,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 48,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/val/Kinodata-3D",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/Kinodata-3D.csv",
+      "source_sha256": "3d281b2a3e52ce141db6d2c129a6822a8dd8d1ea0cc730343c0f478c7a2b9071",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 97,
+        "format_pass_rows": 97,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 57,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/val/OMol25_bio_mols",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/OMol25_bio_mols.csv",
+      "source_sha256": "602eaebf56bb4f7554eb2baf1b154362c6b52631ca0de0526c619dccefc42173",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 36,
+        "format_pass_rows": 36,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 18,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/val/Plinder",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/Plinder.csv",
+      "source_sha256": "f9565a1e131109ae651fcf18832db3bfac36d4a0ee59db0441aebd757bdde6a6",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 367,
+        "format_pass_rows": 367,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 335,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/val/SAIR",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/SAIR.csv",
+      "source_sha256": "8616783eae03edefe27a681197d875d1f9ead6c698e907c6459c6c89cba5fd54",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 100,
+        "format_pass_rows": 100,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 52,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/val/SPINDR",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/SPINDR.csv",
+      "source_sha256": "a81ed7856af7a690a8dd78246bc78ba36c1c06342ce19dfe5f7edd5aca161b97",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 56,
+        "format_pass_rows": 56,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 53,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/val/backup_un/chembl3d",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/backup_un/chembl3d.csv",
+      "source_sha256": "459e62366c8eff4749b569de5bc521a31fa9459e896d3fae489be17b6484abd9",
+      "rdkit": "2025.09.6",
+      "chunks": 2,
+      "counts": {
+        "rows": 182419,
+        "format_pass_rows": 182419,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 21905,
+        "rows_with_inchi_warning": 53248,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_a/val/geom",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/geom.csv",
+      "source_sha256": "7a5710849eb0e24b8b5cf17e4f223f96b7383beb0effed6b6e0bc0a268c000d5",
+      "rdkit": "2025.09.6",
+      "chunks": 6,
+      "counts": {
+        "rows": 715614,
+        "format_pass_rows": 715614,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 103413,
+        "rows_with_inchi_warning": 68299,
+        "review_flag_rows": 41,
+        "any_flagged_rows": 41,
+        "bond_above_2.5A_review": 41
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_c/test/nablaDFT_conformations",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_c/test/nablaDFT_conformations.csv",
+      "source_sha256": "bad8c75c9edc2247816ac6c90b996266e5e82f3a2b3142d24f7a3996a53bc8ad",
+      "rdkit": "2025.09.6",
+      "chunks": 10,
+      "counts": {
+        "rows": 1623912,
+        "format_pass_rows": 1623912,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 582820,
+        "review_flag_rows": 28,
+        "any_flagged_rows": 28,
+        "bond_below_0.7A_review": 28
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_c/test/nablaDFT_scaffolds",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_c/test/nablaDFT_scaffolds.csv",
+      "source_sha256": "86c0a97cf24b11181633fd6a82902c83e80dd91f61e176a605cd3ea0486433f1",
+      "rdkit": "2025.09.6",
+      "chunks": 7,
+      "counts": {
+        "rows": 1130328,
+        "format_pass_rows": 1130328,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 467867,
+        "review_flag_rows": 28,
+        "any_flagged_rows": 28,
+        "bond_below_0.7A_review": 28,
+        "bond_above_2.5A_review": 1
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "grp_c/test/nablaDFT_structures",
+      "input": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_c/test/nablaDFT_structures.csv",
+      "source_sha256": "5a805aafe104b852a2757e1675de6a7b7b8232a8047c8f84a4170729e05d3ff2",
+      "rdkit": "2025.09.6",
+      "chunks": 7,
+      "counts": {
+        "rows": 1152833,
+        "format_pass_rows": 1152833,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 0,
+        "rows_with_inchi_warning": 479442,
+        "review_flag_rows": 29,
+        "any_flagged_rows": 29,
+        "bond_below_0.7A_review": 29,
+        "bond_above_2.5A_review": 1
+      },
+      "format_checks_pass": true
+    },
+    {
+      "dataset": "geom_revisited",
+      "input": "/mnt/weka/fgeikyan/fsq/test/geom_revisited.csv",
+      "source_sha256": "3ad8e05da89f1144bc9ef18620990ca596a4a61742ac3281bef4024c33f245f1",
+      "rdkit": "2025.09.6",
+      "chunks": 1,
+      "counts": {
+        "rows": 23404,
+        "format_pass_rows": 23404,
+        "rows_with_isotope": 0,
+        "rows_with_radical": 0,
+        "rows_with_bond_stereo": 3475,
+        "rows_with_inchi_warning": 2304,
+        "review_flag_rows": 0,
+        "any_flagged_rows": 0
+      },
+      "format_checks_pass": true
+    }
+  ],
+  "publication_ready": false,
+  "scope": "All 28 predefined Group A holdouts, three distinct nabla test sets, and GEOM-revisited; current corrected working inputs. Read-only; no model evaluation.",
+  "manifest_sha256": "14711e93fdc70665a52e7bbd95421db843b6144c00c62181bdd42cd37141a8dd",
+  "elapsed_seconds": 1.5621894914656878
+}

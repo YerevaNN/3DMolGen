@@ -1,0 +1,7 @@
+Loaded revisited pickle from /auto/home/vover/revisited.pickle
+Using payload as Group D test source: <all>
+Top-level records to inspect: 1,000
+Unique Group D enriched_text rows: 23,404
+Unique Group D base SMILES: 1,041
+Saved Group D test CSV to /nfs/h100/raid/chem/3D_big_data/grp_d/test/geom_revisited_test.csv
+Saved summary to /nfs/h100/raid/chem/3D_big_data/grp_d/grp_d_summary.csv

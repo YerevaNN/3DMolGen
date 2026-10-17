@@ -1,0 +1,443 @@
+{
+  "checked_on": "2026-09-16",
+  "host": "np",
+  "tokenizer_data": {
+    "root": "/nfs/dgx/raid/chem/TokenizerData",
+    "files": [
+      {
+        "relative_path": "KIBA-3D_test_orig.csv",
+        "bytes": 2599882,
+        "mtime_ns": 1765050364833733020
+      },
+      {
+        "relative_path": "KIBA-3D_train_orig.csv",
+        "bytes": 266408800,
+        "mtime_ns": 1765050362701909968
+      },
+      {
+        "relative_path": "KIBA-3D_val_orig.csv",
+        "bytes": 757467,
+        "mtime_ns": 1765050363181870130
+      },
+      {
+        "relative_path": "backup/chembl3d.csv",
+        "bytes": 1148138490,
+        "mtime_ns": 1772546788302692837
+      },
+      {
+        "relative_path": "backup_excluded_splits_v2/KIBA-3D/test/KIBA-3D.csv",
+        "bytes": 2593920,
+        "mtime_ns": 1772437900899487748
+      },
+      {
+        "relative_path": "backup_excluded_splits_v2/KIBA-3D/train/KIBA-3D.csv",
+        "bytes": 265785382,
+        "mtime_ns": 1772437900395477507
+      },
+      {
+        "relative_path": "backup_excluded_splits_v2/KIBA-3D/val/KIBA-3D.csv",
+        "bytes": 755639,
+        "mtime_ns": 1772437900811485960
+      },
+      {
+        "relative_path": "backup_excluded_splits_v2/OMol25_small_mols/test/OMol25_small_mols.csv",
+        "bytes": 20900838,
+        "mtime_ns": 1765053145642924224
+      },
+      {
+        "relative_path": "backup_excluded_splits_v2/OMol25_small_mols/train/OMol25_small_mols.csv",
+        "bytes": 2172235619,
+        "mtime_ns": 1772464573006556373
+      },
+      {
+        "relative_path": "backup_excluded_splits_v2/OMol25_small_mols/val/OMol25_small_mols.csv",
+        "bytes": 6061622,
+        "mtime_ns": 1765053120269030111
+      },
+      {
+        "relative_path": "backup_excluded_splits_v2/chembl3d/test/chembl3d.csv",
+        "bytes": 28163987,
+        "mtime_ns": 1772437891699300809
+      },
+      {
+        "relative_path": "backup_excluded_splits_v2/chembl3d/train/chembl3d.csv",
+        "bytes": 1090347061,
+        "mtime_ns": 1772437889559257326
+      },
+      {
+        "relative_path": "backup_excluded_splits_v2/chembl3d/val/chembl3d.csv",
+        "bytes": 28111767,
+        "mtime_ns": 1772437890759281709
+      },
+      {
+        "relative_path": "backup_excluded_splits_v2/pubchem3d/test/pubchem3d.csv",
+        "bytes": 681501931,
+        "mtime_ns": 1767127834338204038
+      },
+      {
+        "relative_path": "backup_excluded_splits_v2/pubchem3d/train/pubchem3d.csv",
+        "bytes": 63576230778,
+        "mtime_ns": 1767129133936468378
+      },
+      {
+        "relative_path": "backup_excluded_splits_v2/pubchem3d/val/pubchem3d.csv",
+        "bytes": 340815721,
+        "mtime_ns": 1767127841478324152
+      },
+      {
+        "relative_path": "chembl_removed_ids.txt",
+        "bytes": 10946,
+        "mtime_ns": 1772437891711301053
+      },
+      {
+        "relative_path": "chembl_rm_test.csv",
+        "bytes": 8778,
+        "mtime_ns": 1773826763658545873
+      },
+      {
+        "relative_path": "chembl_rm_train.csv",
+        "bytes": 530250,
+        "mtime_ns": 1773826741046065710
+      },
+      {
+        "relative_path": "chembl_rm_val.csv",
+        "bytes": 69137,
+        "mtime_ns": 1773826759846464987
+      },
+      {
+        "relative_path": "chembl_test.csv",
+        "bytes": 28209834,
+        "mtime_ns": 1765621755826714143
+      },
+      {
+        "relative_path": "chembl_train.csv",
+        "bytes": 1092306922,
+        "mtime_ns": 1765617350706705875
+      },
+      {
+        "relative_path": "chembl_val.csv",
+        "bytes": 28161556,
+        "mtime_ns": 1765616336032694981
+      },
+      {
+        "relative_path": "kiba_removed_ids.txt",
+        "bytes": 6502,
+        "mtime_ns": 1772437900903487829
+      },
+      {
+        "relative_path": "pubchem3d.csv",
+        "bytes": 63878486778,
+        "mtime_ns": 1767001912680610298
+      },
+      {
+        "relative_path": "pubchem3d_test.csv",
+        "bytes": 683627298,
+        "mtime_ns": 1767001934601028105
+      },
+      {
+        "relative_path": "pubchem3d_val.csv",
+        "bytes": 341700230,
+        "mtime_ns": 1767001919932748373
+      },
+      {
+        "relative_path": "removed_isotopic_ids.txt",
+        "bytes": 2850091,
+        "mtime_ns": 1767127792733505771
+      },
+      {
+        "relative_path": "test/BindingMoad.csv",
+        "bytes": 315974,
+        "mtime_ns": 1765050201263309831
+      },
+      {
+        "relative_path": "test/BindingNet-High.csv",
+        "bytes": 3202925,
+        "mtime_ns": 1765050329336679377
+      },
+      {
+        "relative_path": "test/BindingNet-Low.csv",
+        "bytes": 5900380,
+        "mtime_ns": 1765050368729409668
+      },
+      {
+        "relative_path": "test/BindingNet-Mid.csv",
+        "bytes": 2763565,
+        "mtime_ns": 1766084265079042731
+      },
+      {
+        "relative_path": "test/CrossDocked2020.csv",
+        "bytes": 68731,
+        "mtime_ns": 1765050235140497927
+      },
+      {
+        "relative_path": "test/DAVIS-3D.csv",
+        "bytes": 195351,
+        "mtime_ns": 1765050193707936949
+      },
+      {
+        "relative_path": "test/HiQBind.csv",
+        "bytes": 198026,
+        "mtime_ns": 1765050203879092714
+      },
+      {
+        "relative_path": "test/Kinodata-3D.csv",
+        "bytes": 193144,
+        "mtime_ns": 1765050223681449061
+      },
+      {
+        "relative_path": "test/OMol25_bio_mols.csv",
+        "bytes": 78236,
+        "mtime_ns": 1765053194466872011
+      },
+      {
+        "relative_path": "test/Plinder.csv",
+        "bytes": 735576,
+        "mtime_ns": 1765050334044288632
+      },
+      {
+        "relative_path": "test/SAIR.csv",
+        "bytes": 200158,
+        "mtime_ns": 1765051531152924315
+      },
+      {
+        "relative_path": "test/SPINDR.csv",
+        "bytes": 164160,
+        "mtime_ns": 1765050205042996107
+      },
+      {
+        "relative_path": "test/chembl3d.csv",
+        "bytes": 28156291,
+        "mtime_ns": 1773826763626545194
+      },
+      {
+        "relative_path": "test/geom.csv",
+        "bytes": 511666815,
+        "mtime_ns": 1765627658114964889
+      },
+      {
+        "relative_path": "test/pubchem3d.csv",
+        "bytes": 681501931,
+        "mtime_ns": 1767127834338204038
+      },
+      {
+        "relative_path": "test/zinc.csv",
+        "bytes": 649720511,
+        "mtime_ns": 1766999824858974373
+      },
+      {
+        "relative_path": "test_nabla_backup.csv",
+        "bytes": 2370505126,
+        "mtime_ns": 1771859219493074510
+      },
+      {
+        "relative_path": "token_stats.npz",
+        "bytes": 3066,
+        "mtime_ns": 1767015333428362205
+      },
+      {
+        "relative_path": "train/BindingMoad.csv",
+        "bytes": 21597523,
+        "mtime_ns": 1765050200955335395
+      },
+      {
+        "relative_path": "train/BindingNet-High.csv",
+        "bytes": 199071791,
+        "mtime_ns": 1765050327160859976
+      },
+      {
+        "relative_path": "train/BindingNet-Low.csv",
+        "bytes": 251795299,
+        "mtime_ns": 1765050363617833944
+      },
+      {
+        "relative_path": "train/BindingNet-Mid.csv",
+        "bytes": 136563415,
+        "mtime_ns": 1766084263179002787
+      },
+      {
+        "relative_path": "train/CrossDocked2020.csv",
+        "bytes": 65851764,
+        "mtime_ns": 1765050234928515523
+      },
+      {
+        "relative_path": "train/DAVIS-3D.csv",
+        "bytes": 10755367,
+        "mtime_ns": 1765050193471956536
+      },
+      {
+        "relative_path": "train/HiQBind.csv",
+        "bytes": 22597013,
+        "mtime_ns": 1765050203679109315
+      },
+      {
+        "relative_path": "train/KIBA-3D.csv",
+        "bytes": 269468232,
+        "mtime_ns": 1772546623494767055
+      },
+      {
+        "relative_path": "train/Kinodata-3D.csv",
+        "bytes": 60442584,
+        "mtime_ns": 1765050223501464000
+      },
+      {
+        "relative_path": "train/OMol25_bio_mols.csv",
+        "bytes": 20,
+        "mtime_ns": 1772452075784899287
+      },
+      {
+        "relative_path": "train/OMol25_small_mols.csv",
+        "bytes": 2172235619,
+        "mtime_ns": 1772551850139639000
+      },
+      {
+        "relative_path": "train/Plinder.csv",
+        "bytes": 221338731,
+        "mtime_ns": 1765050333180360341
+      },
+      {
+        "relative_path": "train/SAIR.csv",
+        "bytes": 1390212604,
+        "mtime_ns": 1765051530896945561
+      },
+      {
+        "relative_path": "train/SPINDR.csv",
+        "bytes": 25664959,
+        "mtime_ns": 1765050204883009386
+      },
+      {
+        "relative_path": "train/chembl3d.csv",
+        "bytes": 1118142057,
+        "mtime_ns": 1773826740854061630
+      },
+      {
+        "relative_path": "train/geom.csv",
+        "bytes": 4144131473,
+        "mtime_ns": 1765627629618380850
+      },
+      {
+        "relative_path": "train/nablaDFT.csv",
+        "bytes": 5361668402,
+        "mtime_ns": 1772042389309957713
+      },
+      {
+        "relative_path": "train/zinc.csv",
+        "bytes": 47845876364,
+        "mtime_ns": 1766999803454559911
+      },
+      {
+        "relative_path": "train_nabla_backup.csv",
+        "bytes": 5355555846,
+        "mtime_ns": 1772041543444205796
+      },
+      {
+        "relative_path": "val/BindingMoad.csv",
+        "bytes": 118162,
+        "mtime_ns": 1765050201043328090
+      },
+      {
+        "relative_path": "val/BindingNet-High.csv",
+        "bytes": 111111,
+        "mtime_ns": 1765050327252852342
+      },
+      {
+        "relative_path": "val/BindingNet-Low.csv",
+        "bytes": 1743438,
+        "mtime_ns": 1765050364753739661
+      },
+      {
+        "relative_path": "val/BindingNet-Mid.csv",
+        "bytes": 283507,
+        "mtime_ns": 1766084263347006319
+      },
+      {
+        "relative_path": "val/CrossDocked2020.csv",
+        "bytes": 201551,
+        "mtime_ns": 1765050235088502244
+      },
+      {
+        "relative_path": "val/DAVIS-3D.csv",
+        "bytes": 85422,
+        "mtime_ns": 1765050193547950228
+      },
+      {
+        "relative_path": "val/HiQBind.csv",
+        "bytes": 45818,
+        "mtime_ns": 1765050203723105661
+      },
+      {
+        "relative_path": "val/Kinodata-3D.csv",
+        "bytes": 86435,
+        "mtime_ns": 1765050223561459020
+      },
+      {
+        "relative_path": "val/OMol25_bio_mols.csv",
+        "bytes": 36875,
+        "mtime_ns": 1765053194406876991
+      },
+      {
+        "relative_path": "val/Plinder.csv",
+        "bytes": 579791,
+        "mtime_ns": 1765050333568328138
+      },
+      {
+        "relative_path": "val/SAIR.csv",
+        "bytes": 89292,
+        "mtime_ns": 1765051530984938258
+      },
+      {
+        "relative_path": "val/SPINDR.csv",
+        "bytes": 46769,
+        "mtime_ns": 1765050204923006066
+      },
+      {
+        "relative_path": "val/chembl3d.csv",
+        "bytes": 139665107,
+        "mtime_ns": 1773826759750462949
+      },
+      {
+        "relative_path": "val/geom.csv",
+        "bytes": 516436351,
+        "mtime_ns": 1765627645486706051
+      },
+      {
+        "relative_path": "val/pubchem3d.csv",
+        "bytes": 340815721,
+        "mtime_ns": 1767127841478324152
+      },
+      {
+        "relative_path": "val/zinc.csv",
+        "bytes": 324814908,
+        "mtime_ns": 1766999810782701645
+      },
+      {
+        "relative_path": "val_nabla_backup.csv",
+        "bytes": 6112576,
+        "mtime_ns": 1772041524999817199
+      }
+    ],
+    "fingerprints": "metadata only; large source files were not hashed"
+  },
+  "revisited_pickle": {
+    "path": "/auto/home/vover/revisited.pickle",
+    "bytes": 28228953,
+    "sha256": "25aa2fa3f703dc9d375696a95c6d9549b2c9aa37b4dbd8d991a04ebdc4009524"
+  },
+  "rebuilt_reference": {
+    "rows": 23404,
+    "unique_base_smiles": 1041,
+    "sha256": "3ad8e05da89f1144bc9ef18620990ca596a4a61742ac3281bef4024c33f245f1",
+    "matches_historical_counts": true,
+    "historical_byte_identity": "unknown; original CSV unavailable"
+  },
+  "environment_observed": {
+    "python": "3.10.14",
+    "packages": {
+      "tqdm": "4.67.1",
+      "numpy": "2.2.6",
+      "pandas": "2.3.3",
+      "rdkit": "2025.9.3",
+      "torch": "2.9.1",
+      "torch-geometric": "2.7.0"
+    }
+  }
+}

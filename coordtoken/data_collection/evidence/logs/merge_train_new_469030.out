@@ -1,0 +1,21 @@
+train/BindingMoad: merged_rows=20,763
+train/BindingNet-High: merged_rows=211,479
+train/BindingNet-Low: merged_rows=252,760
+train/BindingNet-Mid: merged_rows=144,831
+train/CrossDocked2020: merged_rows=79,074
+train/DAVIS-3D: merged_rows=129
+train/HiQBind: merged_rows=24,863
+train/KIBA-3D: merged_rows=263,514
+train/Kinodata-3D: merged_rows=62,027
+train/OMol25_bio_mols: merged_rows=1,348,889
+train/OMol25_small_mols: merged_rows=3,751,240
+train/Plinder: merged_rows=123,402
+train/SAIR: merged_rows=1,523,594
+train/SPINDR: merged_rows=25,892
+train/chembl3d: merged_rows=1,442,219
+train/geom: merged_rows=5,261,074
+train/nablaDFT: merged_rows=8,687,509
+train/pubchem3d: merged_rows=93,723,972
+train/zinc: merged_rows=73,267,017
+train total rows=190,214,248 empty_name_rows=0
+Saved merged train CSV to: /nfs/h100/raid/chem/3D_big_data_new_dedup_no_geom_revisited/merged_train.csv

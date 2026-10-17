@@ -1,0 +1,37 @@
+{
+  "status": "complete",
+  "csv": "/mnt/weka/fgeikyan/CoordToken/data_collection/reviews/chembl_replacement_20261004/chembl3d.checked.csv",
+  "csv_sha256": "76280f17c8f568bc15338a2969a4112a9e72305fc193b42277582750fce85878",
+  "source": "/mnt/weka/fgeikyan/CoordToken/data_collection/rebuild_20260930/downloads/loqi/train_h.pt",
+  "source_sha256": "9b787ebd9b244de721b09bcaa996fef31c5eca63b667fd3a3ababd345e6d11b1",
+  "counts": {
+    "rows": 1442219,
+    "source_reencoding_matched_within_precision": 1441803,
+    "source_graph_and_conformer_matched": 411,
+    "source_serialization_normalized_match": 5
+  },
+  "failures": [],
+  "normalized_matches": [
+    {
+      "name": "chembl3d_752146",
+      "rmsd": 1.5978412758915255e-15
+    },
+    {
+      "name": "chembl3d_783982",
+      "rmsd": 1.5152787220753012e-15
+    },
+    {
+      "name": "chembl3d_811536",
+      "rmsd": 1.3936958979433734e-15
+    },
+    {
+      "name": "chembl3d_850338",
+      "rmsd": 1.176711238874784e-15
+    },
+    {
+      "name": "chembl3d_940438",
+      "rmsd": 2.1576439486261492e-15
+    }
+  ],
+  "normalization_policy": "Only fallback when source and reencoded canonical isomeric SMILES agree; then exact graph/stereo and coordinates under proper rotation must match to 0.001 A. This does not certify preservation of source properties not represented by canonical SMILES."
+}

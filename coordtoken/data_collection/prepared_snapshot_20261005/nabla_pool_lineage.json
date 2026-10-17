@@ -1,0 +1,17 @@
+{
+  "grouped_pool_rows": 8757879,
+  "root_rows_matched_in_order": 8725557,
+  "root_is_exact_byte_subsequence": true,
+  "grouped_rows_not_in_root": 32322,
+  "examples_of_grouped_rows_absent_from_root": [
+    "1157924_7",
+    "1818886_0",
+    "660830_3",
+    "1266003_8",
+    "1907900_2"
+  ],
+  "grouped_sha256": "2c5812234ce8daa4fd9773244035946dc40ad5e03861c249d39491a691596c79",
+  "root_sha256": "691ea95877836cc1dbc4c4695e8d5ed486b9fefdfcef1053340f8382ba60b4f9",
+  "elapsed_seconds": 18.49675588030368,
+  "decision": "Use grouped train as the less-filtered legacy pool; root file adds no rows"
+}

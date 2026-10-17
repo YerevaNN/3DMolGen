@@ -1,0 +1,50 @@
+{
+  "status": "integration_checks_passed_with_preexisting_legacy_suite_failures",
+  "date": "2026-10-17",
+  "selected_checkpoint_sha256": "29d487cf3783978c801c5a237e3c3c86cc23ab058aa7edea7eff0aa707c4bc4f",
+  "core_and_packed_target_regression": {
+    "passed": 155,
+    "failed": 0,
+    "log": "/tmp/coordtoken-final-tests-20261017.log"
+  },
+  "latest_adapter_suite_after_config_test_and_formatting": {
+    "passed": 23,
+    "failed": 0,
+    "log": "/tmp/coordtoken-latest-tests-20261017.log"
+  },
+  "all_dataloader_suite": {
+    "passed": 29,
+    "failed": 4,
+    "failures": [
+      "FAILED tests/dataloader/test_isomer_units.py::test_chunk_flushes_and_repeats_smiles_when_conformer_overflows",
+      "FAILED tests/dataloader/test_isomer_units.py::test_packer_delimiter_and_end_pad",
+      "FAILED tests/dataloader/test_isomer_units.py::test_packer_non_fitting_next_unit",
+      "FAILED tests/dataloader/test_isomer_units.py::test_serialize_truncates_long_unit"
+    ],
+    "baseline_commit": "c253b635b0ed034dc41371e8296f71f0b696aa57",
+    "baseline_same_failures": true,
+    "scope": "These are legacy isomer-unit test expectations, unchanged on the pristine baseline. The new contract requires pair serialization; isomer-unit mode is rejected."
+  },
+  "source_model_parity": "CPU fp32 outputs and indices bit-exact against frozen source; model/quantizer copies verified",
+  "training_sample": "coordtoken_training_sample_validation.json",
+  "generation_smoke": "Tiny random Qwen train/save/resume was exact; generation uses a constrained valid suffix to test the interface, not learned quality.",
+  "not_completed": [
+    "full-corpus code conversion",
+    "production GPU/bf16 integration validation",
+    "distributed production Qwen training",
+    "new downstream scientific evaluation"
+  ],
+  "data_pipeline_synthetic_stages": [
+    "group_a_split",
+    "group_b_split",
+    "group_c_split",
+    "merge_release",
+    "exact_duplicate_audit",
+    "exact_deduplication"
+  ],
+  "additional_numeric_parser_suite": {
+    "passed": 6,
+    "failed": 0
+  },
+  "whitespace_check": "New integration edits pass; exact copied quantizer and one copied data LaTeX snippet retain their source whitespace."
+}

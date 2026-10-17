@@ -1,0 +1,30 @@
+{
+  "python": "/mnt/weka/fgeikyan/tokenizer/conda_envs/train/bin/python",
+  "results": [
+    {
+      "stage": "group_a_split",
+      "exit_code": 0
+    },
+    {
+      "stage": "group_b_split",
+      "exit_code": 0
+    },
+    {
+      "stage": "group_c_split",
+      "exit_code": 0
+    },
+    {
+      "stage": "merge_release",
+      "exit_code": 0
+    },
+    {
+      "stage": "exact_duplicate_audit",
+      "exit_code": 0
+    },
+    {
+      "stage": "exact_deduplication",
+      "exit_code": 0
+    }
+  ],
+  "scope": "Synthetic stage and orchestration tests; not a fresh full-corpus rerun."
+}

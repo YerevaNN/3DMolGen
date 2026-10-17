@@ -1,0 +1,549 @@
+{
+  "rows_scanned": 198920635,
+  "duplicate_text_groups": 1689701,
+  "rows_in_duplicate_groups": 3440614,
+  "redundant_rows_global": 1750913,
+  "hash_collision_groups": 0,
+  "within_split_redundant_rows": {
+    "train": 1734217,
+    "val": 7102,
+    "test": 9594
+  },
+  "within_category_redundant_rows": {
+    "22": 29340,
+    "47": 54941,
+    "53": 1133909,
+    "51": 5839,
+    "50": 78253,
+    "16": 344,
+    "52": 5740,
+    "41": 367,
+    "23": 5912,
+    "25": 1331,
+    "17": 336,
+    "36": 0,
+    "46": 466,
+    "45": 1262,
+    "27": 2096,
+    "48": 230,
+    "13": 318,
+    "59": 0,
+    "15": 416,
+    "49": 425,
+    "20": 23,
+    "21": 133,
+    "30": 1,
+    "14": 49,
+    "18": 8,
+    "8": 0,
+    "0": 1,
+    "9": 0,
+    "2": 3
+  },
+  "split_pair_shared_texts": {},
+  "category_pair_shared_texts": {
+    "22|47": 427062,
+    "36|46": 4,
+    "13|59": 2037,
+    "20|22": 56,
+    "20|47": 51,
+    "14|23": 3,
+    "16|17": 2,
+    "15|16": 3,
+    "8|45": 2,
+    "0|9": 1
+  },
+  "status": "complete_verified_exact_duplicate_audit",
+  "seconds": 93.86201402917504,
+  "categories": [
+    {
+      "id": 0,
+      "dataset": "BindingMoad",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 468
+    },
+    {
+      "id": 1,
+      "dataset": "BindingNet-High",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 3729
+    },
+    {
+      "id": 2,
+      "dataset": "BindingNet-Low",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 6850
+    },
+    {
+      "id": 3,
+      "dataset": "BindingNet-Mid",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 3312
+    },
+    {
+      "id": 4,
+      "dataset": "CrossDocked2020",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 100
+    },
+    {
+      "id": 5,
+      "dataset": "DAVIS-3D",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 225
+    },
+    {
+      "id": 6,
+      "dataset": "HiQBind",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 279
+    },
+    {
+      "id": 7,
+      "dataset": "Kinodata-3D",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 225
+    },
+    {
+      "id": 8,
+      "dataset": "OMol25_bio_mols",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 225
+    },
+    {
+      "id": 9,
+      "dataset": "Plinder",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 950
+    },
+    {
+      "id": 10,
+      "dataset": "SAIR",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 225
+    },
+    {
+      "id": 11,
+      "dataset": "SPINDR",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 225
+    },
+    {
+      "id": 12,
+      "dataset": "chembl3d",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 37065
+    },
+    {
+      "id": 13,
+      "dataset": "geom",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 711546
+    },
+    {
+      "id": 14,
+      "dataset": "BindingMoad",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 20529
+    },
+    {
+      "id": 15,
+      "dataset": "BindingNet-High",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 210818
+    },
+    {
+      "id": 16,
+      "dataset": "BindingNet-Low",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 251747
+    },
+    {
+      "id": 17,
+      "dataset": "BindingNet-Mid",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 144352
+    },
+    {
+      "id": 18,
+      "dataset": "CrossDocked2020",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 78241
+    },
+    {
+      "id": 19,
+      "dataset": "DAVIS-3D",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 129
+    },
+    {
+      "id": 20,
+      "dataset": "HiQBind",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 24518
+    },
+    {
+      "id": 21,
+      "dataset": "Kinodata-3D",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 61245
+    },
+    {
+      "id": 22,
+      "dataset": "OMol25_bio_mols",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 1344106
+    },
+    {
+      "id": 23,
+      "dataset": "Plinder",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 127987
+    },
+    {
+      "id": 24,
+      "dataset": "SAIR",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 1521900
+    },
+    {
+      "id": 25,
+      "dataset": "SPINDR",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 26671
+    },
+    {
+      "id": 26,
+      "dataset": "chembl3d",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 1428111
+    },
+    {
+      "id": 27,
+      "dataset": "geom",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 5099357
+    },
+    {
+      "id": 28,
+      "dataset": "BindingMoad",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 129
+    },
+    {
+      "id": 29,
+      "dataset": "BindingNet-High",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 127
+    },
+    {
+      "id": 30,
+      "dataset": "BindingNet-Low",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 1889
+    },
+    {
+      "id": 31,
+      "dataset": "BindingNet-Mid",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 326
+    },
+    {
+      "id": 32,
+      "dataset": "CrossDocked2020",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 262
+    },
+    {
+      "id": 33,
+      "dataset": "DAVIS-3D",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 7
+    },
+    {
+      "id": 34,
+      "dataset": "HiQBind",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 48
+    },
+    {
+      "id": 35,
+      "dataset": "Kinodata-3D",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 95
+    },
+    {
+      "id": 36,
+      "dataset": "OMol25_bio_mols",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 35
+    },
+    {
+      "id": 37,
+      "dataset": "Plinder",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 362
+    },
+    {
+      "id": 38,
+      "dataset": "SAIR",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 99
+    },
+    {
+      "id": 39,
+      "dataset": "SPINDR",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 56
+    },
+    {
+      "id": 40,
+      "dataset": "chembl3d",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 180929
+    },
+    {
+      "id": 41,
+      "dataset": "geom",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 689655
+    },
+    {
+      "id": 42,
+      "dataset": "KIBA-3D",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 1576
+    },
+    {
+      "id": 43,
+      "dataset": "KIBA-3D",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 1533
+    },
+    {
+      "id": 44,
+      "dataset": "KIBA-3D",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 260129
+    },
+    {
+      "id": 45,
+      "dataset": "OMol25_small_mols",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 37384
+    },
+    {
+      "id": 46,
+      "dataset": "OMol25_small_mols",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 21597
+    },
+    {
+      "id": 47,
+      "dataset": "OMol25_small_mols",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 4033245
+    },
+    {
+      "id": 48,
+      "dataset": "pubchem3d",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 473758
+    },
+    {
+      "id": 49,
+      "dataset": "pubchem3d",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 473756
+    },
+    {
+      "id": 50,
+      "dataset": "pubchem3d",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 93802743
+    },
+    {
+      "id": 51,
+      "dataset": "zinc",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 375763
+    },
+    {
+      "id": 52,
+      "dataset": "zinc",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 2,
+      "rows": 375763
+    },
+    {
+      "id": 53,
+      "dataset": "zinc",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 74401034
+    },
+    {
+      "id": 54,
+      "dataset": "nablaDFT",
+      "test_subset": "",
+      "split": "train",
+      "file_index": 0,
+      "rows": 8689383
+    },
+    {
+      "id": 55,
+      "dataset": "nablaDFT",
+      "test_subset": "",
+      "split": "val",
+      "file_index": 1,
+      "rows": 63340
+    },
+    {
+      "id": 56,
+      "dataset": "nablaDFT",
+      "test_subset": "conformations",
+      "split": "test",
+      "file_index": 2,
+      "rows": 1623912
+    },
+    {
+      "id": 57,
+      "dataset": "nablaDFT",
+      "test_subset": "scaffolds",
+      "split": "test",
+      "file_index": 2,
+      "rows": 1130328
+    },
+    {
+      "id": 58,
+      "dataset": "nablaDFT",
+      "test_subset": "structures",
+      "split": "test",
+      "file_index": 2,
+      "rows": 1152833
+    },
+    {
+      "id": 59,
+      "dataset": "GEOM-Revisited",
+      "test_subset": "",
+      "split": "test",
+      "file_index": 3,
+      "rows": 23404
+    }
+  ],
+  "inputs_modified": false,
+  "equality": "exact enriched_text field equality; no canonicalization, rounding, or name comparison",
+  "all_hash_candidates_compared_as_full_strings": true,
+  "plan_sha256": "6a72f0a245d744fbfc87a988d1cb6a18ca98c2013319190a12a43ee5921fdf8b",
+  "job_id": "314196",
+  "implementation_commit": "ca6e075",
+  "merged_test_redundant_rows": 7557,
+  "geom_revisited_texts_shared_with_merged_test": 2037,
+  "training_rows_after_exact_deduplication": 189792028
+}

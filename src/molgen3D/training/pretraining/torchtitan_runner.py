@@ -413,6 +413,12 @@ def _prepare_job_config(
         job_config.metrics.save_tb_folder = "tb"
 
     tokenizer_path = _resolve_tag_or_path(run_settings.tokenizer_tag)
+    from molgen3D.data_processing.coordtoken_contract import load_contract, validate_training_data
+    if load_contract(tokenizer_path):
+        data_cfg = getattr(job_config,"molgen_data",None)
+        if data_cfg is None or data_cfg.serialization_mode != "pairs" or data_cfg.min_emb_len != 0:
+            raise ValueError("CoordToken requires pair serialization and min_emb_len=0")
+        validate_training_data(data_cfg.train_path,tokenizer_path,job_config.training.seq_len)
     tokenizer_info = _load_tokenizer_details(tokenizer_path)
     vocab_size = tokenizer_info.vocab_size
 

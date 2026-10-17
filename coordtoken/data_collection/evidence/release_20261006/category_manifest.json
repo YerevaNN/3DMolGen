@@ -1,0 +1,314 @@
+{
+  "status": "molecular_split_verified",
+  "kind": "row categories within merged CSV files",
+  "files": [
+    {
+      "dataset": "BindingMoad",
+      "role": "test",
+      "rows": 467
+    },
+    {
+      "dataset": "BindingNet-High",
+      "role": "test",
+      "rows": 3729
+    },
+    {
+      "dataset": "BindingNet-Low",
+      "role": "test",
+      "rows": 6847
+    },
+    {
+      "dataset": "BindingNet-Mid",
+      "role": "test",
+      "rows": 3312
+    },
+    {
+      "dataset": "CrossDocked2020",
+      "role": "test",
+      "rows": 100
+    },
+    {
+      "dataset": "DAVIS-3D",
+      "role": "test",
+      "rows": 225
+    },
+    {
+      "dataset": "HiQBind",
+      "role": "test",
+      "rows": 279
+    },
+    {
+      "dataset": "Kinodata-3D",
+      "role": "test",
+      "rows": 225
+    },
+    {
+      "dataset": "OMol25_bio_mols",
+      "role": "test",
+      "rows": 225
+    },
+    {
+      "dataset": "Plinder",
+      "role": "test",
+      "rows": 949
+    },
+    {
+      "dataset": "SAIR",
+      "role": "test",
+      "rows": 225
+    },
+    {
+      "dataset": "SPINDR",
+      "role": "test",
+      "rows": 225
+    },
+    {
+      "dataset": "chembl3d",
+      "role": "test",
+      "rows": 37065
+    },
+    {
+      "dataset": "geom",
+      "role": "test",
+      "rows": 711228
+    },
+    {
+      "dataset": "BindingMoad",
+      "role": "train",
+      "rows": 20480
+    },
+    {
+      "dataset": "BindingNet-High",
+      "role": "train",
+      "rows": 210402
+    },
+    {
+      "dataset": "BindingNet-Low",
+      "role": "train",
+      "rows": 251400
+    },
+    {
+      "dataset": "BindingNet-Mid",
+      "role": "train",
+      "rows": 144014
+    },
+    {
+      "dataset": "CrossDocked2020",
+      "role": "train",
+      "rows": 78233
+    },
+    {
+      "dataset": "DAVIS-3D",
+      "role": "train",
+      "rows": 129
+    },
+    {
+      "dataset": "HiQBind",
+      "role": "train",
+      "rows": 24495
+    },
+    {
+      "dataset": "Kinodata-3D",
+      "role": "train",
+      "rows": 61112
+    },
+    {
+      "dataset": "OMol25_bio_mols",
+      "role": "train",
+      "rows": 1314710
+    },
+    {
+      "dataset": "Plinder",
+      "role": "train",
+      "rows": 122072
+    },
+    {
+      "dataset": "SAIR",
+      "role": "train",
+      "rows": 1521900
+    },
+    {
+      "dataset": "SPINDR",
+      "role": "train",
+      "rows": 25340
+    },
+    {
+      "dataset": "chembl3d",
+      "role": "train",
+      "rows": 1428111
+    },
+    {
+      "dataset": "geom",
+      "role": "train",
+      "rows": 5097261
+    },
+    {
+      "dataset": "BindingMoad",
+      "role": "val",
+      "rows": 129
+    },
+    {
+      "dataset": "BindingNet-High",
+      "role": "val",
+      "rows": 127
+    },
+    {
+      "dataset": "BindingNet-Low",
+      "role": "val",
+      "rows": 1888
+    },
+    {
+      "dataset": "BindingNet-Mid",
+      "role": "val",
+      "rows": 326
+    },
+    {
+      "dataset": "CrossDocked2020",
+      "role": "val",
+      "rows": 262
+    },
+    {
+      "dataset": "DAVIS-3D",
+      "role": "val",
+      "rows": 7
+    },
+    {
+      "dataset": "HiQBind",
+      "role": "val",
+      "rows": 48
+    },
+    {
+      "dataset": "Kinodata-3D",
+      "role": "val",
+      "rows": 95
+    },
+    {
+      "dataset": "OMol25_bio_mols",
+      "role": "val",
+      "rows": 35
+    },
+    {
+      "dataset": "Plinder",
+      "role": "val",
+      "rows": 362
+    },
+    {
+      "dataset": "SAIR",
+      "role": "val",
+      "rows": 99
+    },
+    {
+      "dataset": "SPINDR",
+      "role": "val",
+      "rows": 56
+    },
+    {
+      "dataset": "chembl3d",
+      "role": "val",
+      "rows": 180929
+    },
+    {
+      "dataset": "geom",
+      "role": "val",
+      "rows": 689288
+    },
+    {
+      "dataset": "KIBA-3D",
+      "role": "test",
+      "rows": 1576
+    },
+    {
+      "dataset": "KIBA-3D",
+      "role": "val",
+      "rows": 1533
+    },
+    {
+      "dataset": "KIBA-3D",
+      "role": "train",
+      "rows": 260129
+    },
+    {
+      "dataset": "OMol25_small_mols",
+      "role": "test",
+      "rows": 36120
+    },
+    {
+      "dataset": "OMol25_small_mols",
+      "role": "val",
+      "rows": 21127
+    },
+    {
+      "dataset": "OMol25_small_mols",
+      "role": "train",
+      "rows": 3551242
+    },
+    {
+      "dataset": "pubchem3d",
+      "role": "test",
+      "rows": 473528
+    },
+    {
+      "dataset": "pubchem3d",
+      "role": "val",
+      "rows": 473331
+    },
+    {
+      "dataset": "pubchem3d",
+      "role": "train",
+      "rows": 93724490
+    },
+    {
+      "dataset": "zinc",
+      "role": "val",
+      "rows": 369924
+    },
+    {
+      "dataset": "zinc",
+      "role": "test",
+      "rows": 370023
+    },
+    {
+      "dataset": "zinc",
+      "role": "train",
+      "rows": 73267125
+    },
+    {
+      "dataset": "nablaDFT",
+      "role": "train",
+      "rows": 8689383
+    },
+    {
+      "dataset": "nablaDFT",
+      "role": "val",
+      "rows": 63340
+    },
+    {
+      "dataset": "nablaDFT_conformations",
+      "role": "test",
+      "rows": 1623912
+    },
+    {
+      "dataset": "nablaDFT_scaffolds",
+      "role": "test",
+      "rows": 1130328
+    },
+    {
+      "dataset": "nablaDFT_structures",
+      "role": "test",
+      "rows": 1152833
+    }
+  ],
+  "geom_revisited_reference": {
+    "path": "/mnt/weka/fgeikyan/fsq/test/geom_revisited.csv",
+    "bytes": 16606582,
+    "mtime_ns": 1774216643293525932,
+    "sha256": "3ad8e05da89f1144bc9ef18620990ca596a4a61742ac3281bef4024c33f245f1",
+    "rows": 23404,
+    "dataset": "geom_revisited",
+    "label": "geom_revisited/test",
+    "role": "test",
+    "group_a": false
+  },
+  "exact_sample_deduplication_performed": true,
+  "conformation_test_molecular_overlap_exception": true
+}

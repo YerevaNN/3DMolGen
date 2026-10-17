@@ -450,7 +450,8 @@ def tokenize_enriched_v2(enriched, digit_width):
 
 
 def decode_cartesian_v2(enriched_string):
-    tokens = tokenize_enriched(enriched_string)
+    from .smiles_encoder_decoder_fsq import tokenize_enriched as tokenize_coordinates_strict
+    tokens = tokenize_coordinates_strict(enriched_string)
 
     smiles_parts = []
     coords = []
@@ -467,7 +468,10 @@ def decode_cartesian_v2(enriched_string):
             smiles_parts.append(token["text"])
 
     smiles = "".join(smiles_parts)
-    mol = Chem.MolFromSmiles(smiles, sanitize=False)
+    params = Chem.SmilesParserParams()
+    params.sanitize = True
+    params.removeHs = False
+    mol = Chem.MolFromSmiles(smiles, params)
     if mol is None:
         raise ValueError(f"Failed to parse rebuilt SMILES: {smiles}")
     if mol.GetNumAtoms() != len(coords):
@@ -475,7 +479,8 @@ def decode_cartesian_v2(enriched_string):
             f"Atom count mismatch: mol has {mol.GetNumAtoms()} atoms, coords list has {len(coords)} entries."
         )
 
-    Chem.SanitizeMol(mol)
+    if not np.isfinite(np.asarray(coords, dtype=float)).all():
+        raise ValueError("Nonfinite coordinates")
 
     conformer = Chem.Conformer(mol.GetNumAtoms())
     for idx, (x, y, z) in enumerate(coords):
@@ -540,7 +545,9 @@ def coords_rmsd(mol_a, mol_b):
         dz = pa.z - pb.z
         sse += dx * dx + dy * dy + dz * dz
 
-    rmsd_rdkit = AllChem.GetBestRMS(mol_a, mol_b)
+    # GetBestRMS aligns its first argument in place. A measurement must not
+    # change coordinates used by subsequent encoding or comparisons.
+    rmsd_rdkit = AllChem.GetBestRMS(Chem.Mol(mol_a), mol_b)
     return min(math.sqrt(sse / n), rmsd_rdkit)
 
 def get_bins_for_coords(ranges, bin_size=0.104):

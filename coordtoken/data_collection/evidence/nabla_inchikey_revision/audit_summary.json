@@ -1,0 +1,1614 @@
+{
+  "status": "complete",
+  "rows_scanned": 190214248,
+  "counts": {
+    "rows": 190214248,
+    "converted_rows": 190214235,
+    "key_nonmatch_rows": 180197670,
+    "exact_text_rows": 9959226,
+    "inchikey_match_rows": 10016565,
+    "additional_rows": 57339,
+    "conversion_failure_rows": 13
+  },
+  "elapsed_seconds": 13253.257467823103,
+  "reference": {
+    "files": [
+      {
+        "path": "/mnt/weka/fgeikyan/fsq/val/nablaDFT.csv",
+        "size": 38549376,
+        "mtime_ns": 1774216721834982315,
+        "label": "val/nablaDFT",
+        "bit": 1,
+        "rows": 63333,
+        "sha256": "62b327cda5f73248ca7374daf414383160fb2821773f631371b7a3d377ee849d"
+      },
+      {
+        "path": "/mnt/weka/fgeikyan/fsq/test/nablaDFT_conformations.csv",
+        "size": 973098216,
+        "mtime_ns": 1768311400403824797,
+        "label": "test/nablaDFT_conformations",
+        "bit": 2,
+        "rows": 1623912,
+        "sha256": "bad8c75c9edc2247816ac6c90b996266e5e82f3a2b3142d24f7a3996a53bc8ad"
+      },
+      {
+        "path": "/mnt/weka/fgeikyan/fsq/test/nablaDFT_scaffolds.csv",
+        "size": 694803833,
+        "mtime_ns": 1768311385112127526,
+        "label": "test/nablaDFT_scaffolds",
+        "bit": 4,
+        "rows": 1130328,
+        "sha256": "86c0a97cf24b11181633fd6a82902c83e80dd91f61e176a605cd3ea0486433f1"
+      },
+      {
+        "path": "/mnt/weka/fgeikyan/fsq/test/nablaDFT_structures.csv",
+        "size": 702603117,
+        "mtime_ns": 1768311391408002886,
+        "label": "test/nablaDFT_structures",
+        "bit": 8,
+        "rows": 1152833,
+        "sha256": "5a805aafe104b852a2757e1675de6a7b7b8232a8047c8f84a4170729e05d3ff2"
+      }
+    ],
+    "unique_texts": 1845963,
+    "unique_valid_keys": 1845600,
+    "failed_unique_texts": 0
+  },
+  "groups": {
+    "all_references": {
+      "exact_text": {
+        "training_rows": 9959226,
+        "unique_training_texts": 1507985,
+        "unique_keys": 1507735,
+        "by_source": [
+          {
+            "source": "BindingMoad",
+            "training_rows": 295,
+            "unique_training_texts": 142,
+            "unique_keys": 142
+          },
+          {
+            "source": "BindingNet-High",
+            "training_rows": 1014,
+            "unique_training_texts": 668,
+            "unique_keys": 668
+          },
+          {
+            "source": "BindingNet-Low",
+            "training_rows": 1228,
+            "unique_training_texts": 934,
+            "unique_keys": 934
+          },
+          {
+            "source": "BindingNet-Mid",
+            "training_rows": 904,
+            "unique_training_texts": 698,
+            "unique_keys": 698
+          },
+          {
+            "source": "CrossDocked2020",
+            "training_rows": 1215,
+            "unique_training_texts": 92,
+            "unique_keys": 92
+          },
+          {
+            "source": "HiQBind",
+            "training_rows": 382,
+            "unique_training_texts": 162,
+            "unique_keys": 162
+          },
+          {
+            "source": "KIBA-3D",
+            "training_rows": 2261,
+            "unique_training_texts": 14,
+            "unique_keys": 14
+          },
+          {
+            "source": "Kinodata-3D",
+            "training_rows": 205,
+            "unique_training_texts": 139,
+            "unique_keys": 139
+          },
+          {
+            "source": "OMol25_bio_mols",
+            "training_rows": 25706,
+            "unique_training_texts": 15011,
+            "unique_keys": 15005
+          },
+          {
+            "source": "Plinder",
+            "training_rows": 1024,
+            "unique_training_texts": 309,
+            "unique_keys": 309
+          },
+          {
+            "source": "SAIR",
+            "training_rows": 2893,
+            "unique_training_texts": 493,
+            "unique_keys": 493
+          },
+          {
+            "source": "SPINDR",
+            "training_rows": 314,
+            "unique_training_texts": 138,
+            "unique_keys": 138
+          },
+          {
+            "source": "chembl3d",
+            "training_rows": 41682,
+            "unique_training_texts": 41682,
+            "unique_keys": 41682
+          },
+          {
+            "source": "geom",
+            "training_rows": 384847,
+            "unique_training_texts": 16966,
+            "unique_keys": 16966
+          },
+          {
+            "source": "nablaDFT",
+            "training_rows": 8597080,
+            "unique_training_texts": 1466574,
+            "unique_keys": 1466338
+          },
+          {
+            "source": "pubchem3d",
+            "training_rows": 817976,
+            "unique_training_texts": 83303,
+            "unique_keys": 83303
+          },
+          {
+            "source": "zinc",
+            "training_rows": 80200,
+            "unique_training_texts": 77728,
+            "unique_keys": 77727
+          }
+        ]
+      },
+      "inchikey": {
+        "training_rows": 10016565,
+        "unique_training_texts": 1517881,
+        "unique_keys": 1509266,
+        "by_source": [
+          {
+            "source": "BindingMoad",
+            "training_rows": 312,
+            "unique_training_texts": 154,
+            "unique_keys": 153
+          },
+          {
+            "source": "BindingNet-High",
+            "training_rows": 1050,
+            "unique_training_texts": 700,
+            "unique_keys": 700
+          },
+          {
+            "source": "BindingNet-Low",
+            "training_rows": 1328,
+            "unique_training_texts": 1016,
+            "unique_keys": 1016
+          },
+          {
+            "source": "BindingNet-Mid",
+            "training_rows": 965,
+            "unique_training_texts": 754,
+            "unique_keys": 753
+          },
+          {
+            "source": "CrossDocked2020",
+            "training_rows": 1322,
+            "unique_training_texts": 103,
+            "unique_keys": 102
+          },
+          {
+            "source": "HiQBind",
+            "training_rows": 422,
+            "unique_training_texts": 176,
+            "unique_keys": 176
+          },
+          {
+            "source": "KIBA-3D",
+            "training_rows": 2421,
+            "unique_training_texts": 16,
+            "unique_keys": 14
+          },
+          {
+            "source": "Kinodata-3D",
+            "training_rows": 234,
+            "unique_training_texts": 159,
+            "unique_keys": 157
+          },
+          {
+            "source": "OMol25_bio_mols",
+            "training_rows": 26930,
+            "unique_training_texts": 15718,
+            "unique_keys": 15404
+          },
+          {
+            "source": "OMol25_small_mols",
+            "training_rows": 673,
+            "unique_training_texts": 477,
+            "unique_keys": 462
+          },
+          {
+            "source": "Plinder",
+            "training_rows": 1058,
+            "unique_training_texts": 326,
+            "unique_keys": 324
+          },
+          {
+            "source": "SAIR",
+            "training_rows": 2958,
+            "unique_training_texts": 504,
+            "unique_keys": 504
+          },
+          {
+            "source": "SPINDR",
+            "training_rows": 327,
+            "unique_training_texts": 147,
+            "unique_keys": 147
+          },
+          {
+            "source": "chembl3d",
+            "training_rows": 43882,
+            "unique_training_texts": 43882,
+            "unique_keys": 43882
+          },
+          {
+            "source": "geom",
+            "training_rows": 410832,
+            "unique_training_texts": 18191,
+            "unique_keys": 18126
+          },
+          {
+            "source": "nablaDFT",
+            "training_rows": 8597095,
+            "unique_training_texts": 1466589,
+            "unique_keys": 1466344
+          },
+          {
+            "source": "pubchem3d",
+            "training_rows": 840854,
+            "unique_training_texts": 85639,
+            "unique_keys": 85638
+          },
+          {
+            "source": "zinc",
+            "training_rows": 83902,
+            "unique_training_texts": 81164,
+            "unique_keys": 79450
+          }
+        ]
+      },
+      "additional": {
+        "training_rows": 57339,
+        "unique_training_texts": 9896,
+        "unique_keys": 9140,
+        "by_source": [
+          {
+            "source": "BindingMoad",
+            "training_rows": 17,
+            "unique_training_texts": 12,
+            "unique_keys": 12
+          },
+          {
+            "source": "BindingNet-High",
+            "training_rows": 36,
+            "unique_training_texts": 32,
+            "unique_keys": 32
+          },
+          {
+            "source": "BindingNet-Low",
+            "training_rows": 100,
+            "unique_training_texts": 82,
+            "unique_keys": 82
+          },
+          {
+            "source": "BindingNet-Mid",
+            "training_rows": 61,
+            "unique_training_texts": 56,
+            "unique_keys": 56
+          },
+          {
+            "source": "CrossDocked2020",
+            "training_rows": 107,
+            "unique_training_texts": 11,
+            "unique_keys": 11
+          },
+          {
+            "source": "HiQBind",
+            "training_rows": 40,
+            "unique_training_texts": 14,
+            "unique_keys": 14
+          },
+          {
+            "source": "KIBA-3D",
+            "training_rows": 160,
+            "unique_training_texts": 2,
+            "unique_keys": 2
+          },
+          {
+            "source": "Kinodata-3D",
+            "training_rows": 29,
+            "unique_training_texts": 20,
+            "unique_keys": 20
+          },
+          {
+            "source": "OMol25_bio_mols",
+            "training_rows": 1224,
+            "unique_training_texts": 707,
+            "unique_keys": 694
+          },
+          {
+            "source": "OMol25_small_mols",
+            "training_rows": 673,
+            "unique_training_texts": 477,
+            "unique_keys": 462
+          },
+          {
+            "source": "Plinder",
+            "training_rows": 34,
+            "unique_training_texts": 17,
+            "unique_keys": 17
+          },
+          {
+            "source": "SAIR",
+            "training_rows": 65,
+            "unique_training_texts": 11,
+            "unique_keys": 11
+          },
+          {
+            "source": "SPINDR",
+            "training_rows": 13,
+            "unique_training_texts": 9,
+            "unique_keys": 9
+          },
+          {
+            "source": "chembl3d",
+            "training_rows": 2200,
+            "unique_training_texts": 2200,
+            "unique_keys": 2200
+          },
+          {
+            "source": "geom",
+            "training_rows": 25985,
+            "unique_training_texts": 1225,
+            "unique_keys": 1166
+          },
+          {
+            "source": "nablaDFT",
+            "training_rows": 15,
+            "unique_training_texts": 15,
+            "unique_keys": 15
+          },
+          {
+            "source": "pubchem3d",
+            "training_rows": 22878,
+            "unique_training_texts": 2336,
+            "unique_keys": 2335
+          },
+          {
+            "source": "zinc",
+            "training_rows": 3702,
+            "unique_training_texts": 3436,
+            "unique_keys": 3156
+          }
+        ]
+      },
+      "exact_without_valid_key": {
+        "training_rows": 0,
+        "unique_training_texts": 0,
+        "unique_keys": 0,
+        "by_source": []
+      }
+    },
+    "val/nablaDFT": {
+      "exact_text": {
+        "training_rows": 4332,
+        "unique_training_texts": 624,
+        "unique_keys": 624,
+        "by_source": [
+          {
+            "source": "BindingNet-Low",
+            "training_rows": 5,
+            "unique_training_texts": 5,
+            "unique_keys": 5
+          },
+          {
+            "source": "BindingNet-Mid",
+            "training_rows": 1,
+            "unique_training_texts": 1,
+            "unique_keys": 1
+          },
+          {
+            "source": "OMol25_bio_mols",
+            "training_rows": 82,
+            "unique_training_texts": 46,
+            "unique_keys": 46
+          },
+          {
+            "source": "SAIR",
+            "training_rows": 5,
+            "unique_training_texts": 1,
+            "unique_keys": 1
+          },
+          {
+            "source": "chembl3d",
+            "training_rows": 129,
+            "unique_training_texts": 129,
+            "unique_keys": 129
+          },
+          {
+            "source": "geom",
+            "training_rows": 1353,
+            "unique_training_texts": 61,
+            "unique_keys": 61
+          },
+          {
+            "source": "pubchem3d",
+            "training_rows": 2506,
+            "unique_training_texts": 260,
+            "unique_keys": 260
+          },
+          {
+            "source": "zinc",
+            "training_rows": 251,
+            "unique_training_texts": 243,
+            "unique_keys": 243
+          }
+        ]
+      },
+      "inchikey": {
+        "training_rows": 6411,
+        "unique_training_texts": 900,
+        "unique_keys": 869,
+        "by_source": [
+          {
+            "source": "BindingNet-High",
+            "training_rows": 1,
+            "unique_training_texts": 1,
+            "unique_keys": 1
+          },
+          {
+            "source": "BindingNet-Low",
+            "training_rows": 7,
+            "unique_training_texts": 7,
+            "unique_keys": 7
+          },
+          {
+            "source": "BindingNet-Mid",
+            "training_rows": 2,
+            "unique_training_texts": 2,
+            "unique_keys": 2
+          },
+          {
+            "source": "Kinodata-3D",
+            "training_rows": 1,
+            "unique_training_texts": 1,
+            "unique_keys": 1
+          },
+          {
+            "source": "OMol25_bio_mols",
+            "training_rows": 122,
+            "unique_training_texts": 75,
+            "unique_keys": 75
+          },
+          {
+            "source": "OMol25_small_mols",
+            "training_rows": 61,
+            "unique_training_texts": 46,
+            "unique_keys": 46
+          },
+          {
+            "source": "SAIR",
+            "training_rows": 5,
+            "unique_training_texts": 1,
+            "unique_keys": 1
+          },
+          {
+            "source": "chembl3d",
+            "training_rows": 216,
+            "unique_training_texts": 216,
+            "unique_keys": 216
+          },
+          {
+            "source": "geom",
+            "training_rows": 3070,
+            "unique_training_texts": 142,
+            "unique_keys": 140
+          },
+          {
+            "source": "nablaDFT",
+            "training_rows": 21,
+            "unique_training_texts": 5,
+            "unique_keys": 5
+          },
+          {
+            "source": "pubchem3d",
+            "training_rows": 2616,
+            "unique_training_texts": 271,
+            "unique_keys": 271
+          },
+          {
+            "source": "zinc",
+            "training_rows": 289,
+            "unique_training_texts": 279,
+            "unique_keys": 272
+          }
+        ]
+      },
+      "additional": {
+        "training_rows": 2079,
+        "unique_training_texts": 276,
+        "unique_keys": 258,
+        "by_source": [
+          {
+            "source": "BindingNet-High",
+            "training_rows": 1,
+            "unique_training_texts": 1,
+            "unique_keys": 1
+          },
+          {
+            "source": "BindingNet-Low",
+            "training_rows": 2,
+            "unique_training_texts": 2,
+            "unique_keys": 2
+          },
+          {
+            "source": "BindingNet-Mid",
+            "training_rows": 1,
+            "unique_training_texts": 1,
+            "unique_keys": 1
+          },
+          {
+            "source": "Kinodata-3D",
+            "training_rows": 1,
+            "unique_training_texts": 1,
+            "unique_keys": 1
+          },
+          {
+            "source": "OMol25_bio_mols",
+            "training_rows": 40,
+            "unique_training_texts": 29,
+            "unique_keys": 29
+          },
+          {
+            "source": "OMol25_small_mols",
+            "training_rows": 61,
+            "unique_training_texts": 46,
+            "unique_keys": 46
+          },
+          {
+            "source": "chembl3d",
+            "training_rows": 87,
+            "unique_training_texts": 87,
+            "unique_keys": 87
+          },
+          {
+            "source": "geom",
+            "training_rows": 1717,
+            "unique_training_texts": 81,
+            "unique_keys": 79
+          },
+          {
+            "source": "nablaDFT",
+            "training_rows": 21,
+            "unique_training_texts": 5,
+            "unique_keys": 5
+          },
+          {
+            "source": "pubchem3d",
+            "training_rows": 110,
+            "unique_training_texts": 11,
+            "unique_keys": 11
+          },
+          {
+            "source": "zinc",
+            "training_rows": 38,
+            "unique_training_texts": 36,
+            "unique_keys": 33
+          }
+        ]
+      },
+      "exact_without_valid_key": {
+        "training_rows": 0,
+        "unique_training_texts": 0,
+        "unique_keys": 0,
+        "by_source": []
+      }
+    },
+    "test/nablaDFT_conformations": {
+      "exact_text": {
+        "training_rows": 9688716,
+        "unique_training_texts": 1469055,
+        "unique_keys": 1468817,
+        "by_source": [
+          {
+            "source": "BindingMoad",
+            "training_rows": 209,
+            "unique_training_texts": 108,
+            "unique_keys": 108
+          },
+          {
+            "source": "BindingNet-High",
+            "training_rows": 841,
+            "unique_training_texts": 550,
+            "unique_keys": 550
+          },
+          {
+            "source": "BindingNet-Low",
+            "training_rows": 937,
+            "unique_training_texts": 721,
+            "unique_keys": 721
+          },
+          {
+            "source": "BindingNet-Mid",
+            "training_rows": 720,
+            "unique_training_texts": 551,
+            "unique_keys": 551
+          },
+          {
+            "source": "CrossDocked2020",
+            "training_rows": 1023,
+            "unique_training_texts": 73,
+            "unique_keys": 73
+          },
+          {
+            "source": "HiQBind",
+            "training_rows": 286,
+            "unique_training_texts": 127,
+            "unique_keys": 127
+          },
+          {
+            "source": "KIBA-3D",
+            "training_rows": 1568,
+            "unique_training_texts": 10,
+            "unique_keys": 10
+          },
+          {
+            "source": "Kinodata-3D",
+            "training_rows": 155,
+            "unique_training_texts": 101,
+            "unique_keys": 101
+          },
+          {
+            "source": "OMol25_bio_mols",
+            "training_rows": 18185,
+            "unique_training_texts": 11790,
+            "unique_keys": 11784
+          },
+          {
+            "source": "Plinder",
+            "training_rows": 784,
+            "unique_training_texts": 244,
+            "unique_keys": 244
+          },
+          {
+            "source": "SAIR",
+            "training_rows": 2343,
+            "unique_training_texts": 397,
+            "unique_keys": 397
+          },
+          {
+            "source": "SPINDR",
+            "training_rows": 253,
+            "unique_training_texts": 107,
+            "unique_keys": 107
+          },
+          {
+            "source": "chembl3d",
+            "training_rows": 33117,
+            "unique_training_texts": 33117,
+            "unique_keys": 33117
+          },
+          {
+            "source": "geom",
+            "training_rows": 305004,
+            "unique_training_texts": 13285,
+            "unique_keys": 13285
+          },
+          {
+            "source": "nablaDFT",
+            "training_rows": 8597077,
+            "unique_training_texts": 1466571,
+            "unique_keys": 1466335
+          },
+          {
+            "source": "pubchem3d",
+            "training_rows": 661280,
+            "unique_training_texts": 67140,
+            "unique_keys": 67140
+          },
+          {
+            "source": "zinc",
+            "training_rows": 64934,
+            "unique_training_texts": 62864,
+            "unique_keys": 62863
+          }
+        ]
+      },
+      "inchikey": {
+        "training_rows": 9734539,
+        "unique_training_texts": 1476796,
+        "unique_keys": 1469176,
+        "by_source": [
+          {
+            "source": "BindingMoad",
+            "training_rows": 225,
+            "unique_training_texts": 119,
+            "unique_keys": 118
+          },
+          {
+            "source": "BindingNet-High",
+            "training_rows": 868,
+            "unique_training_texts": 574,
+            "unique_keys": 574
+          },
+          {
+            "source": "BindingNet-Low",
+            "training_rows": 1018,
+            "unique_training_texts": 786,
+            "unique_keys": 786
+          },
+          {
+            "source": "BindingNet-Mid",
+            "training_rows": 771,
+            "unique_training_texts": 597,
+            "unique_keys": 597
+          },
+          {
+            "source": "CrossDocked2020",
+            "training_rows": 1066,
+            "unique_training_texts": 80,
+            "unique_keys": 80
+          },
+          {
+            "source": "HiQBind",
+            "training_rows": 323,
+            "unique_training_texts": 139,
+            "unique_keys": 139
+          },
+          {
+            "source": "KIBA-3D",
+            "training_rows": 1728,
+            "unique_training_texts": 12,
+            "unique_keys": 10
+          },
+          {
+            "source": "Kinodata-3D",
+            "training_rows": 170,
+            "unique_training_texts": 114,
+            "unique_keys": 112
+          },
+          {
+            "source": "OMol25_bio_mols",
+            "training_rows": 19140,
+            "unique_training_texts": 12324,
+            "unique_keys": 12082
+          },
+          {
+            "source": "OMol25_small_mols",
+            "training_rows": 491,
+            "unique_training_texts": 345,
+            "unique_keys": 334
+          },
+          {
+            "source": "Plinder",
+            "training_rows": 811,
+            "unique_training_texts": 258,
+            "unique_keys": 256
+          },
+          {
+            "source": "SAIR",
+            "training_rows": 2408,
+            "unique_training_texts": 408,
+            "unique_keys": 408
+          },
+          {
+            "source": "SPINDR",
+            "training_rows": 261,
+            "unique_training_texts": 113,
+            "unique_keys": 113
+          },
+          {
+            "source": "chembl3d",
+            "training_rows": 34837,
+            "unique_training_texts": 34837,
+            "unique_keys": 34837
+          },
+          {
+            "source": "geom",
+            "training_rows": 326012,
+            "unique_training_texts": 14256,
+            "unique_keys": 14203
+          },
+          {
+            "source": "nablaDFT",
+            "training_rows": 8597087,
+            "unique_training_texts": 1466581,
+            "unique_keys": 1466336
+          },
+          {
+            "source": "pubchem3d",
+            "training_rows": 679488,
+            "unique_training_texts": 68995,
+            "unique_keys": 68995
+          },
+          {
+            "source": "zinc",
+            "training_rows": 67835,
+            "unique_training_texts": 65562,
+            "unique_keys": 64203
+          }
+        ]
+      },
+      "additional": {
+        "training_rows": 45823,
+        "unique_training_texts": 7741,
+        "unique_keys": 7141,
+        "by_source": [
+          {
+            "source": "BindingMoad",
+            "training_rows": 16,
+            "unique_training_texts": 11,
+            "unique_keys": 11
+          },
+          {
+            "source": "BindingNet-High",
+            "training_rows": 27,
+            "unique_training_texts": 24,
+            "unique_keys": 24
+          },
+          {
+            "source": "BindingNet-Low",
+            "training_rows": 81,
+            "unique_training_texts": 65,
+            "unique_keys": 65
+          },
+          {
+            "source": "BindingNet-Mid",
+            "training_rows": 51,
+            "unique_training_texts": 46,
+            "unique_keys": 46
+          },
+          {
+            "source": "CrossDocked2020",
+            "training_rows": 43,
+            "unique_training_texts": 7,
+            "unique_keys": 7
+          },
+          {
+            "source": "HiQBind",
+            "training_rows": 37,
+            "unique_training_texts": 12,
+            "unique_keys": 12
+          },
+          {
+            "source": "KIBA-3D",
+            "training_rows": 160,
+            "unique_training_texts": 2,
+            "unique_keys": 2
+          },
+          {
+            "source": "Kinodata-3D",
+            "training_rows": 15,
+            "unique_training_texts": 13,
+            "unique_keys": 13
+          },
+          {
+            "source": "OMol25_bio_mols",
+            "training_rows": 955,
+            "unique_training_texts": 534,
+            "unique_keys": 520
+          },
+          {
+            "source": "OMol25_small_mols",
+            "training_rows": 491,
+            "unique_training_texts": 345,
+            "unique_keys": 334
+          },
+          {
+            "source": "Plinder",
+            "training_rows": 27,
+            "unique_training_texts": 14,
+            "unique_keys": 14
+          },
+          {
+            "source": "SAIR",
+            "training_rows": 65,
+            "unique_training_texts": 11,
+            "unique_keys": 11
+          },
+          {
+            "source": "SPINDR",
+            "training_rows": 8,
+            "unique_training_texts": 6,
+            "unique_keys": 6
+          },
+          {
+            "source": "chembl3d",
+            "training_rows": 1720,
+            "unique_training_texts": 1720,
+            "unique_keys": 1720
+          },
+          {
+            "source": "geom",
+            "training_rows": 21008,
+            "unique_training_texts": 971,
+            "unique_keys": 922
+          },
+          {
+            "source": "nablaDFT",
+            "training_rows": 10,
+            "unique_training_texts": 10,
+            "unique_keys": 10
+          },
+          {
+            "source": "pubchem3d",
+            "training_rows": 18208,
+            "unique_training_texts": 1855,
+            "unique_keys": 1855
+          },
+          {
+            "source": "zinc",
+            "training_rows": 2901,
+            "unique_training_texts": 2698,
+            "unique_keys": 2471
+          }
+        ]
+      },
+      "exact_without_valid_key": {
+        "training_rows": 0,
+        "unique_training_texts": 0,
+        "unique_keys": 0,
+        "by_source": []
+      }
+    },
+    "test/nablaDFT_scaffolds": {
+      "exact_text": {
+        "training_rows": 137673,
+        "unique_training_texts": 19542,
+        "unique_keys": 19542,
+        "by_source": [
+          {
+            "source": "BindingMoad",
+            "training_rows": 23,
+            "unique_training_texts": 13,
+            "unique_keys": 13
+          },
+          {
+            "source": "BindingNet-High",
+            "training_rows": 74,
+            "unique_training_texts": 52,
+            "unique_keys": 52
+          },
+          {
+            "source": "BindingNet-Low",
+            "training_rows": 160,
+            "unique_training_texts": 111,
+            "unique_keys": 111
+          },
+          {
+            "source": "BindingNet-Mid",
+            "training_rows": 109,
+            "unique_training_texts": 84,
+            "unique_keys": 84
+          },
+          {
+            "source": "CrossDocked2020",
+            "training_rows": 31,
+            "unique_training_texts": 5,
+            "unique_keys": 5
+          },
+          {
+            "source": "HiQBind",
+            "training_rows": 31,
+            "unique_training_texts": 13,
+            "unique_keys": 13
+          },
+          {
+            "source": "KIBA-3D",
+            "training_rows": 345,
+            "unique_training_texts": 2,
+            "unique_keys": 2
+          },
+          {
+            "source": "Kinodata-3D",
+            "training_rows": 19,
+            "unique_training_texts": 18,
+            "unique_keys": 18
+          },
+          {
+            "source": "OMol25_bio_mols",
+            "training_rows": 2598,
+            "unique_training_texts": 1659,
+            "unique_keys": 1659
+          },
+          {
+            "source": "Plinder",
+            "training_rows": 81,
+            "unique_training_texts": 30,
+            "unique_keys": 30
+          },
+          {
+            "source": "SAIR",
+            "training_rows": 227,
+            "unique_training_texts": 47,
+            "unique_keys": 47
+          },
+          {
+            "source": "SPINDR",
+            "training_rows": 28,
+            "unique_training_texts": 12,
+            "unique_keys": 12
+          },
+          {
+            "source": "chembl3d",
+            "training_rows": 4425,
+            "unique_training_texts": 4425,
+            "unique_keys": 4425
+          },
+          {
+            "source": "geom",
+            "training_rows": 42739,
+            "unique_training_texts": 1964,
+            "unique_keys": 1964
+          },
+          {
+            "source": "pubchem3d",
+            "training_rows": 79365,
+            "unique_training_texts": 8162,
+            "unique_keys": 8162
+          },
+          {
+            "source": "zinc",
+            "training_rows": 7418,
+            "unique_training_texts": 7271,
+            "unique_keys": 7271
+          }
+        ]
+      },
+      "inchikey": {
+        "training_rows": 144451,
+        "unique_training_texts": 20778,
+        "unique_keys": 20222,
+        "by_source": [
+          {
+            "source": "BindingMoad",
+            "training_rows": 23,
+            "unique_training_texts": 13,
+            "unique_keys": 13
+          },
+          {
+            "source": "BindingNet-High",
+            "training_rows": 77,
+            "unique_training_texts": 55,
+            "unique_keys": 55
+          },
+          {
+            "source": "BindingNet-Low",
+            "training_rows": 165,
+            "unique_training_texts": 116,
+            "unique_keys": 116
+          },
+          {
+            "source": "BindingNet-Mid",
+            "training_rows": 115,
+            "unique_training_texts": 90,
+            "unique_keys": 89
+          },
+          {
+            "source": "CrossDocked2020",
+            "training_rows": 69,
+            "unique_training_texts": 6,
+            "unique_keys": 6
+          },
+          {
+            "source": "HiQBind",
+            "training_rows": 31,
+            "unique_training_texts": 13,
+            "unique_keys": 13
+          },
+          {
+            "source": "KIBA-3D",
+            "training_rows": 345,
+            "unique_training_texts": 2,
+            "unique_keys": 2
+          },
+          {
+            "source": "Kinodata-3D",
+            "training_rows": 33,
+            "unique_training_texts": 25,
+            "unique_keys": 25
+          },
+          {
+            "source": "OMol25_bio_mols",
+            "training_rows": 2729,
+            "unique_training_texts": 1746,
+            "unique_keys": 1714
+          },
+          {
+            "source": "OMol25_small_mols",
+            "training_rows": 83,
+            "unique_training_texts": 60,
+            "unique_keys": 60
+          },
+          {
+            "source": "Plinder",
+            "training_rows": 87,
+            "unique_training_texts": 33,
+            "unique_keys": 33
+          },
+          {
+            "source": "SAIR",
+            "training_rows": 227,
+            "unique_training_texts": 47,
+            "unique_keys": 47
+          },
+          {
+            "source": "SPINDR",
+            "training_rows": 32,
+            "unique_training_texts": 14,
+            "unique_keys": 14
+          },
+          {
+            "source": "chembl3d",
+            "training_rows": 4706,
+            "unique_training_texts": 4706,
+            "unique_keys": 4706
+          },
+          {
+            "source": "geom",
+            "training_rows": 45529,
+            "unique_training_texts": 2108,
+            "unique_keys": 2101
+          },
+          {
+            "source": "nablaDFT",
+            "training_rows": 256,
+            "unique_training_texts": 57,
+            "unique_keys": 57
+          },
+          {
+            "source": "pubchem3d",
+            "training_rows": 82103,
+            "unique_training_texts": 8445,
+            "unique_keys": 8444
+          },
+          {
+            "source": "zinc",
+            "training_rows": 7841,
+            "unique_training_texts": 7665,
+            "unique_keys": 7468
+          }
+        ]
+      },
+      "additional": {
+        "training_rows": 6778,
+        "unique_training_texts": 1236,
+        "unique_keys": 1149,
+        "by_source": [
+          {
+            "source": "BindingNet-High",
+            "training_rows": 3,
+            "unique_training_texts": 3,
+            "unique_keys": 3
+          },
+          {
+            "source": "BindingNet-Low",
+            "training_rows": 5,
+            "unique_training_texts": 5,
+            "unique_keys": 5
+          },
+          {
+            "source": "BindingNet-Mid",
+            "training_rows": 6,
+            "unique_training_texts": 6,
+            "unique_keys": 6
+          },
+          {
+            "source": "CrossDocked2020",
+            "training_rows": 38,
+            "unique_training_texts": 1,
+            "unique_keys": 1
+          },
+          {
+            "source": "Kinodata-3D",
+            "training_rows": 14,
+            "unique_training_texts": 7,
+            "unique_keys": 7
+          },
+          {
+            "source": "OMol25_bio_mols",
+            "training_rows": 131,
+            "unique_training_texts": 87,
+            "unique_keys": 87
+          },
+          {
+            "source": "OMol25_small_mols",
+            "training_rows": 83,
+            "unique_training_texts": 60,
+            "unique_keys": 60
+          },
+          {
+            "source": "Plinder",
+            "training_rows": 6,
+            "unique_training_texts": 3,
+            "unique_keys": 3
+          },
+          {
+            "source": "SPINDR",
+            "training_rows": 4,
+            "unique_training_texts": 2,
+            "unique_keys": 2
+          },
+          {
+            "source": "chembl3d",
+            "training_rows": 281,
+            "unique_training_texts": 281,
+            "unique_keys": 281
+          },
+          {
+            "source": "geom",
+            "training_rows": 2790,
+            "unique_training_texts": 144,
+            "unique_keys": 137
+          },
+          {
+            "source": "nablaDFT",
+            "training_rows": 256,
+            "unique_training_texts": 57,
+            "unique_keys": 57
+          },
+          {
+            "source": "pubchem3d",
+            "training_rows": 2738,
+            "unique_training_texts": 283,
+            "unique_keys": 282
+          },
+          {
+            "source": "zinc",
+            "training_rows": 423,
+            "unique_training_texts": 394,
+            "unique_keys": 367
+          }
+        ]
+      },
+      "exact_without_valid_key": {
+        "training_rows": 0,
+        "unique_training_texts": 0,
+        "unique_keys": 0,
+        "by_source": []
+      }
+    },
+    "test/nablaDFT_structures": {
+      "exact_text": {
+        "training_rows": 132631,
+        "unique_training_texts": 19346,
+        "unique_keys": 19346,
+        "by_source": [
+          {
+            "source": "BindingMoad",
+            "training_rows": 63,
+            "unique_training_texts": 21,
+            "unique_keys": 21
+          },
+          {
+            "source": "BindingNet-High",
+            "training_rows": 99,
+            "unique_training_texts": 66,
+            "unique_keys": 66
+          },
+          {
+            "source": "BindingNet-Low",
+            "training_rows": 131,
+            "unique_training_texts": 102,
+            "unique_keys": 102
+          },
+          {
+            "source": "BindingNet-Mid",
+            "training_rows": 75,
+            "unique_training_texts": 63,
+            "unique_keys": 63
+          },
+          {
+            "source": "CrossDocked2020",
+            "training_rows": 161,
+            "unique_training_texts": 14,
+            "unique_keys": 14
+          },
+          {
+            "source": "HiQBind",
+            "training_rows": 65,
+            "unique_training_texts": 22,
+            "unique_keys": 22
+          },
+          {
+            "source": "KIBA-3D",
+            "training_rows": 348,
+            "unique_training_texts": 2,
+            "unique_keys": 2
+          },
+          {
+            "source": "Kinodata-3D",
+            "training_rows": 31,
+            "unique_training_texts": 20,
+            "unique_keys": 20
+          },
+          {
+            "source": "OMol25_bio_mols",
+            "training_rows": 4923,
+            "unique_training_texts": 1562,
+            "unique_keys": 1562
+          },
+          {
+            "source": "Plinder",
+            "training_rows": 159,
+            "unique_training_texts": 35,
+            "unique_keys": 35
+          },
+          {
+            "source": "SAIR",
+            "training_rows": 323,
+            "unique_training_texts": 49,
+            "unique_keys": 49
+          },
+          {
+            "source": "SPINDR",
+            "training_rows": 33,
+            "unique_training_texts": 19,
+            "unique_keys": 19
+          },
+          {
+            "source": "chembl3d",
+            "training_rows": 4130,
+            "unique_training_texts": 4130,
+            "unique_keys": 4130
+          },
+          {
+            "source": "geom",
+            "training_rows": 37049,
+            "unique_training_texts": 1712,
+            "unique_keys": 1712
+          },
+          {
+            "source": "nablaDFT",
+            "training_rows": 3,
+            "unique_training_texts": 3,
+            "unique_keys": 3
+          },
+          {
+            "source": "pubchem3d",
+            "training_rows": 77211,
+            "unique_training_texts": 7983,
+            "unique_keys": 7983
+          },
+          {
+            "source": "zinc",
+            "training_rows": 7827,
+            "unique_training_texts": 7573,
+            "unique_keys": 7573
+          }
+        ]
+      },
+      "inchikey": {
+        "training_rows": 137923,
+        "unique_training_texts": 20345,
+        "unique_keys": 19893,
+        "by_source": [
+          {
+            "source": "BindingMoad",
+            "training_rows": 64,
+            "unique_training_texts": 22,
+            "unique_keys": 22
+          },
+          {
+            "source": "BindingNet-High",
+            "training_rows": 104,
+            "unique_training_texts": 70,
+            "unique_keys": 70
+          },
+          {
+            "source": "BindingNet-Low",
+            "training_rows": 145,
+            "unique_training_texts": 114,
+            "unique_keys": 114
+          },
+          {
+            "source": "BindingNet-Mid",
+            "training_rows": 78,
+            "unique_training_texts": 66,
+            "unique_keys": 66
+          },
+          {
+            "source": "CrossDocked2020",
+            "training_rows": 187,
+            "unique_training_texts": 17,
+            "unique_keys": 16
+          },
+          {
+            "source": "HiQBind",
+            "training_rows": 68,
+            "unique_training_texts": 24,
+            "unique_keys": 24
+          },
+          {
+            "source": "KIBA-3D",
+            "training_rows": 348,
+            "unique_training_texts": 2,
+            "unique_keys": 2
+          },
+          {
+            "source": "Kinodata-3D",
+            "training_rows": 31,
+            "unique_training_texts": 20,
+            "unique_keys": 20
+          },
+          {
+            "source": "OMol25_bio_mols",
+            "training_rows": 5059,
+            "unique_training_texts": 1647,
+            "unique_keys": 1606
+          },
+          {
+            "source": "OMol25_small_mols",
+            "training_rows": 90,
+            "unique_training_texts": 66,
+            "unique_keys": 62
+          },
+          {
+            "source": "Plinder",
+            "training_rows": 162,
+            "unique_training_texts": 36,
+            "unique_keys": 36
+          },
+          {
+            "source": "SAIR",
+            "training_rows": 323,
+            "unique_training_texts": 49,
+            "unique_keys": 49
+          },
+          {
+            "source": "SPINDR",
+            "training_rows": 34,
+            "unique_training_texts": 20,
+            "unique_keys": 20
+          },
+          {
+            "source": "chembl3d",
+            "training_rows": 4333,
+            "unique_training_texts": 4333,
+            "unique_keys": 4333
+          },
+          {
+            "source": "geom",
+            "training_rows": 39313,
+            "unique_training_texts": 1822,
+            "unique_keys": 1817
+          },
+          {
+            "source": "nablaDFT",
+            "training_rows": 226,
+            "unique_training_texts": 51,
+            "unique_keys": 50
+          },
+          {
+            "source": "pubchem3d",
+            "training_rows": 79152,
+            "unique_training_texts": 8182,
+            "unique_keys": 8182
+          },
+          {
+            "source": "zinc",
+            "training_rows": 8206,
+            "unique_training_texts": 7918,
+            "unique_keys": 7760
+          }
+        ]
+      },
+      "additional": {
+        "training_rows": 5292,
+        "unique_training_texts": 999,
+        "unique_keys": 927,
+        "by_source": [
+          {
+            "source": "BindingMoad",
+            "training_rows": 1,
+            "unique_training_texts": 1,
+            "unique_keys": 1
+          },
+          {
+            "source": "BindingNet-High",
+            "training_rows": 5,
+            "unique_training_texts": 4,
+            "unique_keys": 4
+          },
+          {
+            "source": "BindingNet-Low",
+            "training_rows": 14,
+            "unique_training_texts": 12,
+            "unique_keys": 12
+          },
+          {
+            "source": "BindingNet-Mid",
+            "training_rows": 3,
+            "unique_training_texts": 3,
+            "unique_keys": 3
+          },
+          {
+            "source": "CrossDocked2020",
+            "training_rows": 26,
+            "unique_training_texts": 3,
+            "unique_keys": 3
+          },
+          {
+            "source": "HiQBind",
+            "training_rows": 3,
+            "unique_training_texts": 2,
+            "unique_keys": 2
+          },
+          {
+            "source": "OMol25_bio_mols",
+            "training_rows": 136,
+            "unique_training_texts": 85,
+            "unique_keys": 85
+          },
+          {
+            "source": "OMol25_small_mols",
+            "training_rows": 90,
+            "unique_training_texts": 66,
+            "unique_keys": 62
+          },
+          {
+            "source": "Plinder",
+            "training_rows": 3,
+            "unique_training_texts": 1,
+            "unique_keys": 1
+          },
+          {
+            "source": "SPINDR",
+            "training_rows": 1,
+            "unique_training_texts": 1,
+            "unique_keys": 1
+          },
+          {
+            "source": "chembl3d",
+            "training_rows": 203,
+            "unique_training_texts": 203,
+            "unique_keys": 203
+          },
+          {
+            "source": "geom",
+            "training_rows": 2264,
+            "unique_training_texts": 110,
+            "unique_keys": 107
+          },
+          {
+            "source": "nablaDFT",
+            "training_rows": 223,
+            "unique_training_texts": 48,
+            "unique_keys": 47
+          },
+          {
+            "source": "pubchem3d",
+            "training_rows": 1941,
+            "unique_training_texts": 199,
+            "unique_keys": 199
+          },
+          {
+            "source": "zinc",
+            "training_rows": 379,
+            "unique_training_texts": 345,
+            "unique_keys": 319
+          }
+        ]
+      },
+      "exact_without_valid_key": {
+        "training_rows": 0,
+        "unique_training_texts": 0,
+        "unique_keys": 0,
+        "by_source": []
+      }
+    }
+  }
+}

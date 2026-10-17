@@ -1,0 +1,49 @@
+{
+  "audit": "/mnt/weka/fgeikyan/CoordToken/logs/inchikey_overlap/nabla_all_val_test_190m",
+  "audit_manifest": {
+    "train": {
+      "path": "/mnt/weka/fgeikyan/fsq/merged_train.csv",
+      "size": 128047392294,
+      "mtime_ns": 1774215425296462486
+    },
+    "references": [
+      {
+        "path": "/mnt/weka/fgeikyan/fsq/val/nablaDFT.csv",
+        "size": 38549376,
+        "mtime_ns": 1774216721834982315
+      },
+      {
+        "path": "/mnt/weka/fgeikyan/fsq/test/nablaDFT_conformations.csv",
+        "size": 973098216,
+        "mtime_ns": 1768311400403824797
+      },
+      {
+        "path": "/mnt/weka/fgeikyan/fsq/test/nablaDFT_scaffolds.csv",
+        "size": 694803833,
+        "mtime_ns": 1768311385112127526
+      },
+      {
+        "path": "/mnt/weka/fgeikyan/fsq/test/nablaDFT_structures.csv",
+        "size": 702603117,
+        "mtime_ns": 1768311391408002886
+      }
+    ],
+    "script_sha256": "15baba637057e629deb60030c280790131fd5c0a622059166f378bca550ace30",
+    "rdkit": "2025.09.6",
+    "python": "3.13.12 | packaged by conda-forge | (main, Feb  5 2026, 05:53:46) [GCC 14.3.0]",
+    "max_rows": 0,
+    "policy": "full Standard InChIKey from decoded text; no coordinate stereo inference"
+  },
+  "audit_summary_sha256": "cc3a208fbda7a7858f6d8f2df0e67038b4cc42d9692e6a54f69d51e14607f025",
+  "script_sha256": "0ec620c35a20698c173edb62799d22ecb02620cb43b56d1be11c55dd244a9ae7",
+  "preserve_sources": [],
+  "failure_policy": "quarantine",
+  "chunks": 128,
+  "rdkit": "2025.09.6",
+  "reference_labels": [
+    "test/nablaDFT_scaffolds",
+    "test/nablaDFT_structures",
+    "val/nablaDFT"
+  ],
+  "reference_mask": 13
+}

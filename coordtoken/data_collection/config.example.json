@@ -1,0 +1,8 @@
+{
+  "start_at": "deduplicate",
+  "source_root": "/nfs/h100/raid/chem/3D_big_data_new",
+  "reference_csv": "/nfs/h100/raid/chem/3D_big_data/grp_d/test/geom_revisited_test.csv",
+  "output_root": "./runs/190m-replay",
+  "workers": 8,
+  "expected_train_rows": 190214248
+}

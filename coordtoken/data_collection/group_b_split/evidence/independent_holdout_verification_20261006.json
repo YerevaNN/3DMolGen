@@ -1,0 +1,135 @@
+{
+  "status": "passed",
+  "seconds": 278.86702237604186,
+  "rdkit": "2025.09.6",
+  "directly_reparsed_holdout_rows": 5707138,
+  "holdout_files": 39,
+  "actual_test_unique_keys": 782100,
+  "actual_validation_unique_keys": 580981,
+  "actual_test_validation_shared_keys": 0,
+  "validation_checks": [
+    {
+      "label": "A/val/BindingMoad",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    },
+    {
+      "label": "A/val/BindingNet-High",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    },
+    {
+      "label": "A/val/BindingNet-Low",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    },
+    {
+      "label": "A/val/BindingNet-Mid",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    },
+    {
+      "label": "A/val/CrossDocked2020",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    },
+    {
+      "label": "A/val/DAVIS-3D",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    },
+    {
+      "label": "A/val/HiQBind",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    },
+    {
+      "label": "A/val/Kinodata-3D",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    },
+    {
+      "label": "A/val/OMol25_bio_mols",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    },
+    {
+      "label": "A/val/Plinder",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    },
+    {
+      "label": "A/val/SAIR",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    },
+    {
+      "label": "A/val/SPINDR",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    },
+    {
+      "label": "A/val/chembl3d",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    },
+    {
+      "label": "A/val/geom",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    },
+    {
+      "label": "B/val/KIBA-3D",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    },
+    {
+      "label": "B/val/OMol25_small_mols",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    },
+    {
+      "label": "B/val/pubchem3d",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    },
+    {
+      "label": "B/val/zinc",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    }
+  ],
+  "group_a_training_overlapping_rows": {},
+  "group_b_training_checks": [
+    {
+      "dataset": "KIBA-3D",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    },
+    {
+      "dataset": "OMol25_small_mols",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    },
+    {
+      "dataset": "pubchem3d",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    },
+    {
+      "dataset": "zinc",
+      "overlap_keys": 0,
+      "overlap_rows": 0
+    }
+  ],
+  "original_reference_test_validation_shared_keys": 2612,
+  "pubchem_original_conflicts_by_destination": [
+    {
+      "destination": "test",
+      "keys": 270,
+      "rows": 2461
+    }
+  ],
+  "freshly_hash_verified_files": 57,
+  "scope": "Every written A/B holdout and fixed nabla structure/scaffold plus GEOM-revisited reparsed directly. Training membership checked through saved key assignments, with fresh hashes of every written A/B CSV. No ownership.sqlite used; no full fresh training reparse."
+}

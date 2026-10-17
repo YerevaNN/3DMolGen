@@ -1,0 +1,34 @@
+{
+  "train": {
+    "path": "/mnt/weka/fgeikyan/fsq/merged_train.csv",
+    "size": 128047392294,
+    "mtime_ns": 1774215425296462486
+  },
+  "references": [
+    {
+      "path": "/mnt/weka/fgeikyan/fsq/val/nablaDFT.csv",
+      "size": 38549376,
+      "mtime_ns": 1774216721834982315
+    },
+    {
+      "path": "/mnt/weka/fgeikyan/fsq/test/nablaDFT_conformations.csv",
+      "size": 973098216,
+      "mtime_ns": 1768311400403824797
+    },
+    {
+      "path": "/mnt/weka/fgeikyan/fsq/test/nablaDFT_scaffolds.csv",
+      "size": 694803833,
+      "mtime_ns": 1768311385112127526
+    },
+    {
+      "path": "/mnt/weka/fgeikyan/fsq/test/nablaDFT_structures.csv",
+      "size": 702603117,
+      "mtime_ns": 1768311391408002886
+    }
+  ],
+  "script_sha256": "15baba637057e629deb60030c280790131fd5c0a622059166f378bca550ace30",
+  "rdkit": "2025.09.6",
+  "python": "3.13.12 | packaged by conda-forge | (main, Feb  5 2026, 05:53:46) [GCC 14.3.0]",
+  "max_rows": 0,
+  "policy": "full Standard InChIKey from decoded text; no coordinate stereo inference"
+}

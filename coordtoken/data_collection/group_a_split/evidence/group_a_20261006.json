@@ -1,0 +1,541 @@
+{
+  "status": "group_a_fixed_reference_pass_complete",
+  "date": "2026-10-06",
+  "job_id": "313611",
+  "failed_predecessor_job": "313567",
+  "implementation_commit": "416a3f957c8e89e8ea8a8745f9805af8af4a03aa",
+  "rdkit_version": "2025.09.6",
+  "elapsed_seconds": 530.8,
+  "group_a_rows": 12761262,
+  "files_verified": 42,
+  "summary": {
+    "test": {
+      "input_rows": 765424,
+      "retained_rows": 765424,
+      "removed_rows": 0
+    },
+    "train": {
+      "input_rows": 11094343,
+      "retained_rows": 10339711,
+      "removed_rows": 754632
+    },
+    "val": {
+      "input_rows": 901495,
+      "retained_rows": 874019,
+      "removed_rows": 27476
+    }
+  },
+  "checks": [
+    "pinned full input hashes",
+    "complete row/key alignment",
+    "zero retained higher-priority key overlaps",
+    "quarantined ChEMBL IDs absent",
+    "output hash readback and row accounting",
+    "All 42 output counts match independent recomputation from first-run identity counts"
+  ],
+  "new_group_a_identity_failures": 0,
+  "final_global_split": false,
+  "pending": "Apply newly selected Group B/C holdout keys to Group A training/validation before final release.",
+  "policy": "Full Standard InChIKeys only; fixed test > validation > training; no nabla conformation-test molecular blacklist or scaffold-wide exclusion. Existing conformer rows are not collapsed.",
+  "files": [
+    {
+      "dataset": "BindingMoad",
+      "role": "test",
+      "input_sha256": "47561e2efc0c950352933049ba848ee8abdb6ac2d4d91803edc82b76f54e0404",
+      "output_sha256": "5cc20c85e4f757bd4417af82354e4f9de4b1684de960bc097184e67d8c3d9482",
+      "input_rows": 468,
+      "output_rows": 468,
+      "counts": {
+        "keep": 468
+      }
+    },
+    {
+      "dataset": "BindingNet-High",
+      "role": "test",
+      "input_sha256": "37e60367030e43aaa6ec30e1bed3e35a6a5ff36e18b0fea47bf5366726622800",
+      "output_sha256": "408f6dd0081606f5ab21d1f0453e16b1ad8709d1ed536d3e1c62aecfaaf356c4",
+      "input_rows": 3729,
+      "output_rows": 3729,
+      "counts": {
+        "keep": 3729
+      }
+    },
+    {
+      "dataset": "BindingNet-Low",
+      "role": "test",
+      "input_sha256": "af1e3bd5944e4401860c4d41126f57c187adf2f203505c1484048477c4a06775",
+      "output_sha256": "b4fb863fcffdd101264b757d2417d727a4e3ced205cf9d44f9fb9a6714501793",
+      "input_rows": 6850,
+      "output_rows": 6850,
+      "counts": {
+        "keep": 6850
+      }
+    },
+    {
+      "dataset": "BindingNet-Mid",
+      "role": "test",
+      "input_sha256": "f3f313ebfc3b6f7db021d90f921c74ac8947f63db51ccf2754ac58f7bbbbd904",
+      "output_sha256": "e04f005a108ba22b3d65a390fda4c1ef2aef16cdf8147c577698a0d1c41f8190",
+      "input_rows": 3312,
+      "output_rows": 3312,
+      "counts": {
+        "keep": 3312
+      }
+    },
+    {
+      "dataset": "CrossDocked2020",
+      "role": "test",
+      "input_sha256": "509d3f7f911f8ee5b412a7570e1ddd4718d7c21e7d100b70db4c3a3be29fd4f1",
+      "output_sha256": "25b2a6f2112cc9c5db9bd97a8860fc5c7f643db036fd306c645c760c163ba830",
+      "input_rows": 100,
+      "output_rows": 100,
+      "counts": {
+        "keep": 100
+      }
+    },
+    {
+      "dataset": "DAVIS-3D",
+      "role": "test",
+      "input_sha256": "c38814489d71771fdfa1e5fa38da8a6074db6609a32552d238dd25cd68e5d66e",
+      "output_sha256": "ff21a86885e2c2eaa055c7e69d30f73227c37aa1e3f91b8b525c53484834e0dc",
+      "input_rows": 225,
+      "output_rows": 225,
+      "counts": {
+        "keep": 225
+      }
+    },
+    {
+      "dataset": "HiQBind",
+      "role": "test",
+      "input_sha256": "23a4ac546dcf9e19d01019a3cc93348e067c618b726f0136b82e2c405b121eab",
+      "output_sha256": "cfbd8ac8afebcf9c475207255839515f8a867262deb4059a5638c16b5faa153b",
+      "input_rows": 279,
+      "output_rows": 279,
+      "counts": {
+        "keep": 279
+      }
+    },
+    {
+      "dataset": "Kinodata-3D",
+      "role": "test",
+      "input_sha256": "1e4543a24249ebfd4cd689c4f2f737157ace86a89cafb353d365f634b7a0891e",
+      "output_sha256": "c20630178d9eb5607eed57ca6cd1688428b090d2caf1ac079012518b09266574",
+      "input_rows": 225,
+      "output_rows": 225,
+      "counts": {
+        "keep": 225
+      }
+    },
+    {
+      "dataset": "OMol25_bio_mols",
+      "role": "test",
+      "input_sha256": "380d681f1d317244260c9f3b5ffc9d081886c29444a4010c2010e20052bfc895",
+      "output_sha256": "3a2582741ff00d491965a50320fc88c9747339e260b3a693c25d23d493c44012",
+      "input_rows": 225,
+      "output_rows": 225,
+      "counts": {
+        "keep": 225
+      }
+    },
+    {
+      "dataset": "Plinder",
+      "role": "test",
+      "input_sha256": "57027dcce66a77ee09b141b7c9e0793ee39e6dadccb5c4bf9318a9e706c7cfb4",
+      "output_sha256": "a015b5a6557565611fe454a015e07e53170539d52aecdde355444e39741bcc12",
+      "input_rows": 950,
+      "output_rows": 950,
+      "counts": {
+        "keep": 950
+      }
+    },
+    {
+      "dataset": "SAIR",
+      "role": "test",
+      "input_sha256": "8c7cb80beccf587efeeffa5d2c0c2aa6d68f91da86f9534ba3b33bea9cbb5d6d",
+      "output_sha256": "cce55dc72c14298da9bb4cea2e1e7be908896c8cbdbc4c4cb96a29e595895784",
+      "input_rows": 225,
+      "output_rows": 225,
+      "counts": {
+        "keep": 225
+      }
+    },
+    {
+      "dataset": "SPINDR",
+      "role": "test",
+      "input_sha256": "49decad9262e2e727e5410ce0e7abd6b5dc22985ca3adf42dee739bdc6b85af7",
+      "output_sha256": "d85a45a2833b0a70c492cba74bb11114090ef36e83fa37c68e7016b023cd1229",
+      "input_rows": 225,
+      "output_rows": 225,
+      "counts": {
+        "keep": 225
+      }
+    },
+    {
+      "dataset": "chembl3d",
+      "role": "test",
+      "input_sha256": "423ee2d7ee1aa2013a11c0f54a174c0127e61d3cf31aa82b3600a103ed6edf41",
+      "output_sha256": "fa4f1de00f53fb0c5eca9247c3e689a49cc13d63e23ccee8816becc879a59b78",
+      "input_rows": 37065,
+      "output_rows": 37065,
+      "counts": {
+        "keep": 37065
+      }
+    },
+    {
+      "dataset": "geom",
+      "role": "test",
+      "input_sha256": "25d3a35f43743b31dd7cc5259acad703b51c5936a23644eaf5b97958a03792ce",
+      "output_sha256": "34ed84a8ce599478740eb5fa56b265190bbe4f973d8f26148e0744401c8dc680",
+      "input_rows": 711546,
+      "output_rows": 711546,
+      "counts": {
+        "keep": 711546
+      }
+    },
+    {
+      "dataset": "BindingMoad",
+      "role": "train",
+      "input_sha256": "01bed829718767c2e7e6fdf8a85f8d511ff3c29dab8bdcff2d84526948c4816c",
+      "output_sha256": "bda61397b8f6727762f836bb6bb3c261fd629774c5c36240de1f797c8d24462f",
+      "input_rows": 21084,
+      "output_rows": 20529,
+      "counts": {
+        "keep": 20529,
+        "excluded_test_identity": 283,
+        "excluded_validation_identity": 272
+      }
+    },
+    {
+      "dataset": "BindingNet-High",
+      "role": "train",
+      "input_sha256": "c4f5359cb1e00df216b4e066b54a36bc7f73fce1d539c22442c2ef83bf6fd760",
+      "output_sha256": "4d0d120a5b68589bcad1f417496b9467f22f09d9fc6f3d980237c5e5d1890f1d",
+      "input_rows": 220224,
+      "output_rows": 210818,
+      "counts": {
+        "keep": 210818,
+        "excluded_validation_identity": 7565,
+        "excluded_test_identity": 1841
+      }
+    },
+    {
+      "dataset": "BindingNet-Low",
+      "role": "train",
+      "input_sha256": "f950ea5dcfef9296c883c760fd34f67a1f0d2c1ab2aa92e7cc3c98408ceba80d",
+      "output_sha256": "9184c053ea8520fd12d1663e4a98afdb4fcbcbb7b00e28f563fa0f877b56a9ef",
+      "input_rows": 261515,
+      "output_rows": 251747,
+      "counts": {
+        "keep": 251747,
+        "excluded_validation_identity": 7641,
+        "excluded_test_identity": 2127
+      }
+    },
+    {
+      "dataset": "BindingNet-Mid",
+      "role": "train",
+      "input_sha256": "c58b4c8716f4da3fc7a533142c3c8fd9a865ea8ba8e5eaf78a1a93036a768922",
+      "output_sha256": "3c445ef5e2be2cacf65e5da0895a746ebf27b6a35b215b4345a79f6d5a2116e4",
+      "input_rows": 151204,
+      "output_rows": 144352,
+      "counts": {
+        "keep": 144352,
+        "excluded_validation_identity": 5437,
+        "excluded_test_identity": 1415
+      }
+    },
+    {
+      "dataset": "CrossDocked2020",
+      "role": "train",
+      "input_sha256": "d6360cfe1a0f5eadfa7c27920b5aa715cf7a91efccab20c0716f300c6bf5f227",
+      "output_sha256": "50ca22328b417f704e59c133fb9a6063b186afef3a509c34de59cce754b3a6e7",
+      "input_rows": 80304,
+      "output_rows": 78241,
+      "counts": {
+        "keep": 78241,
+        "excluded_test_identity": 860,
+        "excluded_validation_identity": 1203
+      }
+    },
+    {
+      "dataset": "DAVIS-3D",
+      "role": "train",
+      "input_sha256": "75b61bf14d124aaa6f0f718848f18782fc0125619f3ce43bd293d3623b84b2ca",
+      "output_sha256": "f455696b0ed88a03b10fd6f37445762921ce5d03baacbbe4d87b2bbc50b87eb4",
+      "input_rows": 129,
+      "output_rows": 129,
+      "counts": {
+        "keep": 129
+      }
+    },
+    {
+      "dataset": "HiQBind",
+      "role": "train",
+      "input_sha256": "a9d78e88c1f7ee4ed8b1b0f8b97f1278e06dcda16ba3692b2dde6b181dd62bca",
+      "output_sha256": "7ea42ce657fefefc305d6d79f1bfb7a6707d87d2ece06f5c7bd924658ad3a037",
+      "input_rows": 25489,
+      "output_rows": 24518,
+      "counts": {
+        "keep": 24518,
+        "excluded_validation_identity": 577,
+        "excluded_test_identity": 394
+      }
+    },
+    {
+      "dataset": "Kinodata-3D",
+      "role": "train",
+      "input_sha256": "05e707772bbdc18d0aab003b69ce1d4067e3f80c8ce15671bebb590ffcf91977",
+      "output_sha256": "875ac87181ef839b6d9332accd0b4414440648af689d1d80db7da6b3c94aba8c",
+      "input_rows": 65576,
+      "output_rows": 61245,
+      "counts": {
+        "keep": 61245,
+        "excluded_validation_identity": 3259,
+        "excluded_test_identity": 1072
+      }
+    },
+    {
+      "dataset": "OMol25_bio_mols",
+      "role": "train",
+      "input_sha256": "c96cce4da88c26ed528c11c74a8707c57fd5b720e89ccf7c0aac40ed677857bc",
+      "output_sha256": "afc10072e71faa84c5c5592ac8aaa6da7fecb24d610ab2cea0c66a7e8ecf8484",
+      "input_rows": 1392375,
+      "output_rows": 1344106,
+      "counts": {
+        "keep": 1344106,
+        "excluded_validation_identity": 27717,
+        "excluded_test_identity": 20552
+      }
+    },
+    {
+      "dataset": "Plinder",
+      "role": "train",
+      "input_sha256": "41d880b9de3f26340dbc23f21dabd89c6ba259c80cedd8b71f76b4713816c749",
+      "output_sha256": "4ac51957d1e3e1191ceba031583311f640a0b29a470cbaeebbbdcd568a126c46",
+      "input_rows": 130402,
+      "output_rows": 127987,
+      "counts": {
+        "keep": 127987,
+        "excluded_validation_identity": 1161,
+        "excluded_test_identity": 1254
+      }
+    },
+    {
+      "dataset": "SAIR",
+      "role": "train",
+      "input_sha256": "0bd85bbd1ee924e24bb3f52f417bb332f0324b141e11e64c246d7b47b5130989",
+      "output_sha256": "c8b501d1b69c30d3c6c404bc96348b27ebf8dd35da35887a277fa9fd01181796",
+      "input_rows": 1545820,
+      "output_rows": 1521900,
+      "counts": {
+        "keep": 1521900,
+        "excluded_test_identity": 4762,
+        "excluded_validation_identity": 19158
+      }
+    },
+    {
+      "dataset": "SPINDR",
+      "role": "train",
+      "input_sha256": "8c0fa9e24c40ea487add29af574d1e68f83dee6d26a54febb849b40db3ccc537",
+      "output_sha256": "cbe22e6ad1992c1f2fd04b533a41a9019b1b95c965169fe2d5e875bdac3bfa9e",
+      "input_rows": 27635,
+      "output_rows": 26671,
+      "counts": {
+        "keep": 26671,
+        "excluded_validation_identity": 532,
+        "excluded_test_identity": 432
+      }
+    },
+    {
+      "dataset": "chembl3d",
+      "role": "train",
+      "input_sha256": "3062f5f1e46b1ff9c53fccf2d2b27fc701cb2163d8cac0c208cb03f582428a56",
+      "output_sha256": "cdd358dbbc2a86de0f833f3d51c71a942ca8b25b4bd4da5058700b56ee704024",
+      "input_rows": 1442214,
+      "output_rows": 1428111,
+      "counts": {
+        "keep": 1428111,
+        "excluded_test_identity": 11746,
+        "excluded_validation_identity": 2357
+      }
+    },
+    {
+      "dataset": "geom",
+      "role": "train",
+      "input_sha256": "a94e782df928bad2068335fe8a6357dc485d5a729c132c4b1e55af180d2d85f1",
+      "output_sha256": "b0ad7683c19e5ac8c77978959e51a75ead24d103e02b2d47548570bfed292dd6",
+      "input_rows": 5730372,
+      "output_rows": 5099357,
+      "counts": {
+        "keep": 5099357,
+        "excluded_validation_identity": 425766,
+        "excluded_test_identity": 205249
+      }
+    },
+    {
+      "dataset": "BindingMoad",
+      "role": "val",
+      "input_sha256": "b9157c373642d15d99e2440c60aae7e7d41be52180c8b9e571dfa231ccee7e56",
+      "output_sha256": "f1f17a1c208e90d7c1aa8850e86c9b15a9f336f4f844e0f25a32305a9f205920",
+      "input_rows": 130,
+      "output_rows": 129,
+      "counts": {
+        "keep": 129,
+        "excluded_test_identity": 1
+      }
+    },
+    {
+      "dataset": "BindingNet-High",
+      "role": "val",
+      "input_sha256": "a064e445ecaedd81ef04bab0c16f1c74e55f2e3811ef56f28d95d2dcfe7778f1",
+      "output_sha256": "b2bb90051c6227cc7d2fde123e0194193a5e6109d97f8b605b841943cb2e9baf",
+      "input_rows": 127,
+      "output_rows": 127,
+      "counts": {
+        "keep": 127
+      }
+    },
+    {
+      "dataset": "BindingNet-Low",
+      "role": "val",
+      "input_sha256": "16b4a7469974e44f8a08b2bf56940cce191ff2dddf0e073cf85db8f9dbdd0caf",
+      "output_sha256": "d20e02e7fb01426fd2858b28faf16922a6b3778c713887cd2a130b1edfb668d4",
+      "input_rows": 1899,
+      "output_rows": 1889,
+      "counts": {
+        "keep": 1889,
+        "excluded_test_identity": 10
+      }
+    },
+    {
+      "dataset": "BindingNet-Mid",
+      "role": "val",
+      "input_sha256": "eee6d5034886987378c33eb670fc0043a62eeaceeb17a1686df4120c4e7257b8",
+      "output_sha256": "d66fb07e7e6f6e98275aa6bde97b022f004293d357ded3433373d85f9ad054d0",
+      "input_rows": 327,
+      "output_rows": 326,
+      "counts": {
+        "keep": 326,
+        "excluded_test_identity": 1
+      }
+    },
+    {
+      "dataset": "CrossDocked2020",
+      "role": "val",
+      "input_sha256": "58840d03ed09c40d9cea032215c5a548d217a0dc6313c961096aae77e3affcc9",
+      "output_sha256": "f63ade0ab600907e9a5a652e39186826212cef0b17c51911a6210abdc93d9f9a",
+      "input_rows": 268,
+      "output_rows": 262,
+      "counts": {
+        "keep": 262,
+        "excluded_test_identity": 6
+      }
+    },
+    {
+      "dataset": "DAVIS-3D",
+      "role": "val",
+      "input_sha256": "8c4721a78f03fd536a926d052d798f6e322dc3c238b6a2e5156cd7d95349a93c",
+      "output_sha256": "41946ab4f445aee3500d94f8f331817c44b0f8efeb43cc3dc770b9be9bc62989",
+      "input_rows": 7,
+      "output_rows": 7,
+      "counts": {
+        "keep": 7
+      }
+    },
+    {
+      "dataset": "HiQBind",
+      "role": "val",
+      "input_sha256": "7fafc7a55ca1460ae4a47a54e8c4f2aaae6ef7270a5234d58ea1b32bdc1c3d69",
+      "output_sha256": "d5c7d02e257fab75dd3728719c43cf036f9d7f6e4b15997baaac64e000426a30",
+      "input_rows": 48,
+      "output_rows": 48,
+      "counts": {
+        "keep": 48
+      }
+    },
+    {
+      "dataset": "Kinodata-3D",
+      "role": "val",
+      "input_sha256": "3d281b2a3e52ce141db6d2c129a6822a8dd8d1ea0cc730343c0f478c7a2b9071",
+      "output_sha256": "b44197600d1ec426232a164eb0df214e0221c32bc8e66dcad25e9aa0ae526126",
+      "input_rows": 97,
+      "output_rows": 95,
+      "counts": {
+        "keep": 95,
+        "excluded_test_identity": 2
+      }
+    },
+    {
+      "dataset": "OMol25_bio_mols",
+      "role": "val",
+      "input_sha256": "602eaebf56bb4f7554eb2baf1b154362c6b52631ca0de0526c619dccefc42173",
+      "output_sha256": "fa74bb87a410017be534fd051e5bb1fc7045badb362c2abb967a54a55e53536c",
+      "input_rows": 36,
+      "output_rows": 35,
+      "counts": {
+        "keep": 35,
+        "excluded_test_identity": 1
+      }
+    },
+    {
+      "dataset": "Plinder",
+      "role": "val",
+      "input_sha256": "f9565a1e131109ae651fcf18832db3bfac36d4a0ee59db0441aebd757bdde6a6",
+      "output_sha256": "6ab2dd3d68e5fc2a98a8b4b7fb0be636cbc03a06059064b095b7187026e664ae",
+      "input_rows": 367,
+      "output_rows": 362,
+      "counts": {
+        "keep": 362,
+        "excluded_test_identity": 5
+      }
+    },
+    {
+      "dataset": "SAIR",
+      "role": "val",
+      "input_sha256": "8616783eae03edefe27a681197d875d1f9ead6c698e907c6459c6c89cba5fd54",
+      "output_sha256": "2d329f71f4981444a2a86eb73024f26c4b02412a74444fd00b97262ea1fb2204",
+      "input_rows": 100,
+      "output_rows": 99,
+      "counts": {
+        "keep": 99,
+        "excluded_test_identity": 1
+      }
+    },
+    {
+      "dataset": "SPINDR",
+      "role": "val",
+      "input_sha256": "a81ed7856af7a690a8dd78246bc78ba36c1c06342ce19dfe5f7edd5aca161b97",
+      "output_sha256": "06461d18ee8a7e9e90121df2512fc0bbd1677b3a87a0573817ed0e9011648c41",
+      "input_rows": 56,
+      "output_rows": 56,
+      "counts": {
+        "keep": 56
+      }
+    },
+    {
+      "dataset": "chembl3d",
+      "role": "val",
+      "input_sha256": "459e62366c8eff4749b569de5bc521a31fa9459e896d3fae489be17b6484abd9",
+      "output_sha256": "8d2a1049c52729b842740c58917afe07d3d329fb55c2067bfc583892cd13a342",
+      "input_rows": 182419,
+      "output_rows": 180929,
+      "counts": {
+        "keep": 180929,
+        "excluded_test_identity": 1490
+      }
+    },
+    {
+      "dataset": "geom",
+      "role": "val",
+      "input_sha256": "7a5710849eb0e24b8b5cf17e4f223f96b7383beb0effed6b6e0bc0a268c000d5",
+      "output_sha256": "f6542c94e9f52feb79fa15ea088405fa09c6508b3f4b11ca95791941062b87ad",
+      "input_rows": 715614,
+      "output_rows": 689655,
+      "counts": {
+        "keep": 689655,
+        "excluded_test_identity": 25959
+      }
+    }
+  ],
+  "preexisting_chembl_quarantined_records": 6
+}

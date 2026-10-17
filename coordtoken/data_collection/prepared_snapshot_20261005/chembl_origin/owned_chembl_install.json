@@ -1,0 +1,50 @@
+{
+  "status": "installed_and_hash_verified",
+  "completed_at_utc": "2026-10-04T19:33:53.075008+00:00",
+  "destination": "/mnt/weka/fgeikyan/3D_big_data_owned",
+  "files": [
+    {
+      "split": "train",
+      "path": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/train/backup_un/chembl3d.csv",
+      "rows": 1442219,
+      "sha256": "76280f17c8f568bc15338a2969a4112a9e72305fc193b42277582750fce85878",
+      "owner_uid": 1027,
+      "original_preserved": "/mnt/weka/fgeikyan/CoordToken/data_collection/reviews/chembl_replacement_20261004/chembl3d.before.csv",
+      "original_rows": 1479020,
+      "membership_changed": true
+    },
+    {
+      "split": "val",
+      "path": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/val/backup_un/chembl3d.csv",
+      "source": "/mnt/weka/fgeikyan/fsq/val/chembl3d.csv",
+      "rows": 182420,
+      "sha256": "1f679aa4f3a8038d88f59c48590389a6facff743147908bcc1171b0ed65f166d",
+      "owner_uid": 1027,
+      "original_preserved": "/mnt/weka/fgeikyan/CoordToken/data_collection/reviews/remaining_verdict_20261004/replaced_owned_chembl_holdouts/val.before.csv",
+      "original_sha256": "0551f81350ff7f391bf3b0cbfa9c6b5abe8ee9449d8f0c37d65cfb2fb541cbb1",
+      "original_rows": 7579,
+      "membership_changed": true
+    },
+    {
+      "split": "test",
+      "path": "/mnt/weka/fgeikyan/3D_big_data_owned/grp_a/test/backup_un/chembl3d.csv",
+      "source": "/mnt/weka/fgeikyan/fsq/test/chembl3d.csv",
+      "rows": 37065,
+      "sha256": "423ee2d7ee1aa2013a11c0f54a174c0127e61d3cf31aa82b3600a103ed6edf41",
+      "owner_uid": 1027,
+      "original_preserved": "/mnt/weka/fgeikyan/CoordToken/data_collection/reviews/remaining_verdict_20261004/replaced_owned_chembl_holdouts/test.before.csv",
+      "original_sha256": "d7637447b4da026f9e7972c7fffba045a765209668e0088f880871f159cbaca1",
+      "original_rows": 7579,
+      "membership_changed": true
+    }
+  ],
+  "source_originals_modified": false,
+  "note": "Later source-checked historical populations replace defective backups, not a same-membership repair. Training source correspondence is recorded separately in train_source_check.json. Canonical-SMILES-normalized resolution for one validation row is recorded separately. This is a corrected working input, not final global cleaning or a new split. Copied root merged artifacts are historical and must not be used as corrected outputs.",
+  "training_source_verification": "complete_no_unresolved_rows",
+  "training_source_verification_report": "/mnt/weka/fgeikyan/CoordToken/data_collection/reviews/remaining_verdict_20261004/train_source_check.json",
+  "source_normalization_cases": {
+    "train": 5,
+    "val": 1,
+    "test": 0
+  }
+}

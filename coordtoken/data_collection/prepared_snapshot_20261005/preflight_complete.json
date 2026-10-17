@@ -1,0 +1,25 @@
+{
+  "status": "complete",
+  "completed_at_utc": "2026-10-05T07:17:19.752367+00:00",
+  "group_a_files": 42,
+  "group_b_pools": 4,
+  "nabla_train_pools": 1,
+  "nabla_test_sets": 3,
+  "fixed_reference_rows_audited": 5597396,
+  "reference_format_failures": 0,
+  "reference_standard_inchikey_failures": 0,
+  "quarantined_rows": 9,
+  "rows_by_reason": {
+    "pubchem_parse_failure": 1,
+    "zinc_parse_failure": 1,
+    "zinc_key_failure": 1,
+    "chembl_stereo_review": 6
+  },
+  "nabla_pool_choice": "grp_c/train has 32,322 more rows than the root nabla CSV; root is an exact byte subsequence",
+  "global_split_started": false,
+  "pending": "Execute and verify the new split; no scaffold-policy clarification remains",
+  "identity_policy_confirmed": "Full Standard InChIKeys only; no scaffold-wide exclusion",
+  "initially_quarantined_rows": 19,
+  "source_repaired_and_restored_rows": 10,
+  "restoration_report": "data_collection/resplit_20261005/quarantine_resolution/restoration.json"
+}

@@ -1,0 +1,26 @@
+{
+  "owned_chembl_install.json": {
+    "source": "/mnt/weka/fgeikyan/CoordToken/data_collection/reviews/remaining_verdict_20261004/owned_chembl_install.json",
+    "sha256": "24b31c663b70269b966176a0e168045083b11b8a1114d05dfbe71a1ac29e95ab"
+  },
+  "train_source_check.json": {
+    "source": "/mnt/weka/fgeikyan/CoordToken/data_collection/reviews/remaining_verdict_20261004/train_source_check.json",
+    "sha256": "ee496ef990ad27c64759c4b7ffc3db4456209e0147d73933cecf05cf0d26253d"
+  },
+  "later_chembl_source_check.json": {
+    "source": "/mnt/weka/fgeikyan/CoordToken/data_collection/reviews/remaining_verdict_20261004/later_chembl_source_check.json",
+    "sha256": "439ca6d7d273c2812eb29a9247b3c15502a2a69650ec148d824768343a714dd1"
+  },
+  "chembl_single_val_diagnosis.json": {
+    "source": "/mnt/weka/fgeikyan/CoordToken/data_collection/reviews/remaining_verdict_20261004/chembl_single_val_diagnosis.json",
+    "sha256": "2dc0bcccd7b53ac11f692c750c231eaf6f0cdf72d3fdc0ca4b33874105f7ad86"
+  },
+  "replacement_manifest.json": {
+    "source": "/mnt/weka/fgeikyan/CoordToken/data_collection/reviews/chembl_replacement_20261004/manifest.json",
+    "sha256": "de4dc689d2486af17ee087a20a6afbc2ac676e8267411e2d768232307810b9eb"
+  },
+  "training_block_audit.json": {
+    "source": "/mnt/weka/fgeikyan/CoordToken/data_collection/rebuild_20260930/overnight_review/final_chembl_block/report.json",
+    "sha256": "f56912217fe60cbc2f441db30cae5d99c03ce274deeb5086966d0599d29087f1"
+  }
+}
