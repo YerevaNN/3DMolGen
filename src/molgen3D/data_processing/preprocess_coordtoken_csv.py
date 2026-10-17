@@ -27,7 +27,10 @@ def validate_tokenizer(tokenizer):
         encoded = tokenizer.encode(token, add_special_tokens=False)
         if len(encoded) != 1 or tokenizer.decode(encoded, skip_special_tokens=False) != token:
             raise ValueError("Geometry code is not one reversible LM token: " + token)
-        if encoded[0] in tokenizer.all_special_ids:
+        if (
+            encoded[0] in tokenizer.all_special_ids
+            or tokenizer.decode(encoded, skip_special_tokens=True) != token
+        ):
             raise ValueError("Geometry codes must survive skip_special_tokens=True")
         ids.append(encoded[0])
     if len(set(ids)) != 4096:
@@ -127,6 +130,11 @@ def run(args):
 
     fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     os.close(fd)
+    # Another worker may have finished while this worker loaded its model.
+    # Recheck under the lock before opening a temporary output for writing.
+    if target.exists() or receipt.exists():
+        lock.unlink()
+        raise FileExistsError("Shard completed while this worker initialized")
     try:
         with source.open("rb") as f, tmp.open("w") as dest:
             header = next(csv.reader([f.readline().decode("utf-8")], strict=True))

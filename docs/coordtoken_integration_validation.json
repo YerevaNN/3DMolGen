@@ -8,9 +8,10 @@
     "log": "/tmp/coordtoken-final-tests-20261017.log"
   },
   "latest_adapter_suite_after_config_test_and_formatting": {
-    "passed": 23,
+    "passed": 24,
     "failed": 0,
-    "log": "/tmp/coordtoken-latest-tests-20261017.log"
+    "log": "/tmp/coordtoken-final-race-tests-20261017.log",
+    "includes": "Late duplicate worker cannot overwrite completed shard; every code survives skip-special decoding."
   },
   "all_dataloader_suite": {
     "passed": 29,

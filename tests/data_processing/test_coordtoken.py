@@ -355,3 +355,40 @@ def test_exported_lm_contract(tmp_path):
     restored.coordtoken_checkpoint_sha256 = "wrong"
     with pytest.raises(ValueError):
         validate_model_contract(restored, contract)
+
+
+def test_late_duplicate_worker_cannot_overwrite_completed_shard(codec, tmp_path, monkeypatch):
+    import argparse
+    from molgen3D.data_processing import preprocess_coordtoken_csv as module
+    from molgen3D.data_processing.coordtoken import SELECTED_SHA256
+
+    source = tmp_path / "source.csv"
+    source.write_text("name,enriched_text\n")
+    out = tmp_path / "encoded"
+    target = out / "part-00000.jsonl"
+
+    def initialize(*args, **kwargs):
+        # Simulate the first worker finishing after the duplicate's initial check.
+        target.write_text("completed shard bytes\n")
+        return codec
+
+    monkeypatch.setattr(module, "CoordTokenCodec", initialize)
+    args = argparse.Namespace(
+        input=str(source),
+        output=str(out),
+        split="train",
+        tokenizer=str(TOKENIZER),
+        checkpoint=SELECTED_CHECKPOINT,
+        expected_sha256=SELECTED_SHA256,
+        device="cpu",
+        precision="fp32",
+        batch_size=2,
+        seq_len=128,
+        num_shards=1,
+        shard_index=0,
+    )
+    with pytest.raises(FileExistsError, match="initialized"):
+        module.run(args)
+    assert target.read_text() == "completed shard bytes\n"
+    assert not (out / "part-00000.lock").exists()
+    assert not (out / "part-00000.failure.json").exists()
