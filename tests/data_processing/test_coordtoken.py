@@ -392,3 +392,12 @@ def test_late_duplicate_worker_cannot_overwrite_completed_shard(codec, tmp_path,
     assert target.read_text() == "completed shard bytes\n"
     assert not (out / "part-00000.lock").exists()
     assert not (out / "part-00000.failure.json").exists()
+
+
+@pytest.mark.parametrize("rings,expected", [("%108", ["%10", "8"]), ("%109", ["%10", "9"]), ("%1021", ["%10", "2", "1"]), ("%118", ["%11", "8"]), ("%10%11", ["%10", "%11"])])
+def test_adjacent_ring_labels_match_training_tokenization(rings, expected):
+    from molgen3D.data_processing.smiles_encoder_decoder_fsq import tokenize_enriched
+    tokens = tokenize_enriched("[C]<0,0,0>" + rings + "[C]<1,0,0>")
+    assert [t["text"] for t in tokens if t["type"] == "nonatom"] == expected
+    stream = parse("<1>[C]<2>" + rings + "[C]<3>")
+    assert list(stream.graph_tokens[1:-1]) == expected

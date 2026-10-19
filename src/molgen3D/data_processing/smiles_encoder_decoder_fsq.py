@@ -57,7 +57,7 @@ V = len(VOCAB)
 IS_ATOM_NP = np.array([tok.startswith("[") for tok in VOCAB], dtype=np.float32)
 
 _ENRICHED_TOKEN_PATTERN = re.compile(
-    r"(\[[^\]]+\])<([^>]+)>|(%\d{2,})|(=|#|:|\/|\\|-)|(\()|(\))|(\d)|(\.)"
+    r"(\[[^\]]+\])<([^>]+)>|(%\d{2})|(=|#|:|\/|\\|-)|(\()|(\))|(\d)|(\.)"
 )
 _FSQ_PAIR_RE = re.compile(r"(.*?)<(\d+)>")
 
